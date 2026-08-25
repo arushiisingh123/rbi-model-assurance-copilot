@@ -544,28 +544,37 @@ Do not introduce unnecessary abstraction layers.
 
 GitHub is the shared source of truth.
 
-Each team member works on their own branch.
+Each team member works on a new, short-lived branch per task, not one
+permanent branch per person.
 
-Recommended branch names:
+Branch naming: feature/<name>-<short-task>
 
-feature/namitha
-feature/manas
-feature/arushi
-feature/nidhi
-feature/khushi
+Examples:
+
+feature/namitha-model-foundation
+feature/manas-explainability-foundation
+feature/arushi-fairness-drift-foundation
+feature/nidhi-rbi-foundation
+feature/khushi-api-foundation
 
 Do not directly develop feature work on main.
 
+Do not reuse one long-lived branch per person across multiple tasks —
+create a new branch for each task and delete it after merge.
+
+See docs/git-workflow.md and docs/team-workflow.md for the full
+step-by-step workflow.
+
 Before starting work
 
-Synchronize with the team's agreed base branch.
+Synchronize with the team's agreed base branch, then create a new task
+branch from it.
 
 Example:
 
 git checkout main
 git pull
-
-Then switch to the feature branch.
+git checkout -b feature/yourname-short-task
 
 Before committing
 Review the changes.

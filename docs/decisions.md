@@ -48,14 +48,14 @@ merges/conflicts easier to reason about for a team new to Git. A single
 long-lived branch per person tends to accumulate unrelated changes, grow
 stale, and produce large, hard-to-review PRs with tangled conflicts.
 
-**Conflict flagged:** CLAUDE.md section 8 ("Git / GitHub Workflow") currently
-recommends one branch per person (`feature/namitha`, `feature/manas`,
-`feature/arushi`, `feature/nidhi`, `feature/khushi`). This decision
-supersedes that recommendation for actual day-to-day work. CLAUDE.md section
-8 has **not** been edited automatically — CLAUDE.md is the project's primary
-source-of-truth document, and changing it should be a deliberate, visible
-team action rather than a side effect of a decisions-log entry. The team
-should explicitly confirm this change so CLAUDE.md can be updated to match.
+**Conflict flagged (resolved 2026-08-25):** CLAUDE.md section 8 ("Git /
+GitHub Workflow") previously recommended one branch per person
+(`feature/namitha`, `feature/manas`, `feature/arushi`, `feature/nidhi`,
+`feature/khushi`). This decision superseded that recommendation for actual
+day-to-day work. Per explicit team instruction on 2026-08-25, CLAUDE.md
+section 8 has now been updated to describe the per-task branching model
+(`feature/<name>-<short-task>`) instead. See also docs/git-workflow.md and
+docs/team-workflow.md for the full step-by-step process.
 
 **Status:** Approved (recorded from project kickoff instructions, 2026-08-24).
-CLAUDE.md section 8 update pending explicit team confirmation.
+CLAUDE.md section 8 updated to match on 2026-08-25.

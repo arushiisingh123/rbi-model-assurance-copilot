@@ -1,0 +1,17 @@
+# Phase 0 dependencies only -- scoped to what the foundation actually
+# needs (health-check API, dashboard skeleton, sample data, smoke
+# tests, and Nidhi's approved RAG smoke test). See docs/decisions.md.
+#
+# Additional packages (scikit-learn, xgboost, shap, lime, fairlearn,
+# langchain, etc.) will be added in the PRs that introduce Phase 1
+# real logic, not pinned prematurely here.
+
+fastapi
+uvicorn
+streamlit
+pandas
+numpy
+pytest
+httpx
+requests
+chromadb

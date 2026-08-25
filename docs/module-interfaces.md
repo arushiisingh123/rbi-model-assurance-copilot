@@ -7,9 +7,11 @@ codebase already point to. The full context and open sign-off status live
 in `docs/TASK.md` §9 and §14 — this file mirrors that content plus the
 actual Phase 0 stub locations.
 
-**Status: draft, proposed shape.** Per `docs/TASK.md` §14, each owner still
-needs to explicitly sign off on their interface before Phase 1 code
-depends on these field names/shapes.
+**Status: APPROVED for Phase 1** (team interface sign-off, 2026-08-25 —
+see `docs/decisions.md`, "Module interface sign-off for Phase 1"). The
+shapes below are the ones Phase 1 code should depend on. Small additive
+changes remain low-friction (see "Changing an interface" below); anything
+else needs the same approval flow again.
 
 ## Namitha's output — `app/models/model.py`
 
@@ -32,6 +34,26 @@ The shared contract most other modules depend on.
 Phase 0 stub: `predict_batch()` returns this shape with hardcoded values
 and `is_mock: True`. Also stubbed: `train()`, `save()`, `load()`.
 
+### Model artifact access (Phase 1 clarification, approved 2026-08-25)
+
+The shared dict does **not** carry the trained model object itself — only
+predictions, probabilities, the feature matrix, and metadata. That's
+deliberate: putting a live model object in a plain-dict interface would
+force serialization/typing concerns onto every consumer.
+
+Intended Phase 1 approach: `app/models/model.py` already stubs `save(path)`
+and `load(path)`, so the trained model artifact is expected to live on
+disk, addressed by a path. When Manas's `explain()` needs the actual model
+object (not just its outputs), it calls `app.models.model.load(...)`
+directly — a normal Python import within the same process, not a new
+interface channel. No new shared-dict field is required for this; at most,
+`model_metadata` may later gain an additive `model_path` key once a real
+saved artifact exists, so callers don't have to hardcode the path.
+
+This is a documentation note only — no Phase 0 code changes follow from
+it. Implementing the real `save()`/`load()` persistence and wiring
+`explain()` to call it is Phase 1 work.
+
 ## Manas's output — `app/explainability/explain.py`
 
 ```python
@@ -51,6 +73,7 @@ Phase 0 stub: `explain()` returns this shape with hardcoded values and
 ```python
 # fairness_report()
 {
+    "protected_attribute": "gender",
     "demographic_parity_diff": 0.14,
     "disparate_impact_ratio": 0.78,
     "status": "WARNING",
@@ -59,6 +82,7 @@ Phase 0 stub: `explain()` returns this shape with hardcoded values and
 
 # drift_report()
 {
+    "features_evaluated": ["income", "age", "credit_history_len"],
     "psi": 0.09,
     "ks_statistic": 0.11,
     "status": "PASS",
@@ -66,8 +90,15 @@ Phase 0 stub: `explain()` returns this shape with hardcoded values and
 }
 ```
 
-Phase 0 stub: both functions return these shapes with hardcoded values and
-`is_mock: True`.
+`protected_attribute` and `features_evaluated` are additive metadata
+fields approved 2026-08-25 (see `docs/decisions.md`) — they don't change
+the overall architecture. `protected_attribute`'s actual value depends on
+which dataset/sensitive column Phase 1 ends up using (still open, see
+`docs/TASK.md` §14); `"gender"` above is illustrative only, matching the
+column already present in `data/sample/credit_sample.csv`.
+
+Phase 0 stub: both functions return these shapes (including the two new
+fields) with hardcoded values and `is_mock: True`.
 
 ## Nidhi's output — `app/compliance/compliance.py`
 

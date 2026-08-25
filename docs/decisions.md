@@ -59,3 +59,39 @@ docs/team-workflow.md for the full step-by-step process.
 
 **Status:** Approved (recorded from project kickoff instructions, 2026-08-24).
 CLAUDE.md section 8 updated to match on 2026-08-25.
+
+---
+
+## 2026-08-25 — Module interface sign-off for Phase 1
+
+**Decision:** The team reviewed `docs/module-interfaces.md` and approved
+the draft interfaces for Phase 1, with two additive changes:
+
+- **Namitha (Model/Data):** approved as-is, no changes to the shared dict.
+  Clarification: the shared dict does not carry the trained model object
+  itself. In Phase 1, the model artifact is expected to be accessed via
+  `app/models/model.py`'s `save()`/`load()` (path-based), called directly
+  by the explainability module within the same process — not passed
+  through the shared interface dict.
+- **Manas (Explainability):** approved as-is, no new fields. Feature
+  context comes from `model_metadata.feature_names`.
+- **Arushi (Fairness/Drift):** approved with two additive fields —
+  `fairness_report()` gains `protected_attribute`; `drift_report()` gains
+  `features_evaluated`. The actual protected attribute depends on the
+  Phase 1 dataset choice, still open (see `docs/TASK.md` §14).
+- **Nidhi (RBI Compliance):** approved as-is. No RAG-specific fields added
+  now; `evidence_chunks` stays empty until Phase 3.
+- **Khushi (API/Dashboard):** approved as-is. The API exposes module
+  outputs under `model` / `explainability` / `fairness_drift` /
+  `compliance` without reshaping or flattening them.
+
+**Why:** Locks in the shared data contracts before Phase 1 real-logic work
+starts, so modules built in parallel don't diverge on field names/shapes.
+
+**Status:** Approved (team interface sign-off, 2026-08-25). See
+`docs/module-interfaces.md` for the full current shapes and
+`docs/TASK.md` §14 (now checked off) for the original open item. Phase 0
+stubs for `app/fairness/fairness.py` and `app/drift/drift.py` were updated
+to include the two new additive fields so the documented interface and the
+actual Phase 0 stub output stay consistent; their tests were updated to
+match.

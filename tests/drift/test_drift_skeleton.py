@@ -6,6 +6,7 @@ from app.drift.drift import drift_report
 
 def test_drift_report_shape():
     result = drift_report()
+    assert "features_evaluated" in result
     assert "psi" in result
     assert "ks_statistic" in result
     assert "status" in result

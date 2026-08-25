@@ -189,7 +189,10 @@ Boundaries (who may edit what):
 
 Crossing into someone else's folder requires naming the dependency and getting their OK first.
 
-Draft interfaces (plain dicts, no custom classes — proposal, needs owner sign-off before Phase 1 code depends on it):
+Draft interfaces as originally proposed (plain dicts, no custom classes) —
+kept below for history. The team has since signed off on these for Phase 1,
+with a few additive fields; see `docs/module-interfaces.md` for the
+current approved shapes and `docs/decisions.md` for the sign-off record.
 
 # Namitha's output — the shared contract most other modules depend on
 {
@@ -340,7 +343,7 @@ Recorded in docs/decisions.md (already created, no further file action needed): 
 - [ ] Branching model: confirm per-task branches (feature/<name>-<short-task>) and approve editing CLAUDE.md §8 to match — currently CLAUDE.md still documents one-branch-per-person, and that edit hasn't been made pending your confirmation.
 - [ ] Sample dataset: synthetic vs. a public dataset (e.g. UCI German Credit), and which column(s) serve as the sensitive attribute for Arushi's fairness work.
 - [ ] RBI document for Nidhi's smoke test: which specific real circular/master direction.
-- [ ] Draft module interfaces (§9): sign-off from each owner before Phase 1 code depends on the field names/shapes.
+- [x] Draft module interfaces (§9): sign-off from each owner before Phase 1 code depends on the field names/shapes. Resolved 2026-08-25 — approved with additive fields for Arushi (protected_attribute, features_evaluated); see docs/module-interfaces.md and docs/decisions.md.
 - [ ] rbi/ vs compliance/ split: confirm the proposed division (rules+engine vs. joined finding+rule+evidence output) — CLAUDE.md doesn't distinguish these explicitly, this is a proposed default.
 - [ ] requirements.txt ownership process: each owner proposes their own package additions in their own PR; Khushi reviews for conflicts/redundancy rather than gatekeeping every addition.
 - [ ] Minimal CI: whether to add a basic pytest-on-PR GitHub Action now, given five beginners will be pushing code in parallel — not required by CLAUDE.md for Phase 0, but worth a yes/no now.

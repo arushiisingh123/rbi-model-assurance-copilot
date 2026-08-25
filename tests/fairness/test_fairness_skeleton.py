@@ -6,6 +6,7 @@ from app.fairness.fairness import fairness_report
 
 def test_fairness_report_shape():
     result = fairness_report()
+    assert "protected_attribute" in result
     assert "demographic_parity_diff" in result
     assert "disparate_impact_ratio" in result
     assert "status" in result

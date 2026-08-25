@@ -63,9 +63,9 @@ rbi-model-assurance-copilot/
 │   ├── explainability/    # Manas — stub explain()
 │   ├── fairness/          # Arushi — stub fairness_report()
 │   ├── drift/              # Arushi — stub drift_report()
-│   ├── rbi/               # Nidhi — sample rules (app/rbi/rules/)
+│   ├── rbi/               # Nidhi — "what does the RBI rule say?": sample rules (app/rbi/rules/)
 │   ├── rag/               # Nidhi — RAG smoke test (app/rag/smoke_test.py)
-│   ├── compliance/        # Nidhi — stub evaluate_compliance()
+│   ├── compliance/        # Nidhi — "how do findings evaluate against the rule?": stub evaluate_compliance()
 │   └── api/                # Khushi — FastAPI app (app/api/main.py)
 ├── dashboard/
 │   └── app.py               # Khushi — Streamlit skeleton

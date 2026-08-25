@@ -1,0 +1,25 @@
+name: Pytest
+
+# Minimal Phase 0 CI (see docs/decisions.md, "Minimal CI (pytest on pull
+# requests)"). Purpose is only to catch broken tests before merging --
+# deliberately no deployment, Docker, cloud steps, or lint/format gates.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q

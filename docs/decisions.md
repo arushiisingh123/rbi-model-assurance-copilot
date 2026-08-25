@@ -95,3 +95,68 @@ stubs for `app/fairness/fairness.py` and `app/drift/drift.py` were updated
 to include the two new additive fields so the documented interface and the
 actual Phase 0 stub output stay consistent; their tests were updated to
 match.
+
+---
+
+## 2026-08-25 — Phase 0 RAG smoke-test source selected
+
+**Decision:** The real RBI source document for Nidhi's Phase 0 RAG
+smoke test (approved in "RAG scope for Phase 0 and Phase 1" above) is:
+
+> **"RBI Master Circular - Prudential Norms on Income Recognition, Asset
+> Classification and Provisioning pertaining to Advances"**
+
+**Source authority:** Official Reserve Bank of India (RBI) website.
+
+**Purpose:** This is the ONE real RBI source used for the Phase 0 RAG
+smoke test — not a production compliance corpus.
+
+**Scope (unchanged from the original RAG-scope decision):**
+- Download/use the official RBI-hosted document.
+- Extract a limited portion for the smoke test.
+- Chunk the selected text.
+- Embed and index it in ChromaDB.
+- Run one retrieval query.
+- Verify the retrieved text is correct.
+- Verify the source is correctly attributed.
+
+This remains a Phase 0 proof of concept ONLY. It explicitly does **not**
+authorize: building the full RAG system, adding multiple RBI documents,
+building a production retrieval pipeline, tuning embeddings, building LLM
+integration, generating compliance reports, or any other Phase 3
+functionality. No RBI clauses or compliance requirements have been
+invented or interpreted as part of this decision — this entry records
+document *selection* only, not regulatory analysis. Draft RBI guidance
+must not be treated as binding regulation.
+
+**Why:** Nidhi's smoke test has been running against a clearly-labeled
+placeholder file (`data/rbi_sources/PLACEHOLDER_NOT_REAL_RBI_TEXT.txt`)
+because a real document hadn't been chosen yet. This decision unblocks
+replacing that placeholder with real, attributable RBI text, which is a
+Phase 0 checkpoint requirement (`docs/TASK.md` §7, item 7).
+
+**Status:** Approved (recorded 2026-08-25). Document selection only — the
+actual download, placeholder replacement, and smoke-test re-run are
+implementation work, not yet done as of this entry. See
+`docs/TASK.md` §14 (now checked off) for the original open item.
+
+**Implementation update (2026-08-25):** The specific document used is the
+July 1, 2014 edition — "Master Circular - Prudential Norms on Income
+Recognition, Asset Classification and Provisioning pertaining to
+Advances" (RBI/2014-15/74, DBOD.No.BP.BC.9/21.04.048/2014-15), downloaded
+directly from the official RBI domain at
+`https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/74MIR010714FL.pdf`.
+This is a real, officially-hosted document matching the approved title —
+not the absolute latest reissue of this subject matter, since RBI's
+current PDF host (`rbidocs.rbi.org.in`) sits behind bot-protection that
+blocked scripted download; using an older but genuinely official,
+directly-downloaded edition was judged preferable to fabricating text or
+using an unofficial mirror. A limited, verbatim excerpt (Part A, §1
+"General" and §2 "Definitions") is stored at
+`data/rbi_sources/RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt`,
+replacing the placeholder file (now deleted). The smoke test
+(`app/rag/smoke_test.py`) runs against this file end-to-end: 17 chunks
+indexed, query "What is a non performing asset?" correctly retrieves the
+real §2.1 NPA definition with correct source attribution. See the stored
+file's own header for full scope/limitation notes, and the Phase 0
+stabilization report for validation details.

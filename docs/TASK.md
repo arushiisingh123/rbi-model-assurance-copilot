@@ -342,7 +342,7 @@ Recorded in docs/decisions.md (already created, no further file action needed): 
 
 - [ ] Branching model: confirm per-task branches (feature/<name>-<short-task>) and approve editing CLAUDE.md §8 to match — currently CLAUDE.md still documents one-branch-per-person, and that edit hasn't been made pending your confirmation.
 - [ ] Sample dataset: synthetic vs. a public dataset (e.g. UCI German Credit), and which column(s) serve as the sensitive attribute for Arushi's fairness work.
-- [ ] RBI document for Nidhi's smoke test: which specific real circular/master direction.
+- [x] RBI document for Nidhi's smoke test: which specific real circular/master direction. Resolved 2026-08-25 — "RBI Master Circular - Prudential Norms on Income Recognition, Asset Classification and Provisioning pertaining to Advances" (official RBI website). See docs/decisions.md, "Phase 0 RAG smoke-test source selected". Document download and placeholder replacement not yet done.
 - [x] Draft module interfaces (§9): sign-off from each owner before Phase 1 code depends on the field names/shapes. Resolved 2026-08-25 — approved with additive fields for Arushi (protected_attribute, features_evaluated); see docs/module-interfaces.md and docs/decisions.md.
 - [ ] rbi/ vs compliance/ split: confirm the proposed division (rules+engine vs. joined finding+rule+evidence output) — CLAUDE.md doesn't distinguish these explicitly, this is a proposed default.
 - [ ] requirements.txt ownership process: each owner proposes their own package additions in their own PR; Khushi reviews for conflicts/redundancy rather than gatekeeping every addition.

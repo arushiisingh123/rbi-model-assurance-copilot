@@ -261,7 +261,7 @@ Namitha — app/models/ skeleton
 Manas — app/explainability/ skeleton
 
 - Objective: stub explain() per §9.
-- Files: app/explainability/__init__.py, app/explainability/explain.py, tests/explainability/test_explain_skeleton.py
+- Files: app/explainability/__init__.py, app/explainability/explain.py, tests/explainability/test_explain.py
 - Must not modify: app/models/ internals (import only).
 - Steps/Tests/Acceptance: same pattern as Namitha's.
 - Delegate to Antigravity: scaffolding + stub.

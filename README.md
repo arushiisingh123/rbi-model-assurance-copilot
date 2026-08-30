@@ -8,8 +8,8 @@ Phase 0 — Foundation
 
 ## Team
 
-- Namitha — Model / Data
+- Namita — Model / Data
 - Manas — Explainability
 - Arushi — Fairness / Drift
 - Nidhi — RBI Compliance / Rule Engine / RAG
-- Khushi — API / Dashboard / Integration
+- Kushi — API / Dashboard / Integration

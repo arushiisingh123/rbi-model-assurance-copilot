@@ -289,6 +289,66 @@ Integration foundation
 
 Use mock JSON/results where necessary.
 
+### Phase 1 Implementation Constraints — Nidhi and Khushi
+
+The following constraints are mandatory for Phase 1 implementation and must remain compatible with the interfaces established by the team.
+
+#### Nidhi — RBI Compliance / Rule Engine / RAG
+
+Nidhi must treat analytical findings produced by the fairness and drift modules as authoritative technical outputs.
+
+Nidhi must not:
+
+* Recalculate fairness or drift metrics independently.
+* Introduce alternative fairness or drift thresholds.
+* Create KS or demographic-parity pass/fail thresholds.
+* Modify, reinterpret, or override `PASS`, `WARNING`, `FAIL`, or `PENDING` status values produced by the analytical modules.
+* Interpret Attribute 9 (`personal_status_and_sex`) as a standalone `gender` or `sex` field.
+* Introduce a codebook or semantic remapping of Attribute 9 categories unless explicitly approved by the team.
+* Present synthetic drift scenarios as observed real-world population drift.
+* Treat analytical thresholds as RBI regulatory requirements.
+
+Nidhi may:
+
+* Map analytical findings to RBI rules and compliance concepts.
+* Attach RBI clauses, metadata, and evidence to technical findings.
+* Use the existing analytical metric values and status values as inputs to compliance mapping.
+* Use sample RBI rules during Phase 1 where necessary.
+* Build the RBI rule repository, clause structure, metadata, and compliance mapping foundation defined in the Phase 1 scope.
+
+The authoritative analytical threshold definitions are maintained in `app/config/thresholds.py` and documented in `docs/thresholds.md`.
+
+Full RAG implementation remains primarily a Phase 3 responsibility unless explicitly approved earlier.
+
+#### Khushi — API / Dashboard / Integration
+
+Khushi must consume the existing analytical module interfaces rather than reimplementing their calculations.
+
+Khushi must not:
+
+* Recalculate fairness or drift metrics in the API layer.
+* Recalculate or override PSI, KS, demographic parity, or disparate impact values in the dashboard.
+* Introduce separate threshold constants for fairness or drift.
+* Change, reinterpret, or override analytical status values.
+* Replace calculated analytical results with fabricated values.
+* Rename `personal_status_and_sex` to `gender` or `sex`.
+* Present synthetic drift data as observed real-world population drift.
+* Treat analytical thresholds as RBI regulatory requirements.
+
+Khushi must:
+
+* Preserve the existing fairness and drift output schemas.
+* Pass `favorable_label` through to `fairness_report` when specified by the API caller.
+* Preserve `PASS`, `WARNING`, `FAIL`, and `PENDING` status values.
+* Display calculated analytical results rather than modifying them.
+* Use mock data only where the Phase 1 interface explicitly permits it.
+* Keep API and dashboard integration compatible with the existing module interfaces.
+* Connect the analytical modules through FastAPI and display their results through the dashboard.
+
+The API and dashboard layers are integration and presentation layers. Technical metric calculation remains the responsibility of the analytical modules.
+
+
+
 Phase 1 Rule
 
 No team member should have to wait for another member to finish Phase 1.
@@ -840,6 +900,7 @@ docs/
 ├── architecture.md
 ├── development-phases.md
 ├── module-interfaces.md
+├── thresholds.md
 ├── git-workflow.md
 └── decisions.md
 
@@ -888,27 +949,40 @@ A phase is complete only when its checkpoint criteria have been satisfied and th
 
 Current phase:
 
-PHASE 0 — FOUNDATION
+PHASE 1 — INDEPENDENT MODULE DEVELOPMENT
 
-The repository may currently contain only basic files.
+Phase 0 (Foundation) was completed and signed off on 2026-08-27, with two
+accepted limitations that must be closed early in Phase 1. See
+docs/decisions.md, "Phase 0 checkpoint sign-off and Phase 1 start".
 
-Do not assume that future functionality exists.
+Each owner now implements real logic inside their own module, using mock
+inputs where an upstream module is not ready (see section 6).
 
-Do not implement sophisticated:
+Now in scope — within your own assigned module only:
 
-Credit-scoring models
-SHAP
-LIME
-Fairness analysis
-Drift analysis
-RBI rule engine
-RAG
-LLM compliance reports
-Dashboard analytics
+Real preprocessing, training, evaluation, prediction, save/load
+Real SHAP / LIME explainability
+Real Fairlearn, demographic parity, disparate impact, PSI, KS
+RBI rule repository, rule structure, rule engine foundation
+Real API endpoints and Streamlit views over mock/sample data
 
-unless the team explicitly begins the relevant phase.
+Still out of scope until the team explicitly begins the relevant phase:
 
-The immediate goal is to establish the project foundation, architecture documentation, module structure, interfaces, testing structure, development workflow, and basic runnable skeleton.
+Cross-module integration and run_assurance.py (Phase 2)
+Full multi-document RAG pipeline (Phase 3) — the existing one-document
+smoke test continues as-is
+LLM compliance report generation (Phase 3)
+Full dashboard analytics (Phase 4)
+
+Analytical thresholds (fairness, drift) have a single authoritative
+location and must not be independently defined per module. See
+docs/thresholds.md. Those thresholds are project/industry conventions,
+NOT RBI requirements, and must never be presented as RBI requirements
+without a cited RBI source.
+
+The immediate goal is for each owner to replace their Phase 0 stub with
+real, tested logic behind the interfaces recorded in
+docs/module-interfaces.md, without changing those interfaces.
 
 21. Default Behavior for Claude Code
 

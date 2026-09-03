@@ -19,7 +19,11 @@ CLAUDE.md §17.
 
 ## Current phase
 
-**PHASE 0 — FOUNDATION.**
+**PHASE 1 — INDEPENDENT MODULE DEVELOPMENT.**
+
+Phase 0 was signed off on 2026-08-27, with two accepted limitations that
+must be closed early in Phase 1 — see `docs/decisions.md`, "Phase 0
+checkpoint sign-off and Phase 1 start".
 
 ## Phase 0 checkpoint criteria (from docs/TASK.md §7)
 
@@ -39,8 +43,10 @@ Phase 0 is complete only when all of the following hold:
    without help.
 10. No unexplained gap between documentation and repo state.
 
-The team reviews and explicitly signs off before Phase 1 starts. See the
-Phase 0 stabilization report for current status against this checklist.
+The team reviewed and signed off on 2026-08-27. The per-item status
+against this checklist — including the two items accepted as known
+limitations (items 4 and 9) — is recorded in `docs/decisions.md`,
+"Phase 0 checkpoint sign-off and Phase 1 start".
 
 ## What each phase adds, per module
 
@@ -64,6 +70,16 @@ for the explicit Phase 0 vs. Phase 1 scope table. Summary:
   JSON → Phase 1 real endpoints/views on mock data → Phase 2 wire all
   modules through the API, `run_assurance.py` → Phase 3 wire report
   generation into API/dashboard → Phase 4 overall dashboard/UX.
+
+## Explicitly out of scope for Phase 1
+
+- Cross-module integration and `run_assurance.py` (Phase 2)
+- Full multi-document RAG pipeline (Phase 3) — the existing
+  one-document smoke test continues as-is
+- LLM compliance report generation (Phase 3)
+- Full dashboard analytics (Phase 4)
+- Changes to the module interfaces in `docs/module-interfaces.md`
+  without the CLAUDE.md §7 approval flow
 
 ## Explicitly out of scope for Phase 0
 

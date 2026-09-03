@@ -38,9 +38,14 @@ Intended data flow (target shape, reached incrementally across phases):
                   API / Dashboard
 ```
 
-## 2. Current state (Phase 0)
+## 2. Current state (Phase 1 — module implementation in progress)
 
-As of Phase 0, every module is a **stub**: functions exist with the agreed
+Phase 0 closed on 2026-08-27 (see `docs/decisions.md`). Phase 1 replaces
+each stub with real logic one module at a time, so this section changes
+as each owner's pull request lands. As of the Phase 0 close, and until
+those PRs merge, the description below still holds.
+
+Every module is a **stub**: functions exist with the agreed
 input/output shape, but return hardcoded or fake values (`is_mock: True`).
 No real model, SHAP/LIME, fairness/drift calculation, or rule engine logic
 exists yet. The one exception is Nidhi's RAG smoke test, which is a real
@@ -100,13 +105,40 @@ rbi-model-assurance-copilot/
   scripts — may consume other modules' outputs but not implement their
   internal logic.
 
+### Shared assets
+
+Assigned 2026-08-27 (see `docs/decisions.md`, "Shared asset ownership and
+requirements.txt clarification"). These were previously unowned.
+
+- **`tests/api/`** — Khushi, matching every other owner's test folder.
+- **`.github/workflows/`** — Khushi, as integration/infrastructure owner.
+- **`app/config/`** — Arushi, for the authoritative analytical threshold
+  configuration (`app/config/thresholds.py`, to be created during Phase 1
+  implementation). Other owners import from it; they do not redefine
+  thresholds locally. See `docs/thresholds.md`.
+- **`docs/`** — shared. Any member may update documentation describing
+  their own module. Project-level documents (`CLAUDE.md`, `README.md`,
+  `architecture.md`, `decisions.md`, `module-interfaces.md`,
+  `development-phases.md`, `thresholds.md`) require team agreement before
+  substantive change, per CLAUDE.md §2 "Ownership Rule".
+- **`requirements.txt`** — Khushi is the **reviewing** owner, not a
+  gatekeeper. Any member may add their own dependencies in their own PR
+  under the process in `docs/decisions.md` ("requirements.txt ownership
+  process", 2026-08-25); Khushi performs a conflict/redundancy review.
+  This supersedes any earlier wording implying exclusive ownership.
+
 Crossing into someone else's folder requires naming the dependency and
 getting their approval first (see CLAUDE.md §2, "Ownership Rule").
 
-## 5. Technology stack actually in use (Phase 0)
+## 5. Technology stack actually in use (current)
 
 From `requirements.txt`: `fastapi`, `uvicorn`, `streamlit`, `pandas`,
-`numpy`, `pytest`, `httpx`, `requests`, `chromadb`. This is intentionally
-scoped to what Phase 0 needs. The rest of the planned stack
-(scikit-learn/XGBoost, SHAP, LIME, Fairlearn, LangChain, an LLM API) is
-introduced in the PRs that bring in real Phase 1+ logic — see CLAUDE.md §3.
+`numpy`, `pytest`, `httpx`, `requests`, `chromadb`. This is still the
+Phase 0 set — no Phase 1 dependencies have been added yet. The rest of
+the planned stack (scikit-learn/XGBoost, SHAP, LIME, Fairlearn,
+LangChain, an LLM API) is introduced in the individual PRs that bring in
+each module's real Phase 1 logic, not up front — see CLAUDE.md §3 and
+`docs/decisions.md` ("requirements.txt ownership process").
+
+Supported Python version: **3.11**, matching CI
+(`.github/workflows/pytest.yml`) and the team's local environments.

@@ -113,9 +113,42 @@ fields) with hardcoded values and `is_mock: True`.
 }
 ```
 
-Phase 0 stub: `evaluate_compliance()` builds `findings` from
+Phase 0 stub (historical): `evaluate_compliance()` builds `findings` from
 `app/rbi/rules.SAMPLE_RULES` (2 sample rules) with `status: "PENDING"` and
 `is_mock: True`.
+
+### Phase 1 additive clarifications (proposed — pending Arushi/Khushi confirm)
+
+The **output** shape above is unchanged. Phase 1 adds two clarifications
+that don't alter the architecture; full detail in `docs/rbi-rules.md`.
+
+**Status vocabulary.** `status` is one of `PASS`, `WARNING`, `FAIL`,
+`NOT_EVALUATED`. `NOT_EVALUATED` replaces the Phase 0 placeholder
+`PENDING` (used when the referenced technical value is missing).
+
+**Assumed input shape for `evaluate_compliance(technical_findings)`.**
+Nobody consumes this input yet, so it is not a breaking change, but it is
+a cross-module assumption for Phase 2:
+
+```python
+{
+    "model":          { ... Namitha's predict_batch() output ... },
+    "explainability": { ... Manas's explain() output ... },
+    "fairness":       { ... Arushi's fairness_report() output ... },
+    "drift":          { ... Arushi's drift_report() output ... },
+}
+```
+
+Rule references index into this (`"fairness.disparate_impact_ratio"` →
+`tf["fairness"]["disparate_impact_ratio"]`). `None` / missing paths →
+`NOT_EVALUATED`, never an error. **Open:** Arushi's fairness and drift
+come from two functions and Khushi's API groups them as `fairness_drift`;
+the separate `fairness` / `drift` keys here need Arushi + Khushi sign-off
+before Phase 2 wiring.
+
+Phase 1 stub: `evaluate_compliance()` runs a real rule engine over
+illustrative sample rules in `app/rbi/`; output still carries
+`is_mock: True` and `evidence_chunks: []`.
 
 ## Khushi's API — `app/api/main.py`
 

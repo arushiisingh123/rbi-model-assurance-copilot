@@ -174,22 +174,56 @@ illustrative sample rules in `app/rbi/`; output still carries
 
 ## Khushi's API — `app/api/main.py`
 
-Wraps the above under top-level keys unmodified — the API/dashboard
-renders, it doesn't reshape:
+Wraps the other modules' outputs under top-level keys unmodified — the
+API/dashboard renders, it doesn't reshape:
 
 ```python
 {
-    "model": {...},
-    "explainability": {...},
-    "fairness_drift": {...},
-    "compliance": {...}
+    "model": {...},            # ModelResult
+    "explainability": {...},   # ExplainabilityResult
+    "fairness_drift": {        # FairnessDriftResult — the two reports side by side
+        "fairness": {...},     # fairness_report() output
+        "drift": {...}         #  drift_report() output
+    },
+    "compliance": {...},       # ComplianceResult
+    "note": "SYNTHETIC / MOCK DATA. ..."
 }
 ```
 
-Phase 0 reality: `/mock-assurance-result` returns a hardcoded mock object
-with this shape (status strings only, not the full per-module payloads
-above) — real wiring of each module's actual output into this endpoint is
-Phase 2 work. `/health` returns `{"status": "ok"}`.
+### Phase 1 endpoints (implemented 2026-09-03, PR #3)
+
+Real, schema-validated endpoints. In Phase 1 every one is backed by a
+**mock fixture** in `app/api/mock_data.py` — no real module is wired in
+yet (that is Phase 2). Response schemas live in `app/api/schemas.py`;
+interactive docs at `/docs`.
+
+| Method & path | Response model | Notes |
+|---|---|---|
+| `GET /health` | `{"status": "ok"}` | liveness check |
+| `GET /model` | `ModelResult` | |
+| `GET /explainability?method=shap\|lime` | `ExplainabilityResult` | `method` defaults to `shap`; any other value -> HTTP 400 |
+| `GET /fairness-drift` | `FairnessDriftResult` | `{"fairness": {...}, "drift": {...}}` |
+| `GET /compliance` | `ComplianceResult` | |
+| `GET /assurance-result` | `AssuranceResult` | all four sections + `note` |
+| `GET /mock-assurance-result` | `AssuranceResult` | **deprecated** alias of `/assurance-result`, kept for Phase 0 callers |
+
+### `feature_matrix` over HTTP (additive serialization note, 2026-09-03)
+
+Namitha's shared dict carries `feature_matrix` as a `pandas.DataFrame`,
+which is not JSON-serializable. The **API** therefore represents it as a
+list of row records:
+
+```python
+"feature_matrix": [
+    {"income": 45000, "age": 34, "credit_history_len": 5},
+    ...
+]
+```
+
+This does **not** change the in-process contract between Python modules —
+they still pass a real DataFrame to each other. It only fixes the JSON
+form used by the API and dashboard. `pd.DataFrame(payload["feature_matrix"])`
+round-trips it. Additive and non-breaking; flagged to Namitha 2026-09-03.
 
 ## Changing an interface
 

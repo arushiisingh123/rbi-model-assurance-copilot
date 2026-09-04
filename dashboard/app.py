@@ -1,43 +1,129 @@
-"""Phase 0 Streamlit skeleton (owner: Khushi).
+"""Phase 1 Streamlit Dashboard (Owner: Khushi).
 
-Displays the FastAPI mock endpoint's data. No real analytics yet --
-that is Phase 4 work (see docs/development-phases.md).
-
-Run locally (with the API already running separately):
-    streamlit run dashboard/app.py
+Consumes the Phase 1 API via api_client helper and displays structured evaluation
+evidence for Model, Explainability, Fairness & Drift, and RBI Compliance.
 """
-import requests
 import streamlit as st
 
-API_URL = "http://127.0.0.1:8000/mock-assurance-result"
-
-FALLBACK_MOCK_RESULT = {
-    "model": {"status": "PASS", "is_mock": True},
-    "explainability": {"status": "PASS", "is_mock": True},
-    "fairness_drift": {"status": "WARNING", "is_mock": True},
-    "compliance": {"status": "PENDING", "is_mock": True},
-    "note": "SYNTHETIC / MOCK DATA. Not real results. Phase 0 skeleton only.",
-}
+from dashboard.api_client import (
+    get_compliance,
+    get_explainability,
+    get_fairness_drift,
+    get_model,
+    render_status,
+)
 
 st.set_page_config(page_title="AI Model Risk & Assurance Copilot", layout="centered")
+
 st.title("AI Model Risk & Assurance Copilot")
-st.caption("Phase 0 — Foundation skeleton. All data below is mock/synthetic.")
+st.caption("Phase 1 — Independent Module Development. All data below is mock/synthetic.")
 
 st.warning("SYNTHETIC / MOCK DATA — NOT REAL CREDIT DATA — NOT FOR PRODUCTION USE")
 
-try:
-    response = requests.get(API_URL, timeout=2)
-    response.raise_for_status()
-    result = response.json()
-    st.success("Loaded mock result from the FastAPI backend.")
-except requests.exceptions.RequestException:
-    result = FALLBACK_MOCK_RESULT
-    st.info("FastAPI backend not reachable — showing built-in fallback mock data instead.")
+tab_model, tab_explain, tab_fair_drift, tab_compliance = st.tabs(
+    ["Model", "Explainability", "Fairness & Drift", "Compliance"]
+)
 
-for section, data in result.items():
-    if section == "note":
-        continue
-    st.subheader(section.replace("_", " ").title())
-    st.json(data)
+# -----------------------------------------------------------------------------
+# 1. Model Tab
+# -----------------------------------------------------------------------------
+with tab_model:
+    data, source = get_model()
+    st.caption(f"Data source: **{source}**")
 
-st.caption(result.get("note", ""))
+    st.subheader("Model Metadata")
+    meta = data.get("model_metadata", {})
+    col1, col2 = st.columns(2)
+    col1.metric("Model Type", meta.get("model_type", "N/A"))
+    col2.metric("Version", meta.get("version", "N/A"))
+    st.text(f"Trained on: {meta.get('trained_on', 'N/A')}")
+    st.text(f"Features: {', '.join(meta.get('feature_names', []))}")
+
+    st.subheader("Predictions & Probabilities")
+    preds = data.get("predictions", [])
+    probs = data.get("probabilities", [])
+    pred_records = [
+        {"Row": i, "Prediction": pred, "Probability": prob}
+        for i, (pred, prob) in enumerate(zip(preds, probs))
+    ]
+    st.dataframe(pred_records, use_container_width=True)
+
+    st.subheader("Feature Matrix (Input Records)")
+    st.dataframe(data.get("feature_matrix", []), use_container_width=True)
+
+# -----------------------------------------------------------------------------
+# 2. Explainability Tab
+# -----------------------------------------------------------------------------
+with tab_explain:
+    method = st.radio(
+        "Explainability Method",
+        ["shap", "lime"],
+        horizontal=True,
+        index=0,
+    )
+    data, source = get_explainability(method=method)
+    st.caption(f"Data source: **{source}**")
+
+    st.subheader(f"{method.upper()} Global Feature Importance")
+    importance_dict = data.get("global_importance", {})
+    imp_records = [
+        {"Feature": k, "Importance": v} for k, v in importance_dict.items()
+    ]
+    st.dataframe(imp_records, use_container_width=True)
+
+    st.subheader(f"{method.upper()} Per-Instance Feature Contributions")
+    st.json(data.get("per_instance", []))
+
+# -----------------------------------------------------------------------------
+# 3. Fairness & Drift Tab
+# -----------------------------------------------------------------------------
+with tab_fair_drift:
+    data, source = get_fairness_drift()
+    st.caption(f"Data source: **{source}**")
+
+    fairness = data.get("fairness", {})
+    drift = data.get("drift", {})
+
+    st.subheader("Fairness Evaluation")
+    st.markdown(f"**Fairness Status:** {render_status(fairness.get('status'))}")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Protected Attribute", fairness.get("protected_attribute", "N/A"))
+    col2.metric("Demographic Parity Diff", fairness.get("demographic_parity_diff", "N/A"))
+    col3.metric("Disparate Impact Ratio", fairness.get("disparate_impact_ratio", "N/A"))
+
+    st.divider()
+
+    st.subheader("Drift Detection")
+    st.markdown(f"**Drift Status:** {render_status(drift.get('status'))}")
+    col1, col2 = st.columns(2)
+    col1.metric("Population Stability Index (PSI)", drift.get("psi", "N/A"))
+    col2.metric("Kolmogorov-Smirnov (KS)", drift.get("ks_statistic", "N/A"))
+    st.text(f"Features Evaluated: {', '.join(drift.get('features_evaluated', []))}")
+
+# -----------------------------------------------------------------------------
+# 4. Compliance Tab
+# -----------------------------------------------------------------------------
+with tab_compliance:
+    data, source = get_compliance()
+    st.caption(f"Data source: **{source}**")
+
+    st.subheader("RBI Compliance Findings")
+    findings = data.get("findings", [])
+    if not findings:
+        st.info("No compliance findings returned.")
+    for finding in findings:
+        rule_title = f"{finding.get('rule_id', 'Rule')} — {render_status(finding.get('status'))}"
+        with st.expander(rule_title, expanded=True):
+            st.write(f"**Description:** {finding.get('rule_description', '')}")
+            st.write(f"**Technical Reference:** `{finding.get('technical_finding_ref', '')}`")
+            evidence = finding.get("evidence_chunks", [])
+            if evidence:
+                st.write("**Evidence Chunks:**")
+                st.json(evidence)
+            else:
+                st.caption("No evidence chunks populated yet (Phase 3 RAG integration).")
+
+st.divider()
+st.caption(
+    "AI Model Risk & Assurance Copilot — Phase 1 Prototype. Data is strictly synthetic and serves interface validation."
+)

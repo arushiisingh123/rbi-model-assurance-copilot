@@ -135,8 +135,8 @@ because a real document hadn't been chosen yet. This decision unblocks
 replacing that placeholder with real, attributable RBI text, which is a
 Phase 0 checkpoint requirement (`docs/TASK.md` §7, item 7).
 
-**Status:** Approved (recorded 2026-08-25). Document selection only — the
-actual download, placeholder replacement, and smoke-test re-run are
+**Status:** Approved (recorded 2026-08-25). Document selection only —
+the actual download, placeholder replacement, and smoke-test re-run are
 implementation work, not yet done as of this entry. See
 `docs/TASK.md` §14 (now checked off) for the original open item.
 
@@ -213,18 +213,17 @@ no dataset download, no preprocessing, and no changes to
 that remains Phase 1 implementation work. See `docs/TASK.md` §14 (now
 checked off) for the original open item.
 
-**Amendment (2026-08-27) — reaffirmed as a Phase 1 requirement.** The
-team reconfirmed this entry at the Phase 0 sign-off. The Attribute 9
-caveat above is not advisory: the protected attribute used in Phase 1
-fairness analysis is a **derived grouping**, and it must be documented
-as derived everywhere it is used or reported. It must never be
-represented as a clean source gender column, in code, in the API, in the
-dashboard, or in any generated report. The exact category labels
-(e.g. `A91`–`A95`) mapped into each group must be stated explicitly
-rather than described only as "male vs. female". `docs/module-interfaces.md`
-now records this against the `protected_attribute` field. No duplicate
-decision entry was created; this amendment is the record of the
-2026-08-27 reconfirmation.
+**Amendment (2026-08-27) — reaffirmed as a Phase 1 requirement.** The team
+reconfirmed this entry at the Phase 0 sign-off. The Attribute 9 caveat
+above is not advisory: the protected attribute used in Phase 1 fairness
+analysis is a **derived grouping**, and it must be documented as derived
+everywhere it is used or reported. It must never be represented as a clean
+source gender column, in code, in the API, the dashboard, or in any
+generated report. The exact category labels (e.g. `A91`–`A95`) mapped into
+each group must be stated explicitly rather than described only as
+"male vs. female". `docs/module-interfaces.md` now records this against
+the `protected_attribute` field. No duplicate decision entry was created;
+this amendment is the record of the 2026-08-27 reconfirmation.
 
 ---
 
@@ -454,8 +453,8 @@ things.
 
 - The `0.80` disparate-impact boundary is the "four-fifths rule" from the
   **US EEOC Uniform Guidelines on Employee Selection Procedures (1978)** —
-  US *employment* discrimination guidance. Not Indian law, not RBI, not
-  lending-specific.
+  US *employment* discrimination guidance. Not Indian law, not RBI,
+  not lending-specific.
 - The `0.70` disparate-impact boundary is a project-defined choice with
   no external source.
 - PSI bands (`0.10` / `0.25`) are credit-industry convention with no
@@ -500,8 +499,8 @@ but could never be shown working. A controlled shift makes the capability
 demonstrable, provided its synthetic origin is stated plainly.
 
 **Status:** Approved (2026-08-27). Decision/documentation only — no
-dataset construction or preprocessing code written by this entry; that is
-Phase 1 implementation work owned by Arushi.
+dataset construction or preprocessing code written by this entry; that
+is Phase 1 implementation work owned by Arushi.
 
 ---
 
@@ -608,3 +607,44 @@ place where a convention could be mistaken for a regulation.
 **Status:** Open follow-up, assigned to Nidhi for Phase 1
 (recorded 2026-08-27). Application code deliberately not modified as part
 of the governance update.
+
+---
+
+## 2026-09-02 — Compliance status vocabulary + assumed technical-findings input shape
+
+**Decision (PROPOSED — NOT yet approved):** Two additive clarifications arising
+from Phase 1 rule-engine work in `app/compliance/`. Recorded here so Arushi and
+Khushi can sign off (or push back) on the pull request.
+
+1. **Status vocabulary.** `evaluate_compliance()` findings carry a `status` of
+   `PASS`, `WARNING`, `FAIL`, or `NOT_EVALUATED`. `NOT_EVALUATED` replaces the
+   Phase 0 placeholder `PENDING` (used when the referenced technical value is
+   missing, `None`, or not a number).
+
+2. **Assumed input shape for `evaluate_compliance(technical_findings)`.** The
+   engine expects a dict keyed by module domain:
+
+   {
+     "model":          { ... Namitha's predict_batch() output ... },
+     "explainability": { ... Manas's explain() output ... },
+     "fairness":       { ... Arushi's fairness_report() output ... },
+     "drift":          { ... Arushi's drift_report() output ... },
+   }
+
+   A rule's `technical_finding_ref` indexes into this dict, e.g.
+   `"fairness.disparate_impact_ratio"` ->
+   `technical_findings["fairness"]["disparate_impact_ratio"]`. `None` /
+   non-dict input is accepted and returns `NOT_EVALUATED` for every rule
+   (the engine never raises on missing data).
+
+**Why:** The Phase 0 stub returned hardcoded `PENDING` statuses and took no
+inputs. Implementing the real Phase 1 rule engine required deciding what status to assign when a metric is missing / unparseable, and what dictionary structure `evaluate_compliance()` expects as input. Documenting both explicitly avoids silent interface divergence during Phase 2 integration.
+
+**Open for Phase 2:** Arushi returns fairness and drift from two separate
+functions (`fairness_report()` and `drift_report()`), and Khushi's API currently
+groups them under `fairness_drift`. The separate `"fairness"` / `"drift"` keys
+above are Nidhi's assumption and must be confirmed with Arushi and Khushi before
+Phase 2 wiring.
+
+**Status:** Proposed for team sign-off (recorded 2026-09-02 by Nidhi). Not yet
+approved by the team — pending Arushi and Khushi review on the PR.

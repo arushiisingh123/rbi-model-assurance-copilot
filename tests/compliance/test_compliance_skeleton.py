@@ -1,5 +1,5 @@
-"""Phase 0 smoke test for app.compliance: import works, stub returns
-the agreed shape.
+"""Phase 1 smoke test for app.compliance: import works and the stub
+contract from Phase 0 still holds (no-arg call returns the agreed shape).
 """
 from app.compliance.compliance import evaluate_compliance
 

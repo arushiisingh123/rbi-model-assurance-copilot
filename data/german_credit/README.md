@@ -22,7 +22,7 @@ The dataset contains an original binary target classifying credit applicants:
 | `1` | Good Credit | `0` | Low credit risk / Approved |
 | `2` | Bad Credit | `1` | High credit risk / Default |
 
-**Note on Polarity**: The internal target is mapped such that `1` represents the positive/adverse outcome (bad credit / high risk), and output probabilities $P(y=1)$ represent the predicted probability of bad credit.
+**Note on Polarity**: The internal target is mapped such that `1` represents the positive/adverse outcome (bad credit / high risk), and output probabilities $P(y=1)$ represent the predicted probability of bad credit. The **favorable** credit outcome is therefore label `0` (GOOD) — downstream fairness/compliance code must not assume the favorable label is `1`. This is surfaced programmatically in `model_metadata["label_semantics"]`.
 
 ---
 
@@ -59,7 +59,7 @@ The dataset consists of 20 input attributes:
    * `A61`: $< 100$ DM, `A62`: $100 \le \dots < 500$ DM, `A63`: $500 \le \dots < 1000$ DM, `A64`: $\ge 1000$ DM, `A65`: unknown / no savings account
 5. `present_employment`: Present employment duration
    * `A71`: unemployed, `A72`: $< 1$ year, `A73`: $1 \le \dots < 4$ years, `A74`: $4 \le \dots < 7$ years, `A75`: $\ge 7$ years
-6. `personal_status_sex`: Personal status and sex (combined categorical attribute)
+6. `personal_status_and_sex`: Personal status and sex (combined categorical attribute)
    * `A91`: male : divorced/separated
    * `A92`: female : divorced/separated/married
    * `A93`: male : single
@@ -85,6 +85,6 @@ The dataset consists of 20 input attributes:
 ## 4. Preprocessing Assumptions
 
 1. **No Missing Values**: The original dataset has no missing values across all 1,000 instances.
-2. **Sensitive Attribute Preservation**: The raw `personal_status_sex` attribute is preserved directly in feature matrices without modification. Fairness transformations and sensitive group analysis belong strictly to downstream fairness modules.
+2. **Sensitive Attribute Preservation**: The raw `personal_status_and_sex` attribute is preserved directly in feature matrices without modification. It is a combined marital-status + sex field (categories `A91`–`A95`), **not** a standalone gender/sex column. Fairness transformations and sensitive group analysis belong strictly to downstream fairness modules. The column name matches CLAUDE.md and `app/fairness/`.
 3. **Encoding**: Categorical features are encoded using `OneHotEncoder(handle_unknown="ignore")` inside the model pipeline.
 4. **Deterministic Partitioning**: Train/test splits use an 80/20 stratified split (`test_size=0.2`, `stratify=y`, `random_state=42`).

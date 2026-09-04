@@ -646,5 +646,78 @@ groups them under `fairness_drift`. The separate `"fairness"` / `"drift"` keys
 above are Nidhi's assumption and must be confirmed with Arushi and Khushi before
 Phase 2 wiring.
 
-**Status:** Proposed for team sign-off (recorded 2026-09-02 by Nidhi). Not yet
-approved by the team — pending Arushi and Khushi review on the PR.
+**Status:** Superseded in part (see 2026-09-05 entry below): the status-
+vocabulary sub-item was withdrawn — `PENDING` was already the approved
+project-wide value (see "Analytical threshold authority", 2026-08-27, and
+`docs/module-interfaces.md`, Arushi's section), so proposing `NOT_EVALUATED`
+here was a mistake made without checking the already-approved decision. The
+input-shape sub-item is clarified but still pending Arushi/Khushi sign-off
+on the PR — see the entry below.
+
+---
+
+## 2026-09-05 — Compliance rule engine: threshold authority + status vocabulary correction (Phase 1 stabilization)
+
+**Decision:** `app/compliance/` and `app/rbi/rules/` are corrected to
+actually implement the already-approved 2026-08-27 "Analytical threshold
+authority" decision, which they did not fully follow when first written.
+This is an implementation correction bringing code into line with existing
+team-approved policy, not a new policy decision.
+
+**1. Status vocabulary.** `app/compliance/engine.py` no longer defines its
+own `NOT_EVALUATED` status. It now imports `STATUS_PASS`, `STATUS_WARNING`,
+`STATUS_FAIL`, `STATUS_PENDING` from `app.config.thresholds` (the single
+authoritative source) and uses `PENDING` for "missing / not evaluated" —
+matching `docs/module-interfaces.md` (Arushi's section) and
+`docs/thresholds.md`, both already approved 2026-08-25 / 2026-08-27. This
+also fixes a real bug: `app/api/schemas.py`'s `Status = Literal["PASS",
+"WARNING", "FAIL", "PENDING"]` would have rejected any compliance finding
+with the old `NOT_EVALUATED` value.
+
+**2. Threshold authority.** `app/rbi/rules/__init__.py` previously gave
+`RBI-FAIR-01` and `RBI-DRIFT-01` their own `fail_below`/`warn_below`
+numbers for disparate impact ratio and PSI — duplicating, and in places
+diverging from, the canonical thresholds in `app/config/thresholds.py`
+(e.g. a ratio of `0.78` was `FAIL` under the old rule-local band but is
+`WARNING` under the canonical one). This is exactly what CLAUDE.md's
+Phase 1 constraints tell Nidhi not to do ("must not... introduce
+alternative fairness or drift thresholds"). Both rules now use a new
+`mirror_status` operator (`app/rbi/schema.py`, `app/compliance/engine.py`)
+that consumes `fairness.status` / `drift.status` — the status the owning
+module already computed from the canonical thresholds — instead of
+re-deriving it from the raw ratio/PSI value.
+
+**3. Rules with no defined threshold.** `RBI-FAIR-02` (demographic parity
+difference) and `RBI-DRIFT-02` (KS statistic) previously used rule-local
+`fail_above`/`warn_above` bands. `docs/thresholds.md` §4 explicitly defines
+**no** threshold for either metric — inventing one in the rule set is the
+"create a demographic-parity/KS threshold" CLAUDE.md prohibits. Both rules
+now use `presence` only: they confirm the metric was reported, they do not
+classify it.
+
+**4. Not addressed by this entry.** The `docs/decisions.md` 2026-08-27
+"Phase 1 follow-up: RBI-prefixed sample rule IDs" item (the `RBI-` prefix
+implying regulatory authority the sample rules don't have) remains open —
+renaming `rule_id` values is a breaking change to something other modules
+may key on, and is left as a separate decision for Nidhi/the team. The
+fairness/drift input-shape question from the 2026-09-02 entry above
+(separate `fairness`/`drift` keys vs. `fairness_drift`) is now structurally
+clarified — see that entry — but formal Arushi/Khushi sign-off is still
+pending.
+
+**Why:** the compliance module is the one place in the system that turns a
+technical measurement into a stated judgement; letting it silently carry a
+second, competing definition of "how bad is this number" than the module
+that actually computed it would make the two disagree on the same input,
+which is worse than either being wrong alone.
+
+**Cross-module note:** this changes what status `RBI-FAIR-01` reports for
+the same mock input (`WARNING`, previously `FAIL`) — worth a quick heads-up
+to Arushi (whose `app/config/thresholds.py` this now imports directly) and
+Khushi (whose API schema this now actually satisfies) on the pull request,
+even though no interface shape changed.
+
+**Status:** Implemented by Nidhi (module owner), 2026-09-05. Corrects
+`app/compliance/`, `app/rbi/rules/`, and their tests/docs to match the
+already-approved 2026-08-27 decision; does not introduce new policy. Full
+test suite passing (185 tests). Not yet committed/pushed — pending review.

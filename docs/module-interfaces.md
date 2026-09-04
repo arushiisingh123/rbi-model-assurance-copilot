@@ -139,18 +139,28 @@ Phase 0 stub (historical): `evaluate_compliance()` builds `findings` from
 `app/rbi/rules.SAMPLE_RULES` (2 sample rules) with `status: "PENDING"` and
 `is_mock: True`.
 
-### Phase 1 additive clarifications (proposed — pending Arushi/Khushi confirm)
+### Phase 1 additive clarifications
 
-The **output** shape above is unchanged. Phase 1 adds two clarifications
-that don't alter the architecture; full detail in `docs/rbi-rules.md`.
+The **output** shape above is unchanged. Full detail in
+`docs/rbi-rules.md`.
 
 **Status vocabulary.** `status` is one of `PASS`, `WARNING`, `FAIL`,
-`NOT_EVALUATED`. `NOT_EVALUATED` replaces the Phase 0 placeholder
-`PENDING` (used when the referenced technical value is missing).
+`PENDING` — the same project-wide vocabulary defined above in Arushi's
+section (`docs/thresholds.md`). An earlier draft of this section proposed
+a compliance-local `NOT_EVALUATED` value instead; that was a mistake (this
+vocabulary was already approved) and has been corrected — see
+`docs/decisions.md`, "Compliance rule engine: threshold authority + status
+vocabulary correction".
 
-**Assumed input shape for `evaluate_compliance(technical_findings)`.**
-Nobody consumes this input yet, so it is not a breaking change, but it is
-a cross-module assumption for Phase 2:
+**Threshold authority.** The compliance engine consumes, but does not
+recompute, fairness/drift severity. For the two metrics with a canonical
+threshold (disparate impact ratio, PSI) it mirrors the status
+`fairness_report()`/`drift_report()` already produced; for the two metrics
+with no defined threshold (demographic parity difference, KS statistic —
+`docs/thresholds.md` §4) it checks presence only. See
+`docs/decisions.md`, "Analytical threshold authority".
+
+**Assumed input shape for `evaluate_compliance(technical_findings)`:**
 
 ```python
 {
@@ -161,16 +171,17 @@ a cross-module assumption for Phase 2:
 }
 ```
 
-Rule references index into this (`"fairness.disparate_impact_ratio"` →
-`tf["fairness"]["disparate_impact_ratio"]`). `None` / missing paths →
-`NOT_EVALUATED`, never an error. **Open:** Arushi's fairness and drift
-come from two functions and Khushi's API groups them as `fairness_drift`;
-the separate `fairness` / `drift` keys here need Arushi + Khushi sign-off
-before Phase 2 wiring.
+Rule references index into this (`"fairness.status"` →
+`tf["fairness"]["status"]`). `None` / missing paths → `PENDING`, never an
+error. **Clarified:** Khushi's API section below shows `fairness_drift`
+wraps the two reports as `{"fairness": {...}, "drift": {...}}` — separate
+objects, not merged, matching this assumption. **Still open for Phase 2:**
+the code that unwraps `fairness_drift` into this shape has not been
+written yet.
 
-Phase 1 stub: `evaluate_compliance()` runs a real rule engine over
-illustrative sample rules in `app/rbi/`; output still carries
-`is_mock: True` and `evidence_chunks: []`.
+Phase 1: `evaluate_compliance()` runs a real rule engine over illustrative
+sample rules in `app/rbi/`; output still carries `is_mock: True` and
+`evidence_chunks: []`.
 
 ## Khushi's API — `app/api/main.py`
 

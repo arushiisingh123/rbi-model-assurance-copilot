@@ -115,26 +115,62 @@ def test_presence_pass_when_non_empty():
 
 
 def test_presence_not_evaluated_when_missing_or_empty():
-    assert evaluate_rule(PRESENCE_RULE, {}) == "NOT_EVALUATED"
+    assert evaluate_rule(PRESENCE_RULE, {}) == "PENDING"
     tf = {"explainability": {"global_importance": {}}}
-    assert evaluate_rule(PRESENCE_RULE, tf) == "NOT_EVALUATED"
+    assert evaluate_rule(PRESENCE_RULE, tf) == "PENDING"
 
 
-# --- evaluate_rule: NOT_EVALUATED and errors -------------------------
+# --- evaluate_rule: mirror_status -------------------------------------
+
+MIRROR_STATUS_RULE = {
+    "rule_id": "R",
+    "technical_finding_ref": "fairness.status",
+    "evaluation": {"operator": "mirror_status"},
+}
+
+
+@pytest.mark.parametrize("value", ["PASS", "WARNING", "FAIL", "PENDING"])
+def test_mirror_status_returns_technical_status_verbatim(value):
+    tf = {"fairness": {"status": value}}
+    assert evaluate_rule(MIRROR_STATUS_RULE, tf) == value
+
+
+def test_mirror_status_does_not_reclassify_the_underlying_metric():
+    # A disparate impact ratio of 0.78 is WARNING under the canonical
+    # threshold (app/config/thresholds.py), not FAIL. mirror_status must
+    # consume that status, never re-derive it from the raw ratio.
+    tf = {"fairness": {"disparate_impact_ratio": 0.78, "status": "WARNING"}}
+    assert evaluate_rule(MIRROR_STATUS_RULE, tf) == "WARNING"
+
+
+def test_mirror_status_missing_is_pending():
+    assert evaluate_rule(MIRROR_STATUS_RULE, {}) == "PENDING"
+
+
+def test_mirror_status_non_status_value_is_pending():
+    # A raw number (or any string outside the vocabulary) must not be
+    # passed through as if it were a status.
+    tf = {"fairness": {"status": 0.78}}
+    assert evaluate_rule(MIRROR_STATUS_RULE, tf) == "PENDING"
+    tf = {"fairness": {"status": "bogus"}}
+    assert evaluate_rule(MIRROR_STATUS_RULE, tf) == "PENDING"
+
+
+# --- evaluate_rule: PENDING and errors --------------------------------
 
 def test_missing_ref_is_not_evaluated():
-    assert evaluate_rule(MAX_VALUE_RULE, {}) == "NOT_EVALUATED"
+    assert evaluate_rule(MAX_VALUE_RULE, {}) == "PENDING"
 
 
 def test_non_numeric_value_is_not_evaluated():
     tf = {"drift": {"psi": "high"}}
-    assert evaluate_rule(MAX_VALUE_RULE, tf) == "NOT_EVALUATED"
+    assert evaluate_rule(MAX_VALUE_RULE, tf) == "PENDING"
 
 
 def test_bool_value_is_not_evaluated():
     # bool is a subclass of int -- it must not be treated as a number.
     tf = {"drift": {"psi": True}}
-    assert evaluate_rule(MAX_VALUE_RULE, tf) == "NOT_EVALUATED"
+    assert evaluate_rule(MAX_VALUE_RULE, tf) == "PENDING"
 
 
 def test_unknown_operator_raises_value_error():
@@ -156,9 +192,20 @@ def test_every_status_is_in_the_vocabulary():
 # --- map_findings_to_rules -----------------------------------------
 
 def test_map_findings_reports_resolvable_refs():
-    tf = {"fairness": {"disparate_impact_ratio": 0.78, "demographic_parity_diff": 0.1}}
+    # RBI-FAIR-01 now references "fairness.status" (mirror_status), not
+    # the raw ratio -- see docs/decisions.md, "Analytical threshold
+    # authority". RBI-DRIFT-01 references "drift.status", unresolved here
+    # since no "drift" key is present.
+    tf = {
+        "fairness": {
+            "disparate_impact_ratio": 0.78,
+            "demographic_parity_diff": 0.1,
+            "status": "WARNING",
+        }
+    }
     mapping = {m["rule_id"]: m["resolved"] for m in map_findings_to_rules(tf)}
     assert mapping["RBI-FAIR-01"] is True
+    assert mapping["RBI-FAIR-02"] is True
     assert mapping["RBI-DRIFT-01"] is False
 
 

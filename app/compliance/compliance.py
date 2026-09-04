@@ -38,7 +38,7 @@ def evaluate_compliance(technical_findings: dict | None = None) -> dict:
 
     ``technical_findings`` is the combined per-module findings dict
     (see app/compliance/mock_findings.py for the assumed shape). If it
-    is None or not a dict, every rule returns "NOT_EVALUATED".
+    is None or not a dict, every rule returns "PENDING".
     """
     if not isinstance(technical_findings, dict):
         technical_findings = {}

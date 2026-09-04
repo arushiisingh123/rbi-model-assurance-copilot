@@ -92,10 +92,32 @@ Phase 0 stub: `explain()` returns this shape with hardcoded values and
 
 `protected_attribute` and `features_evaluated` are additive metadata
 fields approved 2026-08-25 (see `docs/decisions.md`) — they don't change
-the overall architecture. `protected_attribute`'s actual value depends on
-which dataset/sensitive column Phase 1 ends up using (still open, see
-`docs/TASK.md` §14); `"gender"` above is illustrative only, matching the
-column already present in `data/sample/credit_sample.csv`.
+the overall architecture. `"gender"` above is illustrative only, matching
+the column present in the Phase 0 sample file
+`data/sample/credit_sample.csv`.
+
+For Phase 1 the dataset choice is settled: UCI Statlog (German Credit
+Data), with the protected attribute **derived** from Attribute 9
+("Personal status and sex"). That attribute combines marital/personal
+status with sex and is **not** a clean gender column, so
+`protected_attribute` must carry the derived grouping and be documented
+as derived — never presented as a source gender field. See
+`docs/decisions.md`, "Phase 1 credit-scoring dataset and fairness
+attribute" (2026-08-25, amended 2026-08-27).
+
+### Status values and thresholds
+
+The `status` field on both reports takes one of `PASS`, `WARNING`,
+`FAIL`, `PENDING`. The thresholds that map a metric to a status are
+defined in **one** place — `docs/thresholds.md`, implemented in
+`app/config/thresholds.py` — and must not be redefined per module.
+
+Those thresholds are project/industry conventions, **not RBI
+requirements**. See `docs/thresholds.md` §1.
+
+Thresholds are applied **internally** and are deliberately **not** part
+of either output shape in Phase 1 (team decision, 2026-08-27). The
+shapes above are unchanged.
 
 Phase 0 stub: both functions return these shapes (including the two new
 fields) with hardcoded values and `is_mock: True`.

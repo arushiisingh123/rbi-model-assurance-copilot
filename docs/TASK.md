@@ -1,3 +1,13 @@
+> **Status note (added 2026-08-27).** This document is the **historical
+> Phase 0 plan**. It is kept for its detailed per-task breakdown and
+> rationale, but it is no longer the source of truth for current project
+> state. For the current phase see `docs/development-phases.md`; for
+> approved decisions and any supersessions see `docs/decisions.md`; for
+> module boundaries and ownership see `docs/architecture.md` §4; for
+> analytical thresholds see `docs/thresholds.md`. Where this document
+> conflicts with those, they win. Specific superseded passages are
+> annotated inline below.
+
 Understood — here's the complete Phase 0 plan in the structure you asked for, consolidated in one place. No files are being created or modified in this response.
 
 1. Complete Project Architecture
@@ -186,6 +196,10 @@ Boundaries (who may edit what):
 - Arushi: app/fairness/, app/drift/, tests/fairness/, tests/drift/.
 - Nidhi: app/rbi/, app/rag/, app/compliance/, tests/rbi/, tests/rag/, tests/compliance/, data/rbi_sources/.
 - Khushi: app/api/, dashboard/, requirements.txt, root run scripts — may consume other modules' outputs but not implement their logic.
+  **[Clarified 2026-08-27]** Khushi is the *reviewing* owner of requirements.txt,
+  not a gatekeeper: any member may add their own dependencies in their own PR.
+  Ownership of `tests/api/`, `.github/workflows/`, `app/config/`, and `docs/` is
+  now assigned in `docs/architecture.md` §4, "Shared assets".
 
 Crossing into someone else's folder requires naming the dependency and getting their OK first.
 
@@ -252,6 +266,9 @@ Namitha — app/models/ skeleton
 - Objective: runnable package matching the §9 stub interface, plus sample dataset.
 - Files: app/models/__init__.py, app/models/model.py, data/sample/credit_sample.csv, tests/models/test_model_skeleton.py
 - Must not modify: any other app/* folder, dashboard/, requirements.txt (propose additions, Khushi owns the file).
+  **[Clarified 2026-08-27]** Members may now add their own dependencies directly
+  in their own PR; Khushi reviews for conflicts/redundancy. See `docs/decisions.md`,
+  "requirements.txt ownership process" (2026-08-25).
 - Steps: create package → stub functions with docstrings of intended real behavior → tiny clearly-synthetic CSV → smoke test.
 - Tests: import works, each stub call returns correctly-shaped (if fake) output.
 - Acceptance: pytest tests/models passes; import app.models works.
@@ -274,6 +291,9 @@ Arushi — app/fairness/ + app/drift/ skeleton
 - Must not modify: other modules.
 - Delegate to Antigravity: scaffolding.
 - Human review: Arushi confirms metric names/thresholds she intends to use later.
+  **[Superseded 2026-08-27]** Thresholds are no longer deferred to an individual.
+  They have a single authoritative location — `docs/thresholds.md`, implemented in
+  `app/config/thresholds.py`. See `docs/decisions.md`, "Analytical threshold authority".
 
 Nidhi — app/rbi/, app/rag/, app/compliance/ skeleton + RAG smoke test
 

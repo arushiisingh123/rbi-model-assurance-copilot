@@ -71,9 +71,9 @@ Phase 0 stub: `explain()` returns this shape with hardcoded values and
 ## Arushi's output — `app/fairness/fairness.py` + `app/drift/drift.py`
 
 ```python
-# fairness_report()
+# fairness_report(predictions, sensitive_feature, favorable_label=0)
 {
-    "protected_attribute": "gender",
+    "protected_attribute": "personal_status_and_sex",
     "demographic_parity_diff": 0.14,
     "disparate_impact_ratio": 0.78,
     "status": "WARNING",
@@ -92,9 +92,11 @@ Phase 0 stub: `explain()` returns this shape with hardcoded values and
 
 `protected_attribute` and `features_evaluated` are additive metadata
 fields approved 2026-08-25 (see `docs/decisions.md`) — they don't change
-the overall architecture. `"gender"` above is illustrative only, matching
-the column present in the Phase 0 sample file
-`data/sample/credit_sample.csv`.
+the overall architecture. `protected_attribute` is taken from the
+sensitive feature's pandas Series name when one is present; the literal
+names `"gender"` and `"sex"` are rejected and replaced with
+`"personal_status_and_sex"`, because Attribute 9 is not a standalone
+sex field.
 
 For Phase 1 the dataset choice is settled: UCI Statlog (German Credit
 Data), with the protected attribute **derived** from Attribute 9
@@ -119,8 +121,63 @@ Thresholds are applied **internally** and are deliberately **not** part
 of either output shape in Phase 1 (team decision, 2026-08-27). The
 shapes above are unchanged.
 
-Phase 0 stub: both functions return these shapes (including the two new
-fields) with hardcoded values and `is_mock: True`.
+`status` is derived from the **reported (rounded) metric**, so the number
+shown in a report and the status beside it can never disagree. This
+matters at the boundaries: a ratio printed as `0.8` is always `PASS`, and
+a PSI printed as `0.1` is always `WARNING`.
+
+### `favorable_label` (fairness)
+
+`fairness_report()` takes an explicit `favorable_label` keyword. Which
+prediction value counts as favourable is **domain-specific and is never
+inferred from the data**.
+
+The default is **`0`**, matching the current credit model, whose target is
+encoded `0 = GOOD` (favourable) and `1 = BAD` (see
+`data/german_credit/README.md`). Callers evaluating a model with different
+label semantics must pass the value explicitly. Passing `None` raises
+`ValueError`.
+
+Reading this backwards inverts the result — on the real dataset the same
+predictions give a passing ratio under `favorable_label=0` and a failing
+one under `favorable_label=1`.
+
+### When each function returns `PENDING`
+
+`PENDING` means the assessment could not be performed. It is never used to
+mean "acceptable", and missing data is never reported as `FAIL`.
+
+- `fairness_report()` — fewer than two distinct groups, or no group
+  receives the favourable outcome at all (the ratio is undefined).
+- `drift_report()` — empty frames, no shared numeric columns, or every
+  shared numeric column left with no usable values.
+
+In both cases the metrics are returned as neutral placeholders
+(`demographic_parity_diff: 0.0` / `disparate_impact_ratio: 1.0`, or
+`psi: 0.0` / `ks_statistic: 0.0`).
+
+### What `drift_report()` actually covers
+
+`features_evaluated` lists exactly the features that were evaluated, and
+never claims coverage the calculation did not provide. Excluded from
+PSI/KS:
+
+- categorical and text columns (they are **not** treated as numeric);
+- boolean columns (pandas reports them as numeric, but they are
+  semantically categorical);
+- columns present in only one of the two frames;
+- non-finite values (`NaN`, `±inf`), dropped per feature;
+- any feature left with no usable values after that cleaning — it is
+  dropped from `features_evaluated` entirely.
+
+`psi` and `ks_statistic` are each the **maximum across evaluated
+features**, computed independently, so they may originate from different
+features. Status is driven by PSI alone; KS carries no threshold and
+never contributes a severity (`docs/thresholds.md` §4.1).
+
+Phase 1: both functions perform real calculations and return
+`is_mock: False`. That flag describes the arithmetic only — a real
+calculation is not, by itself, verified regulatory evidence.
 
 ## Nidhi's output — `app/compliance/compliance.py`
 

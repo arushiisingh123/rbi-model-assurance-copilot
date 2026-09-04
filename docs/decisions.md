@@ -648,3 +648,73 @@ Phase 2 wiring.
 
 **Status:** Proposed for team sign-off (recorded 2026-09-02 by Nidhi). Not yet
 approved by the team — pending Arushi and Khushi review on the PR.
+
+---
+
+## 2026-09-04 — Phase 1 stabilization: fairness and drift
+
+**Decision:** Applying the team's approved project-wide contracts to the
+fairness and drift modules. No threshold value, output key, or function name
+was changed. Scope limited to `app/fairness/`, `app/drift/`, `app/config/`
+consumers, their tests, and the fairness/drift sections of the docs.
+
+**1. `favorable_label` now defaults to `0`.** The model target is encoded
+`0 = GOOD`, `1 = BAD` (`data/german_credit/README.md`), so the previous
+default of `1` measured the rate of receiving a *bad* credit decision as if
+it were favourable. On the real dataset the same predictions gave a
+disparate impact ratio of ~0.67 (FAIL) under the old default versus ~0.82
+(PASS) under the correct reading — the same data, an inverted verdict.
+`favorable_label` remains an explicit caller-supplied keyword and is never
+inferred from the data; `None` now raises `ValueError`.
+
+**2. A zero maximum selection rate now returns `PENDING`, not `PASS`.** When
+no group receives the favourable outcome the ratio is undefined. The previous
+behaviour returned a neutral ratio of 1.0, which `classify_disparate_impact`
+then reported as `PASS` — an unassessable run presented as a passing check.
+
+**3. Status is derived from the reported (rounded) metric.** Both modules
+round metrics to 4 decimal places but previously classified the unrounded
+value, so a report could show a ratio of `0.8` beside a `WARNING`, or a PSI
+of `0.1` beside a `PASS`. In an assurance report the number and its status
+must never disagree. Recorded in `docs/thresholds.md` §3.4.
+
+**4. Drift feature eligibility tightened, and `features_evaluated` made
+truthful.** Non-finite values (`NaN`, `±inf`) are now excluded per feature:
+`np.quantile` over an infinity produced NaN bin edges, a meaningless PSI of
+~2.6, and a spurious `FAIL` on data that had not drifted. Boolean columns are
+excluded (pandas reports them as numeric, but they are semantically
+categorical). A feature left with no usable values is dropped from
+`features_evaluated` rather than silently contributing a zero, so the field
+never claims coverage the calculation did not provide. If nothing remains
+evaluable the result is `PENDING` — absent data is never reported as `FAIL`.
+
+**5. MAX aggregation documented.** The existing behaviour (aggregate PSI and
+KS are each the maximum across evaluated features, computed independently)
+was implemented in Phase 1 but never written down. Now recorded in
+`docs/thresholds.md` §3.5, closing the documentation debt noted at the time.
+Maximum rather than mean: the mean of several per-feature PSIs is not itself
+a PSI, so the §3.2 bands would be applied to a quantity they were never
+defined for.
+
+**Explicitly unchanged:** threshold values (`0.80`, `0.70`, `0.10`, `0.25`);
+both output key sets; both function names; the `PASS`/`WARNING`/`FAIL`/
+`PENDING` vocabulary; the raw Attribute 9 grouping (no derived sex grouping,
+no codebook); PSI/KS formulas and binning strategy; `app/drift/scenario.py`
+behaviour. `docs/thresholds.md` §3.5 records the aggregation rule but adds no
+KS or demographic-parity threshold — those remain deliberately undefined.
+
+**Why:** these were correctness defects against contracts the team had
+already approved, not new design. Each produced a plausible-looking but wrong
+status, which is the most damaging failure mode for an assurance tool.
+
+**Status:** Implemented 2026-09-04 (Arushi). Not committed — pending team
+review of the diff.
+
+**Open, outside this module's ownership — needs team resolution:**
+`app/rbi/rules/__init__.py` evaluates `fairness.disparate_impact_ratio` and
+`drift.psi` against thresholds embedded in the rules themselves rather than
+importing `app/config/thresholds.py`, and those values disagree with the
+authoritative ones (e.g. a ratio of 0.78 classifies as `WARNING` centrally
+and `FAIL` by rule). The rules also define KS and demographic-parity
+thresholds that `docs/thresholds.md` §4 deliberately declines to define.
+Not changed here — that is Nidhi's module.

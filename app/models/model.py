@@ -2,6 +2,24 @@
 
 Implements Phase 1 scikit-learn Logistic Regression pipeline for RBI compliance
 model risk assurance, operating on the UCI Statlog (German Credit Data) dataset.
+
+Public model contract (Phase 1)
+-------------------------------
+- ``load(path=...)`` -> fitted ``sklearn.pipeline.Pipeline``. Raises
+  ``FileNotFoundError`` if the artifact is absent (deterministic, no
+  implicit training).
+- ``predict_batch(feature_matrix: pandas.DataFrame | None)`` -> shared dict
+  (see the function docstring). Internally always a ``pandas.DataFrame``;
+  serialization to ``list[dict]`` is the API layer's concern, not this
+  module's.
+- Expected input: the 20 RAW German-Credit features named and ordered by
+  ``app.models.preprocessing.FEATURE_COLUMNS``. The pipeline one-hot expands
+  categoricals internally; those expanded columns are NOT part of the input
+  contract and are never exposed as ``feature_names``.
+- Labels: ``0`` = GOOD (low risk), ``1`` = BAD (high risk) = positive class.
+  ``probabilities[i]`` is ``P(class == 1) == P(BAD)``. The favorable credit
+  outcome is label ``0``; consumers must not assume the favorable label is
+  ``1``. This is echoed in ``model_metadata["label_semantics"]``.
 """
 
 from __future__ import annotations
@@ -27,8 +45,10 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from app.models.preprocessing import (
     CATEGORICAL_FEATURES,
     DEFAULT_DATASET_PATH,
+    FAVORABLE_OUTCOME_LABEL,
     FEATURE_COLUMNS,
     NUMERIC_FEATURES,
+    POSITIVE_CLASS,
     load_dataset,
     preprocess,
     split_data,
@@ -37,6 +57,35 @@ from app.models.preprocessing import (
 DEFAULT_MODEL_ARTIFACT_PATH = "app/models/artifacts/credit_model.joblib"
 MODEL_VERSION = "0.1.0"
 MODEL_TYPE = "logistic_regression"
+
+# Project-agreed target label semantics, surfaced in model_metadata so every
+# downstream consumer reads the same contract instead of assuming a polarity.
+# 0 = GOOD (low risk), 1 = BAD (high risk / default) = positive class.
+LABEL_SEMANTICS: Dict[str, Any] = {
+    "0": "GOOD - low credit risk",
+    "1": "BAD - high credit risk / likely default",
+    "positive_class": POSITIVE_CLASS,
+    "probabilities_represent": "P(class == 1) = P(BAD / high credit risk)",
+    "favorable_outcome_label": FAVORABLE_OUTCOME_LABEL,
+}
+
+
+def _positive_class_probabilities(model: Any, X: pd.DataFrame) -> np.ndarray:
+    """Return P(class == 1) = P(BAD) regardless of ``model.classes_`` ordering.
+
+    sklearn orders ``predict_proba`` columns by ``model.classes_``. For a
+    ``{0, 1}`` target that is already ``[0, 1]`` so column ``1`` is the
+    positive class, but this looks the column up explicitly so the contract
+    ("probabilities mean P(BAD)") cannot silently break.
+    """
+    proba = model.predict_proba(X)
+    classes = list(getattr(model, "classes_", [0, 1]))
+    if POSITIVE_CLASS not in classes:
+        raise ValueError(
+            f"Model was not trained with the positive class {POSITIVE_CLASS}; "
+            f"classes_={classes}."
+        )
+    return proba[:, classes.index(POSITIVE_CLASS)]
 
 
 def build_pipeline(
@@ -187,7 +236,7 @@ def evaluate(
         n_test_samples, and is_mock=False.
     """
     y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)[:, 1]
+    y_prob = _positive_class_probabilities(model, X_test)
 
     accuracy = float(accuracy_score(y_test, y_pred))
     precision = float(precision_score(y_test, y_pred, zero_division=0))
@@ -261,11 +310,21 @@ def load(
 
 
 def _get_or_train_default_model() -> Pipeline:
-    """Helper to retrieve the persisted model or train a default model."""
+    """Return the persisted default model, training + saving it once if absent.
+
+    Deterministic: training uses ``random_state=42`` on the fixed approved
+    dataset, so a rebuilt artifact is identical to a previously saved one.
+    Only ``predict_batch()`` uses this convenience path -- ``load()`` itself
+    never trains implicitly and raises ``FileNotFoundError`` on a missing
+    artifact. The generated artifact lives under the git-ignored
+    ``app/models/artifacts/`` directory and is never committed.
+    """
     if os.path.exists(DEFAULT_MODEL_ARTIFACT_PATH):
         try:
             return load(DEFAULT_MODEL_ARTIFACT_PATH)
         except Exception:
+            # Corrupt / incompatible artifact (e.g. trained on an older
+            # feature schema): fall back to a fresh deterministic rebuild.
             pass
 
     # Train and save default model if artifact not present
@@ -283,17 +342,22 @@ def predict_batch(
 
     Follows the shared module interface contract from docs/module-interfaces.md:
     {
-        "predictions": [0, 1, 0, ...],
-        "probabilities": [0.12, 0.81, 0.33, ...],
-        "feature_matrix": <pandas.DataFrame>,
+        "predictions": [0, 1, 0, ...],       # 0 = GOOD, 1 = BAD (positive class)
+        "probabilities": [0.12, 0.81, ...],  # probabilities[i] = P(class 1) = P(BAD)
+        "feature_matrix": <pandas.DataFrame>,  # the 20 RAW features, FEATURE_COLUMNS order
         "model_metadata": {
             "model_type": "logistic_regression",
             "version": "0.1.0",
             "trained_on": "data/german_credit/german_credit.csv",
-            "feature_names": [...]
+            "feature_names": [...],          # 20 RAW feature names (not one-hot columns)
+            "label_semantics": {...}         # additive: 0/1 meaning, positive & favorable class
         },
         "is_mock": False
     }
+
+    ``feature_matrix`` is returned as a ``pandas.DataFrame`` (the in-process
+    representation). The API layer serializes it to ``list[dict]`` at the
+    HTTP boundary; this function does not.
 
     Parameters
     ----------
@@ -333,7 +397,7 @@ def predict_batch(
     scored_features = feature_matrix[FEATURE_COLUMNS].copy()
 
     raw_preds = model.predict(scored_features)
-    raw_probs = model.predict_proba(scored_features)[:, 1]
+    raw_probs = _positive_class_probabilities(model, scored_features)
 
     predictions: List[int] = [int(p) for p in raw_preds]
     probabilities: List[float] = [float(p) for p in raw_probs]
@@ -347,6 +411,7 @@ def predict_batch(
             "version": MODEL_VERSION,
             "trained_on": DEFAULT_DATASET_PATH,
             "feature_names": list(scored_features.columns),
+            "label_semantics": LABEL_SEMANTICS,
         },
         "is_mock": False,
     }

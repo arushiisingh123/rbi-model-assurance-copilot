@@ -130,13 +130,38 @@ def test_preprocess_shapes_and_target_polarity(preprocessed_data):
     assert (y == 1).sum() == 300
 
 
-def test_preprocess_preserves_personal_status_sex(preprocessed_data):
-    """Verify raw personal_status_sex is preserved without converting to fairness groups."""
+def test_preprocess_preserves_personal_status_and_sex(preprocessed_data):
+    """Verify raw personal_status_and_sex is preserved without converting to fairness groups.
+
+    The column name must match CLAUDE.md and app/fairness/ (`personal_status_and_sex`),
+    and it must stay a raw combined marital-status + sex field, not a derived
+    gender grouping (that is a downstream fairness responsibility).
+    """
     X = preprocessed_data["X"]
-    assert "personal_status_sex" in X.columns
-    # Check that categories (A91, A92, A93, A94) are preserved
-    unique_vals = set(X["personal_status_sex"].unique())
+    assert "personal_status_and_sex" in X.columns
+    assert "personal_status_sex" not in X.columns
+    assert "gender" not in X.columns and "sex" not in X.columns
+    # Check that raw categories (A91..A95) are preserved unchanged
+    unique_vals = set(X["personal_status_and_sex"].unique())
     assert unique_vals.issubset({"A91", "A92", "A93", "A94", "A95"})
+
+
+def test_raw_feature_schema_names_and_types(preprocessed_data):
+    """Verify the authoritative RAW feature schema: 20 features, 13 categorical + 7 numeric."""
+    assert len(FEATURE_COLUMNS) == 20
+    assert len(CATEGORICAL_FEATURES) == 13
+    assert len(NUMERIC_FEATURES) == 7
+    # Categorical + numeric partition the full schema exactly
+    assert set(CATEGORICAL_FEATURES) | set(NUMERIC_FEATURES) == set(FEATURE_COLUMNS)
+    assert set(CATEGORICAL_FEATURES) & set(NUMERIC_FEATURES) == set()
+    assert list(preprocessed_data["X"].columns) == FEATURE_COLUMNS
+
+
+def test_preprocess_raises_on_missing_feature_column():
+    """Verify preprocess() raises ValueError (not KeyError) when a feature column is absent."""
+    bad_df = pd.DataFrame({"age": [30, 40], TARGET_COLUMN: [1, 2]})
+    with pytest.raises(ValueError, match="missing required feature columns"):
+        preprocess(bad_df)
 
 
 def test_preprocess_no_nan_in_features(preprocessed_data):
@@ -328,6 +353,74 @@ def test_predict_batch_default_arguments():
     assert metadata["feature_names"] == list(result["feature_matrix"].columns)
 
 
+def test_predict_batch_output_exposes_raw_feature_schema():
+    """feature_names must be the 20 RAW features, never the one-hot expanded columns."""
+    result = predict_batch()
+    names = result["model_metadata"]["feature_names"]
+
+    assert names == FEATURE_COLUMNS
+    assert len(names) == 20
+    assert "personal_status_and_sex" in names
+    # One-hot expansion happens inside the pipeline and must not leak out.
+    for n in names:
+        assert "_A1" not in n and "_A2" not in n and "=" not in n
+    # The raw combined attribute keeps its raw category values in the matrix.
+    assert set(result["feature_matrix"]["personal_status_and_sex"].unique()).issubset(
+        {"A91", "A92", "A93", "A94", "A95"}
+    )
+
+
+def test_predict_batch_label_semantics_metadata():
+    """model_metadata must state 0=GOOD, 1=BAD, positive class 1, favorable label 0."""
+    meta = predict_batch()["model_metadata"]
+    ls = meta["label_semantics"]
+
+    assert ls["positive_class"] == 1
+    assert ls["favorable_outcome_label"] == 0
+    assert "GOOD" in ls["0"] and "BAD" in ls["1"]
+    assert "P(class == 1)" in ls["probabilities_represent"]
+
+
+def test_predict_batch_probability_is_p_of_bad():
+    """probabilities[i] must be P(class 1) = P(BAD): prediction 1 <=> probability >= 0.5."""
+    result = predict_batch()
+    for pred, prob in zip(result["predictions"], result["probabilities"]):
+        if pred == 1:
+            assert prob >= 0.5
+        else:
+            assert prob <= 0.5
+
+
+def test_predict_batch_matches_direct_positive_class_column(trained_model, preprocessed_data):
+    """The returned probabilities equal predict_proba's column for class label 1."""
+    X = preprocessed_data["X_test"].head(15).copy()
+    result = predict_batch(feature_matrix=X)
+
+    classes = list(trained_model.classes_)
+    pos_col = trained_model.predict_proba(X.reset_index(drop=True))[:, classes.index(1)]
+    assert result["probabilities"] == [float(p) for p in pos_col]
+
+
+def test_predict_batch_preserves_feature_order_when_columns_shuffled(preprocessed_data):
+    """Columns supplied in a different order are reordered to FEATURE_COLUMNS."""
+    shuffled = preprocessed_data["X_test"].head(5)[list(reversed(FEATURE_COLUMNS))].copy()
+    result = predict_batch(feature_matrix=shuffled)
+    assert list(result["feature_matrix"].columns) == FEATURE_COLUMNS
+    assert result["model_metadata"]["feature_names"] == FEATURE_COLUMNS
+
+
+def test_predict_batch_feature_matrix_is_dataframe_and_round_trips():
+    """feature_matrix stays a DataFrame in-process; list[dict] round-trips it for the API."""
+    result = predict_batch()
+    fm = result["feature_matrix"]
+    assert isinstance(fm, pd.DataFrame)
+
+    records = fm.to_dict(orient="records")
+    assert isinstance(records, list) and isinstance(records[0], dict)
+    restored = pd.DataFrame(records)
+    pd.testing.assert_frame_equal(restored, fm.reset_index(drop=True))
+
+
 def test_predict_batch_with_custom_feature_matrix(preprocessed_data):
     """Verify predict_batch() handles a custom DataFrame properly."""
     custom_X = preprocessed_data["X_test"].head(10).copy()
@@ -362,6 +455,80 @@ def test_public_api_exports():
     """Verify public exports from app.models work as expected."""
     import app.models as models
 
-    expected_exports = ["train", "predict_batch", "evaluate", "save", "load"]
+    expected_exports = [
+        "train",
+        "predict_batch",
+        "evaluate",
+        "save",
+        "load",
+        "load_dataset",
+        "preprocess",
+        "split_data",
+        # RAW feature schema + label semantics, exposed for downstream modules
+        "FEATURE_COLUMNS",
+        "CATEGORICAL_FEATURES",
+        "NUMERIC_FEATURES",
+        "LABEL_GOOD",
+        "LABEL_BAD",
+        "POSITIVE_CLASS",
+        "FAVORABLE_OUTCOME_LABEL",
+        "LABEL_SEMANTICS",
+        "MODEL_TYPE",
+        "MODEL_VERSION",
+    ]
     for export in expected_exports:
         assert hasattr(models, export), f"app.models is missing export: {export}"
+
+    assert models.LABEL_GOOD == 0
+    assert models.LABEL_BAD == 1
+    assert models.POSITIVE_CLASS == 1
+    assert models.FAVORABLE_OUTCOME_LABEL == 0
+    assert models.FEATURE_COLUMNS[8] == "personal_status_and_sex"
+
+
+# =====================================================================
+# 8. Reproducibility + Serialization Fixture Consistency
+# =====================================================================
+
+
+def test_train_end_to_end_is_reproducible(tmp_path):
+    """Two independent train() runs with the same seed produce identical predictions."""
+    p1 = str(tmp_path / "m1.joblib")
+    p2 = str(tmp_path / "m2.joblib")
+    train(dataset_path=DEFAULT_DATASET_PATH, save_path=p1, random_state=42)
+    train(dataset_path=DEFAULT_DATASET_PATH, save_path=p2, random_state=42)
+
+    m1, m2 = load(p1), load(p2)
+    df = load_dataset(DEFAULT_DATASET_PATH)
+    X, _, _, _ = preprocess(df)
+
+    assert (m1.predict(X) == m2.predict(X)).all()
+    assert (m1.predict_proba(X) == m2.predict_proba(X)).all()
+
+
+def test_serialized_output_fixture_matches_current_contract():
+    """The tests/models fixture mirrors the serialized predict_batch() contract."""
+    import json
+
+    fixture_path = os.path.join(
+        os.path.dirname(__file__), "fixtures", "sample_model_output.json"
+    )
+    with open(fixture_path, encoding="utf-8") as fh:
+        fixture = json.load(fh)
+
+    assert set(fixture.keys()) == {
+        "predictions",
+        "probabilities",
+        "feature_matrix",
+        "model_metadata",
+        "is_mock",
+    }
+    # feature_matrix is the serialized list[dict] form (API boundary shape)
+    assert isinstance(fixture["feature_matrix"], list)
+    assert set(fixture["feature_matrix"][0].keys()) == set(FEATURE_COLUMNS)
+
+    meta = fixture["model_metadata"]
+    assert meta["model_type"] == MODEL_TYPE
+    assert meta["feature_names"] == FEATURE_COLUMNS
+    assert meta["label_semantics"]["positive_class"] == 1
+    assert meta["label_semantics"]["favorable_outcome_label"] == 0

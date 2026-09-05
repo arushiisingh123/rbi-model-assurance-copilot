@@ -34,6 +34,41 @@ The shared contract most other modules depend on.
 Phase 0 stub: `predict_batch()` returns this shape with hardcoded values
 and `is_mock: True`. Also stubbed: `train()`, `save()`, `load()`.
 
+### Phase 1 real implementation (stabilized 2026-09-04)
+
+`predict_batch()` returns real values (`is_mock: False`) from an sklearn
+`Pipeline` (LogisticRegression) trained on the UCI German Credit dataset.
+Concrete values for the illustrative fields above:
+
+- `model_metadata.model_type` = `"logistic_regression"`, `version` =
+  `"0.1.0"`, `trained_on` = `"data/german_credit/german_credit.csv"`.
+- `model_metadata.feature_names` is the **20 RAW** German-Credit features
+  in `app.models.preprocessing.FEATURE_COLUMNS` order. The pipeline
+  one-hot expands categoricals internally; those expanded columns are
+  **not** part of the input contract and are never returned here.
+- Attribute 9 is named `personal_status_and_sex` (matches CLAUDE.md and
+  `app/fairness/`), kept as a raw combined marital-status + sex field.
+- `feature_matrix` stays a `pandas.DataFrame` in-process; the API layer
+  serializes it to `list[dict]` (see the API section below).
+
+**Additive field — `model_metadata.label_semantics`** (new optional key,
+low-friction additive change per "Changing an interface" below):
+
+```python
+"label_semantics": {
+    "0": "GOOD - low credit risk",
+    "1": "BAD - high credit risk / likely default",
+    "positive_class": 1,
+    "probabilities_represent": "P(class == 1) = P(BAD / high credit risk)",
+    "favorable_outcome_label": 0,
+}
+```
+
+`predictions` use `0` = GOOD, `1` = BAD; `probabilities[i]` is
+`P(class == 1)` = `P(BAD)`. The **favorable** credit outcome is label `0`,
+so consumers (e.g. `fairness_report(..., favorable_label=...)`) must not
+assume the favorable label is `1`.
+
 ### Model artifact access (Phase 1 clarification, approved 2026-08-25)
 
 The shared dict does **not** carry the trained model object itself — only

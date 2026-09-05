@@ -25,11 +25,18 @@ def build_drift_scenario(
     This transformation is purely deterministic and does not use random sampling,
     ensuring exact reproducibility. The input DataFrame is never mutated.
 
+    The dataset returned as ``current`` is SYNTHETIC. It demonstrates that the
+    PSI/KS calculation detects a known, deliberately introduced shift. It is not
+    observed drift and must never be presented as real-world model or portfolio
+    evidence.
+
     Args:
         reference: Reference baseline DataFrame.
         shift_features: Column name (str) or list of column names to shift.
         shift_amount: Multiplier for feature standard deviation to offset.
-        seed: Seed parameter preserved for deterministic interface compatibility.
+        seed: Accepted but UNUSED -- the transformation draws no random numbers,
+            so output is reproducible without it. Retained only so the signature
+            stays stable for callers that already pass it.
 
     Returns:
         Tuple of (reference_copy, current_data) as DataFrames.

@@ -1,26 +1,35 @@
 """Comprehensive tests for app.drift.drift.
 
-Verifies PSI and KS calculation, status classification against authoritative thresholds,
-MAX aggregation across features, independent PSI/KS maxima, edge cases (empty, constant,
-no common numeric columns, NaNs), schema conformance, and re-export.
+Verifies PSI and KS calculation, status classification against the authoritative
+central thresholds, MAX aggregation across features, feature-eligibility rules
+(numeric only, non-boolean, present in both frames, finite values only), edge
+cases that must return PENDING rather than an invented FAIL, and schema
+conformance.
 """
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
+
 from app.config.thresholds import (
     STATUS_FAIL,
     STATUS_PASS,
     STATUS_PENDING,
     STATUS_WARNING,
     VALID_STATUSES,
+    classify_psi,
 )
 from app.drift import drift_report
 from app.drift.scenario import build_drift_scenario
 
 
-def test_drift_report_identical_frames():
-    # Identical reference and current data -> PSI 0.0, KS 0.0, status PASS
-    np.random.seed(42)
+# --------------------------------------------------------------------------
+# Core calculation
+# --------------------------------------------------------------------------
+
+
+def test_identical_frames_report_no_drift():
     vals = np.linspace(10, 100, 100)
     ref = pd.DataFrame({"income": vals, "age": vals / 2})
     cur = pd.DataFrame({"income": vals, "age": vals / 2})
@@ -34,47 +43,37 @@ def test_drift_report_identical_frames():
     assert res["features_evaluated"] == ["income", "age"]
 
 
-def test_drift_report_known_fixture_hand_computed_ks():
-    # ref = [1.0, 2.0, 3.0, 4.0]
-    # cur = [3.0, 4.0, 5.0, 6.0]
-    # ECDF_ref: 1->0.25, 2->0.5, 3->0.75, 4->1.0, 5->1.0, 6->1.0
-    # ECDF_cur: 1->0.0, 2->0.0, 3->0.25, 4->0.5, 5->0.75, 6->1.0
-    # |ECDF_ref - ECDF_cur| max is at x=2, 3, 4: |0.5 - 0.0| = 0.50
+def test_known_fixture_hand_computed_ks():
+    # ECDF_ref: 1->0.25, 2->0.5, 3->0.75, 4->1.0
+    # ECDF_cur: 1->0.0,  2->0.0, 3->0.25, 4->0.5
+    # max |diff| = 0.50 at x = 2
     ref = pd.DataFrame({"val": [1.0, 2.0, 3.0, 4.0]})
     cur = pd.DataFrame({"val": [3.0, 4.0, 5.0, 6.0]})
 
-    res = drift_report(ref, cur)
-    assert res["ks_statistic"] == 0.50
+    assert drift_report(ref, cur)["ks_statistic"] == 0.50
 
 
-def test_drift_report_psi_status_boundaries():
-    # Generate reference distribution
-    np.random.seed(42)
-    base = np.random.normal(100, 15, 1000)
-    ref = pd.DataFrame({"metric": base})
+def test_psi_status_boundaries_via_scenario():
+    rng = np.random.default_rng(42)
+    ref = pd.DataFrame({"metric": rng.normal(100, 15, 1000)})
 
-    # 1. No shift -> PASS
     _, cur_pass = build_drift_scenario(ref, shift_features="metric", shift_amount=0.0)
     res_pass = drift_report(ref, cur_pass)
     assert res_pass["psi"] < 0.10
     assert res_pass["status"] == STATUS_PASS
 
-    # 2. Moderate shift -> WARNING
     _, cur_warn = build_drift_scenario(ref, shift_features="metric", shift_amount=0.35)
     res_warn = drift_report(ref, cur_warn)
     assert 0.10 <= res_warn["psi"] <= 0.25
     assert res_warn["status"] == STATUS_WARNING
 
-    # 3. Severe shift -> FAIL
     _, cur_fail = build_drift_scenario(ref, shift_features="metric", shift_amount=1.5)
     res_fail = drift_report(ref, cur_fail)
     assert res_fail["psi"] > 0.25
     assert res_fail["status"] == STATUS_FAIL
 
 
-def test_drift_report_max_aggregation_drives_status():
-    # Feature 1 is stable (PSI 0.0), Feature 2 is heavily drifted (PSI > 0.25)
-    # The aggregated PSI must be the MAX, driving status to FAIL
+def test_max_aggregation_drives_status():
     vals = np.linspace(10, 100, 500)
     ref = pd.DataFrame({"stable_feature": vals, "drifted_feature": vals})
     cur = pd.DataFrame({"stable_feature": vals, "drifted_feature": vals + 200.0})
@@ -84,86 +83,300 @@ def test_drift_report_max_aggregation_drives_status():
     assert res["status"] == STATUS_FAIL
 
 
-def test_drift_report_independent_maxima():
-    # Construct case where feature A has higher PSI and feature B has higher KS
-    # Feature A: distributed across bins causing high PSI
-    # Feature B: small localized shift causing KS jump
-    np.random.seed(123)
-    ref_a = np.random.normal(50, 10, 500)
-    cur_a = np.random.normal(65, 10, 500)  # Large mean shift -> high PSI
-
-    ref_b = np.concatenate([np.repeat(10.0, 250), np.repeat(20.0, 250)])
-    cur_b = np.concatenate([np.repeat(10.0, 50), np.repeat(20.0, 450)])  # Large jump at step -> KS = 0.40
-
-    ref = pd.DataFrame({"feat_a": ref_a, "feat_b": ref_b})
-    cur = pd.DataFrame({"feat_a": cur_a, "feat_b": cur_b})
+def test_multiple_features_all_listed():
+    rng = np.random.default_rng(123)
+    ref = pd.DataFrame(
+        {
+            "a": rng.normal(50, 10, 300),
+            "b": rng.normal(0, 1, 300),
+            "c": rng.normal(-5, 2, 300),
+        }
+    )
+    cur = pd.DataFrame(
+        {
+            "a": rng.normal(65, 10, 300),
+            "b": rng.normal(0, 1, 300),
+            "c": rng.normal(-5, 2, 300),
+        }
+    )
 
     res = drift_report(ref, cur)
+    assert res["features_evaluated"] == ["a", "b", "c"]
     assert res["psi"] > 0.0
     assert res["ks_statistic"] > 0.0
-    assert set(res["features_evaluated"]) == {"feat_a", "feat_b"}
 
 
-def test_drift_report_ks_never_affects_status():
-    # Even if KS is large (e.g. 0.50), if PSI is small (< 0.10), status is PASS
-    # Note: 4 points fixture has KS = 0.50, but let's check its PSI status is driven by classify_psi
+def test_small_dataset_does_not_crash():
+    ref = pd.DataFrame({"v": [1.0, 2.0]})
+    cur = pd.DataFrame({"v": [3.0, 4.0]})
+
+    res = drift_report(ref, cur)
+    assert res["status"] in VALID_STATUSES
+    assert res["features_evaluated"] == ["v"]
+
+
+# --------------------------------------------------------------------------
+# Status is driven by PSI only, and always matches the reported PSI
+# --------------------------------------------------------------------------
+
+
+def test_ks_never_affects_status():
+    # KS is 0.50 here, but the status must follow PSI alone.
     ref = pd.DataFrame({"val": [1.0, 2.0, 3.0, 4.0]})
     cur = pd.DataFrame({"val": [3.0, 4.0, 5.0, 6.0]})
     res = drift_report(ref, cur)
-    # Status should match classify_psi(res["psi"])
-    from app.config.thresholds import classify_psi
+
+    assert res["ks_statistic"] == 0.50
     assert res["status"] == classify_psi(res["psi"])
 
 
-def test_drift_report_edge_cases():
-    # 1. Non-DataFrame / None inputs
+def test_status_always_matches_reported_psi():
+    """Regression: the reported PSI and the status must never disagree.
+
+    The status is derived from the rounded value that is actually reported, so
+    a PSI printed as 0.1 can never carry a PASS status (0.10 is WARNING).
+    """
+    rng = np.random.default_rng(11)
+    ref = pd.DataFrame({"metric": rng.normal(100, 15, 800)})
+
+    for shift in [0.0, 0.05, 0.1, 0.2, 0.3, 0.35, 0.5, 0.8, 1.2, 2.0]:
+        _, cur = build_drift_scenario(ref, shift_features="metric", shift_amount=shift)
+        res = drift_report(ref, cur)
+        assert res["status"] == classify_psi(res["psi"]), f"disagreed at shift={shift}"
+
+
+# --------------------------------------------------------------------------
+# Feature eligibility
+# --------------------------------------------------------------------------
+
+
+def test_categorical_columns_are_excluded():
+    ref = pd.DataFrame({"num": [1.0, 2.0, 3.0], "cat": ["a", "b", "c"]})
+    cur = pd.DataFrame({"num": [1.0, 2.0, 3.0], "cat": ["a", "b", "c"]})
+
+    res = drift_report(ref, cur)
+    assert res["features_evaluated"] == ["num"]
+    assert "cat" not in res["features_evaluated"]
+
+
+def test_boolean_columns_are_excluded():
+    """Booleans are numeric to pandas but semantically categorical."""
+    ref = pd.DataFrame({"num": [1.0, 2.0, 3.0], "flag": [True, False, True]})
+    cur = pd.DataFrame({"num": [1.0, 2.0, 3.0], "flag": [False, False, True]})
+
+    res = drift_report(ref, cur)
+    assert res["features_evaluated"] == ["num"]
+
+
+def test_features_present_in_only_one_frame_are_excluded():
+    ref = pd.DataFrame({"shared": [1.0, 2.0, 3.0], "ref_only": [1.0, 2.0, 3.0]})
+    cur = pd.DataFrame({"shared": [1.0, 2.0, 3.0], "cur_only": [1.0, 2.0, 3.0]})
+
+    res = drift_report(ref, cur)
+    assert res["features_evaluated"] == ["shared"]
+
+
+def test_feature_with_no_usable_values_is_not_listed_as_evaluated():
+    """A column that is all-NaN cannot be evaluated, so it must not be claimed."""
+    ref = pd.DataFrame({"good": [1.0, 2.0, 3.0], "empty": [np.nan, np.nan, np.nan]})
+    cur = pd.DataFrame({"good": [1.0, 2.0, 3.0], "empty": [1.0, 2.0, 3.0]})
+
+    res = drift_report(ref, cur)
+    assert res["features_evaluated"] == ["good"]
+
+
+def test_all_features_unusable_is_pending():
+    ref = pd.DataFrame({"v": [np.nan, np.nan, np.nan]})
+    cur = pd.DataFrame({"v": [1.0, 2.0, 3.0]})
+
+    res = drift_report(ref, cur)
+    assert res["status"] == STATUS_PENDING
+    assert res["features_evaluated"] == []
+
+
+# --------------------------------------------------------------------------
+# Non-finite handling
+# --------------------------------------------------------------------------
+
+
+def test_infinities_are_excluded_not_binned():
+    """Regression: infinities used to corrupt the quantile edges.
+
+    Before the fix, a single +inf produced a PSI of ~2.58 and a spurious FAIL.
+    Dropping the non-finite value must give exactly the same answer as if that
+    row had simply been absent.
+    """
+    ref = pd.DataFrame({"v": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    cur_with_inf = pd.DataFrame({"v": [1.0, 2.0, np.inf, 4.0, 5.0]})
+    cur_without = pd.DataFrame({"v": [1.0, 2.0, 4.0, 5.0]})
+
+    assert drift_report(ref, cur_with_inf) == drift_report(ref, cur_without)
+
+
+def test_infinities_do_not_produce_spurious_fail_or_warnings():
+    """A single infinity in an otherwise stable sample must not fabricate drift.
+
+    Before the fix, np.quantile over the infinity emitted a RuntimeWarning and
+    produced a PSI of ~2.58, reporting FAIL on data that had not drifted.
+    """
+    rng = np.random.default_rng(3)
+    base = rng.normal(100, 15, 500)
+    ref = pd.DataFrame({"v": base})
+
+    contaminated = base.copy()
+    contaminated[0] = np.inf
+    cur = pd.DataFrame({"v": contaminated})
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = drift_report(ref, cur)
+
+    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert not runtime_warnings, f"unexpected RuntimeWarning: {runtime_warnings}"
+    assert res["status"] == STATUS_PASS
+    assert res["psi"] < 0.10
+
+
+def test_negative_infinity_in_reference_is_excluded():
+    ref_with_inf = pd.DataFrame({"v": [-np.inf, 1.0, 2.0, 3.0, 4.0]})
+    ref_without = pd.DataFrame({"v": [1.0, 2.0, 3.0, 4.0]})
+    cur = pd.DataFrame({"v": [1.0, 2.0, 3.0, 4.0]})
+
+    assert drift_report(ref_with_inf, cur) == drift_report(ref_without, cur)
+
+
+def test_nans_dropped_per_feature():
+    ref = pd.DataFrame({"val": [1.0, 2.0, None, 4.0, 5.0]})
+    cur = pd.DataFrame({"val": [None, 2.0, 3.0, 4.0, 5.0]})
+
+    res = drift_report(ref, cur)
+    assert res["status"] in VALID_STATUSES
+    assert res["features_evaluated"] == ["val"]
+
+
+# --------------------------------------------------------------------------
+# Degenerate distributions
+# --------------------------------------------------------------------------
+
+
+def test_constant_feature_reports_zero_psi():
+    df = pd.DataFrame({"const": [5.0, 5.0, 5.0, 5.0]})
+    res = drift_report(df, df)
+
+    assert res["psi"] == 0.0
+    assert res["status"] == STATUS_PASS
+
+
+def test_duplicate_quantile_edges_collapse_and_drift_is_still_detected():
+    """Heavily tied data produces duplicate quantile edges.
+
+    np.unique collapses them (here 11 raw quantiles reduce to 3 edges). The
+    calculation must not error, and a genuine distribution change must still be
+    detected rather than swallowed by the collapsed bins.
+    """
+    ref = pd.DataFrame({"tied": [1.0] * 90 + [2.0] * 10})
+    cur = pd.DataFrame({"tied": [1.0] * 10 + [2.0] * 90})
+
+    res = drift_report(ref, cur)
+
+    assert res["status"] == STATUS_FAIL
+    assert res["psi"] > 0.25
+    assert res["ks_statistic"] == pytest.approx(0.8, abs=1e-4)
+    assert res["features_evaluated"] == ["tied"]
+
+
+def test_all_identical_values_produce_no_drift():
+    """A reference with zero spread has nothing to bin against -> PSI 0.0."""
+    ref = pd.DataFrame({"tied": [7.0] * 50})
+    cur = pd.DataFrame({"tied": [7.0] * 50})
+
+    res = drift_report(ref, cur)
+    assert res["psi"] == 0.0
+    assert res["status"] == STATUS_PASS
+
+
+# --------------------------------------------------------------------------
+# PENDING / validation
+# --------------------------------------------------------------------------
+
+
+def test_invalid_inputs_raise():
     with pytest.raises(ValueError, match="must not be None"):
         drift_report(None, pd.DataFrame({"a": [1]}))
+    with pytest.raises(ValueError, match="must not be None"):
+        drift_report(pd.DataFrame({"a": [1]}), None)
     with pytest.raises(ValueError, match="must be pandas DataFrames"):
         drift_report([1, 2], pd.DataFrame({"a": [1]}))
 
-    # 2. Empty DataFrames -> status PENDING
-    empty_df = pd.DataFrame()
-    res_empty = drift_report(empty_df, empty_df)
-    assert res_empty["status"] == STATUS_PENDING
-    assert res_empty["psi"] == 0.0
-    assert res_empty["ks_statistic"] == 0.0
-    assert res_empty["features_evaluated"] == []
 
-    # 3. No common numeric columns -> status PENDING
-    df1 = pd.DataFrame({"name": ["Alice", "Bob"]})
-    df2 = pd.DataFrame({"name": ["Charlie", "David"]})
-    res_no_num = drift_report(df1, df2)
-    assert res_no_num["status"] == STATUS_PENDING
-    assert res_no_num["features_evaluated"] == []
+def test_empty_frames_are_pending():
+    empty = pd.DataFrame()
+    res = drift_report(empty, empty)
 
-    # 4. Constant feature -> PSI 0.0
-    df_const = pd.DataFrame({"const": [5.0, 5.0, 5.0, 5.0]})
-    res_const = drift_report(df_const, df_const)
-    assert res_const["psi"] == 0.0
-    assert res_const["status"] == STATUS_PASS
-
-    # 5. NaNs dropped per feature
-    ref_nan = pd.DataFrame({"val": [1.0, 2.0, None, 4.0, 5.0]})
-    cur_nan = pd.DataFrame({"val": [None, 2.0, 3.0, 4.0, 5.0]})
-    res_nan = drift_report(ref_nan, cur_nan)
-    assert res_nan["status"] in VALID_STATUSES
-    assert res_nan["features_evaluated"] == ["val"]
+    assert res["status"] == STATUS_PENDING
+    assert res["psi"] == 0.0
+    assert res["ks_statistic"] == 0.0
+    assert res["features_evaluated"] == []
 
 
-def test_drift_report_schema_full_key_set():
+def test_empty_current_frame_is_pending():
+    ref = pd.DataFrame({"v": [1.0, 2.0]})
+    res = drift_report(ref, pd.DataFrame())
+
+    assert res["status"] == STATUS_PENDING
+
+
+def test_no_common_numeric_columns_is_pending():
+    ref = pd.DataFrame({"name": ["Alice", "Bob"]})
+    cur = pd.DataFrame({"name": ["Charlie", "David"]})
+
+    res = drift_report(ref, cur)
+    assert res["status"] == STATUS_PENDING
+    assert res["features_evaluated"] == []
+
+
+def test_missing_data_is_never_reported_as_fail():
+    """Absent data is not evidence of drift."""
+    for ref, cur in [
+        (pd.DataFrame(), pd.DataFrame()),
+        (pd.DataFrame({"a": ["x"]}), pd.DataFrame({"a": ["y"]})),
+        (pd.DataFrame({"v": [np.nan]}), pd.DataFrame({"v": [1.0]})),
+    ]:
+        assert drift_report(ref, cur)["status"] != STATUS_FAIL
+
+
+# --------------------------------------------------------------------------
+# Output contract
+# --------------------------------------------------------------------------
+
+
+def test_schema_full_key_set():
     ref = pd.DataFrame({"income": [100.0, 200.0, 300.0]})
     cur = pd.DataFrame({"income": [110.0, 210.0, 310.0]})
     res = drift_report(ref, cur)
 
-    expected_keys = {
+    assert set(res.keys()) == {
         "features_evaluated",
         "psi",
         "ks_statistic",
         "status",
         "is_mock",
     }
-    assert set(res.keys()) == expected_keys
     assert res["is_mock"] is False
     assert res["status"] in VALID_STATUSES
     assert isinstance(res["features_evaluated"], list)
+
+
+def test_synthetic_scenario_drift_is_detected_end_to_end():
+    """The synthetic scenario exists to prove detection works.
+
+    This is demonstrated capability, not observed production drift.
+    """
+    rng = np.random.default_rng(5)
+    ref = pd.DataFrame({"credit_amount": rng.normal(3000, 800, 600)})
+    _, cur = build_drift_scenario(ref, shift_features="credit_amount", shift_amount=1.5)
+
+    res = drift_report(ref, cur)
+    assert res["psi"] > 0.25
+    assert res["status"] == STATUS_FAIL
+    assert res["is_mock"] is False

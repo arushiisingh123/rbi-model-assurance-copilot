@@ -147,7 +147,7 @@ Phase 0 is complete only when all of the following hold:
 3. python -c "import app.models, app.explainability, app.fairness, app.drift, app.rbi, app.rag, app.compliance, app.api" succeeds.
 4. pytest runs and all smoke tests pass.
 5. uvicorn app.api.main:app starts; health/mock endpoints respond.
-6. streamlit run dashboard/app.py starts and displays mock data.
+6. streamlit run dashboard/dashboard_app.py starts and displays mock data. (Renamed from dashboard/app.py during Phase 1; see docs/development-phases.md.)
 7. Nidhi's RAG smoke test runs end-to-end and returns real, attributable RBI text for a test query.
 8. docs/ contains at minimum architecture notes and the decisions log.
 9. All five members have cloned, installed, and run the app locally without help.

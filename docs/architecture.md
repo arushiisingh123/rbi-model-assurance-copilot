@@ -38,25 +38,48 @@ Intended data flow (target shape, reached incrementally across phases):
                   API / Dashboard
 ```
 
-## 2. Current state (Phase 1 — module implementation in progress)
+## 2. Current state (Phase 1 modules implemented — not yet wired together)
 
-Phase 0 closed on 2026-08-27 (see `docs/decisions.md`). Phase 1 replaces
-each stub with real logic one module at a time, so this section changes
-as each owner's pull request lands. As of the Phase 0 close, and until
-those PRs merge, the description below still holds.
+Phase 0 closed on 2026-08-27 (see `docs/decisions.md`). All five owners'
+Phase 1 work has since been implemented and merged into `main`: every
+module that was a stub now contains real logic.
 
-Every module is a **stub**: functions exist with the agreed
-input/output shape, but return hardcoded or fake values (`is_mock: True`).
-No real model, SHAP/LIME, fairness/drift calculation, or rule engine logic
-exists yet. The one exception is Nidhi's RAG smoke test, which is a real
-(but scope-limited) chunk → embed → index → retrieve → attribute pipeline
-running against a clearly labeled placeholder document — see
-`docs/decisions.md` and `data/rbi_sources/PLACEHOLDER_NOT_REAL_RBI_TEXT.txt`.
+A formal Phase 1 checkpoint sign-off is **not** recorded in
+`docs/decisions.md` at the time of writing, so this section describes the
+merged state of the code rather than an approved phase transition.
 
-The FastAPI app (`app/api/main.py`) exposes a health check and one
-hardcoded mock-data endpoint. The Streamlit dashboard
-(`dashboard/dashboard_app.py`) calls that endpoint and renders the result,
-with a built-in fallback if the API isn't running.
+**The modules are real; the system is not yet integrated.** Each module
+computes genuine results behind the interfaces in
+`docs/module-interfaces.md`, but nothing orchestrates them end to end.
+Cross-module wiring and `run_assurance.py` are **Phase 2** work and do not
+exist yet.
+
+Per-module state of the merged Phase 1 code:
+
+- **Model** (Namitha) — real scikit-learn `Pipeline` (one-hot + scaling →
+  `LogisticRegression`) trained on the UCI German Credit dataset, with
+  real `train`/`evaluate`/`predict_batch`/`save`/`load`.
+- **Explainability** (Manas) — real SHAP and LIME, computed against the
+  real model loaded via `app.models.model.load()`.
+- **Fairness / Drift** (Arushi) — real demographic parity, disparate
+  impact, PSI and KS calculations. The drift *scenario generator* produces
+  a deliberately synthetic shifted dataset, clearly labelled as such, so
+  detection can be demonstrated; it is not observed population drift.
+- **RBI rules / Compliance** (Nidhi) — a real rule engine running over
+  **illustrative sample rules**. Those rules are not verified against
+  binding RBI regulation, so compliance output still carries
+  `is_mock: True` (see `app/rbi/metadata.py`).
+- **RAG** (Nidhi) — unchanged from Phase 0: a real but scope-limited
+  chunk → embed → index → retrieve → attribute smoke test over one real
+  RBI circular (`data/rbi_sources/`). The full pipeline is Phase 3.
+- **API / Dashboard** (Khushi) — real, schema-validated FastAPI endpoints
+  and a real multi-tab Streamlit UI. Both are **mock-backed by design in
+  Phase 1**: `app/api/main.py` serves fixtures from `app/api/mock_data.py`
+  rather than calling the analytical modules. Connecting them is Phase 2.
+
+The Streamlit dashboard (`dashboard/dashboard_app.py`) calls the API and
+falls back to built-in mock data when the API is not running, showing
+which source it used.
 
 ## 3. Repository structure (actual)
 
@@ -64,19 +87,22 @@ with a built-in fallback if the API isn't running.
 rbi-model-assurance-copilot/
 ├── app/
 │   ├── __init__.py
-│   ├── models/            # Namitha — stub train/predict_batch/save/load
-│   ├── explainability/    # Manas — stub explain()
-│   ├── fairness/          # Arushi — stub fairness_report()
-│   ├── drift/              # Arushi — stub drift_report()
-│   ├── rbi/               # Nidhi — "what does the RBI rule say?": sample rules (app/rbi/rules/)
-│   ├── rag/               # Nidhi — RAG smoke test (app/rag/smoke_test.py)
-│   ├── compliance/        # Nidhi — "how do findings evaluate against the rule?": stub evaluate_compliance()
-│   └── api/                # Khushi — FastAPI app (app/api/main.py)
+│   ├── models/            # Namitha — real train/evaluate/predict_batch/save/load
+│   ├── explainability/    # Manas — real explain() (SHAP + LIME on the real model)
+│   ├── fairness/          # Arushi — real fairness_report()
+│   ├── drift/              # Arushi — real drift_report() + synthetic scenario generator
+│   ├── config/            # shared — authoritative fairness/drift thresholds
+│   ├── rbi/               # Nidhi — "what does the RBI rule say?": illustrative sample rules (app/rbi/rules/)
+│   ├── rag/               # Nidhi — RAG smoke test (app/rag/smoke_test.py), Phase 0 scope
+│   ├── compliance/        # Nidhi — "how do findings evaluate against the rule?": real evaluate_compliance()
+│   └── api/                # Khushi — FastAPI app (app/api/main.py), mock-backed in Phase 1
 ├── dashboard/
-│   └── app.py               # Khushi — Streamlit skeleton
+│   ├── dashboard_app.py     # Khushi — Streamlit UI (entry point)
+│   └── api_client.py        # Khushi — API calls with mock fallback
 ├── data/
 │   ├── sample/               # tiny synthetic dataset (credit_sample.csv)
-│   └── rbi_sources/           # placeholder doc for the RAG smoke test
+│   ├── german_credit/         # UCI German Credit dataset (model training)
+│   └── rbi_sources/           # one real RBI circular, for the RAG smoke test
 ├── tests/                    # mirrors app/ structure, one test module each
 ├── docs/
 │   ├── TASK.md               # detailed project plan (source of truth for phases/interfaces detail)

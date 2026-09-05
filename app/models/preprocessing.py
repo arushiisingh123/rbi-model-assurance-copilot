@@ -2,6 +2,30 @@
 
 Implements Phase 1 data ingestion, schema validation, train/test splitting,
 and target polarity mapping for the UCI Statlog (German Credit Data) dataset.
+
+Authoritative RAW feature schema
+--------------------------------
+``FEATURE_COLUMNS`` is the single authoritative list of the 20 RAW input
+features the credit model expects, in the exact order the model is trained
+and scored on. ``CATEGORICAL_FEATURES`` / ``NUMERIC_FEATURES`` split those
+20 columns by type. Downstream modules (explainability, fairness, drift,
+API) read the model's expected raw inputs from
+``model_metadata["feature_names"]`` (see ``app/models/model.py``), which is
+derived from this list -- they should never need to guess column names or
+inspect the internally one-hot-expanded pipeline columns.
+
+Attribute 9 is named ``personal_status_and_sex`` here, matching CLAUDE.md
+and the fairness module. It is a combined marital-status + sex categorical
+field (categories ``A91``-``A95``); it is NOT a standalone gender/sex
+column and is preserved raw for downstream fairness grouping.
+
+Target label semantics (project-agreed, do not reverse)
+------------------------------------------------------
+- ``0`` = GOOD  (low credit risk)
+- ``1`` = BAD   (high credit risk / likely default)  -- the positive class
+
+Raw UCI ``credit_risk`` uses ``1`` = Good, ``2`` = Bad; ``preprocess()``
+maps ``1 -> 0`` and ``2 -> 1``.
 """
 
 from __future__ import annotations
@@ -13,6 +37,15 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 DEFAULT_DATASET_PATH = "data/german_credit/german_credit.csv"
+
+# Project-agreed target label semantics for the credit-risk model.
+# 0 = GOOD (low risk), 1 = BAD (high risk / default). 1 is the positive class,
+# so P(class 1) = P(BAD). The favorable credit outcome is GOOD, i.e. label 0 --
+# downstream fairness/compliance must not assume the favorable label is 1.
+LABEL_GOOD = 0
+LABEL_BAD = 1
+POSITIVE_CLASS = LABEL_BAD
+FAVORABLE_OUTCOME_LABEL = LABEL_GOOD
 
 # 20 input features (13 categorical, 7 numeric) matching the approved UCI dataset
 CATEGORICAL_FEATURES: List[str] = [
@@ -139,8 +172,11 @@ def preprocess(
     - Original raw `1` (Good Credit) -> `0` (Good credit / low risk)
     - Original raw `2` (Bad Credit)  -> `1` (Bad credit / high risk)
 
-    Note: The raw `personal_status_and_sex` column is preserved unmodified in `X`.
-    Fairness grouping belongs strictly to downstream fairness modules.
+    The positive class is `1` (BAD / high risk), so downstream probabilities
+    `P(class 1)` mean `P(BAD)`. The favorable credit outcome is `0` (GOOD).
+
+    Note: The raw `personal_status_and_sex` column is preserved unmodified in
+    `X`. Fairness grouping belongs strictly to downstream fairness modules.
 
     Parameters
     ----------
@@ -152,6 +188,12 @@ def preprocess(
     Tuple[pd.DataFrame, Optional[pd.Series], List[str], List[str]]
         (X, y, categorical_column_names, numeric_column_names)
     """
+    missing_features = [col for col in FEATURE_COLUMNS if col not in df.columns]
+    if missing_features:
+        raise ValueError(
+            f"Input DataFrame is missing required feature columns: {missing_features}"
+        )
+
     if TARGET_COLUMN in df.columns:
         X = df[FEATURE_COLUMNS].copy()
         raw_y = df[TARGET_COLUMN].copy()
@@ -168,12 +210,7 @@ def preprocess(
                 "Expected original {1, 2} or mapped {0, 1}."
             )
     else:
-        # Prediction mode with only features provided
-        missing_features = [col for col in FEATURE_COLUMNS if col not in df.columns]
-        if missing_features:
-            raise ValueError(
-                f"Input DataFrame is missing required feature columns: {missing_features}"
-            )
+        # Prediction mode: only features provided, no target column.
         X = df[FEATURE_COLUMNS].copy()
         y = None
 

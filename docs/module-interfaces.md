@@ -34,6 +34,41 @@ The shared contract most other modules depend on.
 Phase 0 stub: `predict_batch()` returns this shape with hardcoded values
 and `is_mock: True`. Also stubbed: `train()`, `save()`, `load()`.
 
+### Phase 1 real implementation (stabilized 2026-09-04)
+
+`predict_batch()` returns real values (`is_mock: False`) from an sklearn
+`Pipeline` (LogisticRegression) trained on the UCI German Credit dataset.
+Concrete values for the illustrative fields above:
+
+- `model_metadata.model_type` = `"logistic_regression"`, `version` =
+  `"0.1.0"`, `trained_on` = `"data/german_credit/german_credit.csv"`.
+- `model_metadata.feature_names` is the **20 RAW** German-Credit features
+  in `app.models.preprocessing.FEATURE_COLUMNS` order. The pipeline
+  one-hot expands categoricals internally; those expanded columns are
+  **not** part of the input contract and are never returned here.
+- Attribute 9 is named `personal_status_and_sex` (matches CLAUDE.md and
+  `app/fairness/`), kept as a raw combined marital-status + sex field.
+- `feature_matrix` stays a `pandas.DataFrame` in-process; the API layer
+  serializes it to `list[dict]` (see the API section below).
+
+**Additive field — `model_metadata.label_semantics`** (new optional key,
+low-friction additive change per "Changing an interface" below):
+
+```python
+"label_semantics": {
+    "0": "GOOD - low credit risk",
+    "1": "BAD - high credit risk / likely default",
+    "positive_class": 1,
+    "probabilities_represent": "P(class == 1) = P(BAD / high credit risk)",
+    "favorable_outcome_label": 0,
+}
+```
+
+`predictions` use `0` = GOOD, `1` = BAD; `probabilities[i]` is
+`P(class == 1)` = `P(BAD)`. The **favorable** credit outcome is label `0`,
+so consumers (e.g. `fairness_report(..., favorable_label=...)`) must not
+assume the favorable label is `1`.
+
 ### Model artifact access (Phase 1 clarification, approved 2026-08-25)
 
 The shared dict does **not** carry the trained model object itself — only
@@ -59,14 +94,64 @@ it. Implementing the real `save()`/`load()` persistence and wiring
 ```python
 {
     "method": "shap",
-    "per_instance": [{"row_index": 0, "contributions": {"income": 0.31, ...}}, ...],
-    "global_importance": {"income": 0.42, ...},
+    "per_instance": [{"row_index": 0, "contributions": {"credit_amount": 0.31, ...}}, ...],
+    "global_importance": {"credit_amount": 0.42, ...},
     "is_mock": False
 }
 ```
 
-Phase 0 stub: `explain()` returns this shape with hardcoded values and
-`is_mock: True`.
+**Output shape unchanged** since sign-off. The notes below describe what
+now fills it; no key was added, removed, or renamed.
+
+### Phase 1 status (real model wiring, 2026-09-04)
+
+`explain(model_output=None, method="shap"|"lime")` explains the **real**
+trained pipeline returned by `app.models.model.load()`. There is no dummy
+model in this path, so `is_mock: False` means real algorithm, real model,
+real data. The module never trains — if the artifact is missing, `load()`
+raises with instructions to run `python -m app.models.train`.
+
+**Feature names are always the 20 RAW German Credit features**
+(`app/models/preprocessing.py` `FEATURE_COLUMNS`). The pipeline's
+preprocessing expands those into 61 transformed columns internally, but
+transformed names (`cat__…`, `num__…`) are **never** exposed. SHAP values
+are computed in the transformed space, where the classifier is linear and
+SHAP is exact, then summed back per source raw feature — an exact
+aggregation, since SHAP values are additive.
+
+**`model_output` is a compatibility input, not the source of the
+explanation.** Only `feature_matrix` and `model_metadata.feature_names`
+are read, and only to select *which rows* to explain. `predictions`,
+`probabilities`, and `model_metadata.model_type` are ignored — the loaded
+pipeline supplies all of those itself. `feature_matrix` may be a
+`DataFrame` **or** a list of row records (the API's HTTP form). Any schema
+other than the exact 20 raw features raises `ValueError`. When
+`model_output` is None, a sample of the held-out test split is explained.
+
+**Scale and ranking — SHAP and LIME are not interchangeable.** SHAP
+contributions are on the **log-odds** scale and are exactly additive
+(`sum(contributions) + expected_value == decision_function(x)`). LIME
+contributions are on the **predicted-probability** scale and are local
+surrogate weights. Two separate cautions follow:
+
+1. **Magnitudes are not comparable.** Never plot the two on a shared axis,
+   and never average, subtract, or otherwise combine them.
+2. **Rankings can also diverge.** Measured on the current model, the two
+   methods' global-importance rank correlation is only about **0.5** — they
+   agree loosely, not closely. Treat them as two independent views. A
+   feature ranking highly under *both* is **not** thereby corroborated: the
+   methods answer different questions (exact additive attribution vs. local
+   surrogate fit), so agreement is informative but never confirmatory, and
+   disagreement is expected rather than a defect. This matters for any
+   dashboard or report that shows both.
+
+**Unseen categorical values behave differently per method.** The model's
+OneHotEncoder uses `handle_unknown='ignore'`, so SHAP can explain a row
+containing a category the model never saw. LIME raises `ValueError` for
+that row instead: its raw-feature encoding has no integer code for an
+unseen value, and substituting a known category or reporting a
+contribution anyway would describe a row the surrogate never represented.
+Use `method="shap"` for rows with out-of-vocabulary categories.
 
 ## Arushi's output — `app/fairness/fairness.py` + `app/drift/drift.py`
 

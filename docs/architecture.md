@@ -55,8 +55,8 @@ running against a clearly labeled placeholder document — see
 
 The FastAPI app (`app/api/main.py`) exposes a health check and one
 hardcoded mock-data endpoint. The Streamlit dashboard
-(`dashboard/app.py`) calls that endpoint and renders the result, with a
-built-in fallback if the API isn't running.
+(`dashboard/dashboard_app.py`) calls that endpoint and renders the result,
+with a built-in fallback if the API isn't running.
 
 ## 3. Repository structure (actual)
 

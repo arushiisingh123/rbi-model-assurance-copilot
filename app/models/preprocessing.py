@@ -129,6 +129,10 @@ def load_dataset(path: str = DEFAULT_DATASET_PATH) -> pd.DataFrame:
 
     df = pd.read_csv(path)
 
+    # Normalize Attribute 9 to the project's canonical name.
+    if "personal_status_sex" in df.columns:
+        df = df.rename(columns={"personal_status_sex": "personal_status_and_sex"})
+
     # Validate required feature columns
     missing_features = [col for col in FEATURE_COLUMNS if col not in df.columns]
     if missing_features:

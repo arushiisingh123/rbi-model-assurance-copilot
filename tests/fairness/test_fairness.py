@@ -102,7 +102,7 @@ def test_real_dataset_polarity_regression():
     models = pytest.importorskip("app.models.preprocessing")
     df = models.load_dataset(str(GERMAN_CREDIT_CSV))
     X, y, _, _ = models.preprocess(df)
-    sens = X["personal_status_sex"]
+    sens = df["personal_status_and_sex"]
 
     good_favourable = fairness_report(y, sens, favorable_label=0)
     bad_favourable = fairness_report(y, sens, favorable_label=1)
@@ -353,14 +353,14 @@ def test_gender_and_sex_names_are_rejected():
 def test_raw_attribute_9_categories_are_used_as_is():
     """No codebook remapping: A91..A94 are four distinct groups."""
     sens = pd.Series(
-        ["A91", "A92", "A93", "A94"] * 5, name="personal_status_sex"
+        ["A91", "A92", "A93", "A94"] * 5, name="personal_status_and_sex"
     )
     preds = [1, 0, 1, 0] * 5
     res = fairness_report(preds, sens, favorable_label=1)
 
     # A91/A93 always favourable, A92/A94 never -> ratio 0.0
     assert res["disparate_impact_ratio"] == 0.0
-    assert res["protected_attribute"] == "personal_status_sex"
+    assert res["protected_attribute"] == "personal_status_and_sex"
 
 
 def test_non_series_sensitive_feature_uses_default_name():

@@ -8,22 +8,49 @@ status string.
 It does NOT store rules and it does NOT build the final output dict --
 that orchestration lives in ``app/compliance/compliance.py``.
 
-Status vocabulary (proposed for team sign-off, see docs/rbi-rules.md):
+Status vocabulary -- the project-wide values, imported from
+``app.config.thresholds`` (the single authoritative source; see
+docs/thresholds.md and docs/decisions.md, "Analytical threshold
+authority"). This module does not define its own status strings:
 
-- ``PASS``           the finding value satisfies the rule
-- ``WARNING``        the value is in the rule's borderline band
-- ``FAIL``           the value violates the rule
-- ``NOT_EVALUATED``  the referenced value was missing / not a number
+- ``PASS``      the finding value satisfies the rule
+- ``WARNING``   the value is in the rule's borderline band
+- ``FAIL``      the value violates the rule
+- ``PENDING``   the referenced value was missing, not a number, or (for
+                ``mirror_status``) not a recognised status string
+
+Earlier Phase 1 work used a compliance-local ``NOT_EVALUATED`` value; that
+was never approved (docs/module-interfaces.md and docs/thresholds.md
+already specified ``PENDING`` project-wide) and has been corrected. See
+docs/decisions.md, "Compliance rule engine: threshold authority + status
+vocabulary correction".
+
+Threshold authority: per docs/decisions.md ("Analytical threshold
+authority"), this engine must not re-derive technical severity from a raw
+fairness/drift metric using its own private threshold. For metrics that
+the fairness/drift modules already classify with the canonical thresholds
+in ``app/config/thresholds.py`` (disparate impact ratio, PSI), rules use
+the ``mirror_status`` operator to consume that module's own ``status``
+field directly. For metrics with no defined threshold (demographic parity
+difference, KS statistic -- docs/thresholds.md §4), rules use ``presence``
+only: they confirm the metric was reported, they do not classify it.
 """
+from app.config.thresholds import (
+    STATUS_FAIL,
+    STATUS_PASS,
+    STATUS_PENDING,
+    STATUS_WARNING,
+    VALID_STATUSES,
+)
 from app.rbi.rules import load_rules
 from app.rbi.schema import SUPPORTED_OPERATORS, _is_number
 
-PASS = "PASS"
-WARNING = "WARNING"
-FAIL = "FAIL"
-NOT_EVALUATED = "NOT_EVALUATED"
+PASS = STATUS_PASS
+WARNING = STATUS_WARNING
+FAIL = STATUS_FAIL
+PENDING = STATUS_PENDING
 
-STATUSES = (PASS, WARNING, FAIL, NOT_EVALUATED)
+STATUSES = (PASS, WARNING, FAIL, PENDING)
 
 _EMPTY = (None, "", [], {}, ())
 
@@ -72,11 +99,19 @@ def evaluate_rule(rule: dict, technical_findings) -> str:
     )
 
     if operator == "presence":
-        return PASS if (found and value not in _EMPTY) else NOT_EVALUATED
+        return PASS if (found and value not in _EMPTY) else PENDING
+
+    if operator == "mirror_status":
+        # Consume the technical module's own status verbatim -- do not
+        # re-derive severity here (docs/decisions.md, "Analytical
+        # threshold authority").
+        if found and value in VALID_STATUSES:
+            return value
+        return PENDING
 
     # All remaining operators are numeric comparisons.
     if not found or not _is_number(value):
-        return NOT_EVALUATED
+        return PENDING
 
     if operator == "min_ratio":
         if value < evaluation["fail_below"]:

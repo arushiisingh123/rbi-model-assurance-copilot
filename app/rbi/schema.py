@@ -30,6 +30,26 @@ Supported evaluation operators (all thresholds are plain numbers):
                  config: ``fail_above``, ``warn_above`` (warn_above <= fail_above)
 - ``presence``   the referenced value must simply be present and non-empty.
                  no threshold config.
+- ``mirror_status``  the referenced value must already be one of the
+                 project's canonical status strings (PASS/WARNING/FAIL/
+                 PENDING) and is returned as-is. No threshold config.
+                 Use this -- not ``min_ratio``/``max_value``/``max_abs`` --
+                 for any metric that a fairness/drift module already
+                 classifies using the authoritative thresholds in
+                 ``app/config/thresholds.py``. Per docs/decisions.md
+                 ("Analytical threshold authority"), the compliance module
+                 must not re-derive technical severity from a raw metric
+                 with its own private threshold; it consumes the status the
+                 owning module already computed. The numeric operators
+                 above remain available for metrics that have no other
+                 canonical classifier.
+
+Generic engine capability note: ``min_ratio``/``max_value``/``max_abs`` are
+reusable numeric-banding primitives, not thresholds themselves. A rule only
+becomes a "competing threshold" (forbidden by CLAUDE.md for fairness/drift
+metrics) if it is instantiated with numbers that duplicate or diverge from
+``app/config/thresholds.py``. The shipped Phase 1 rule set (app/rbi/rules)
+does not do this -- see docs/rbi-rules.md.
 """
 import re
 
@@ -48,7 +68,7 @@ REQUIRED_RULE_KEYS = {
 
 RULE_CATEGORIES = {"fairness", "drift", "explainability", "model", "governance"}
 
-SUPPORTED_OPERATORS = {"min_ratio", "max_value", "max_abs", "presence"}
+SUPPORTED_OPERATORS = {"min_ratio", "max_value", "max_abs", "presence", "mirror_status"}
 
 # A dotted path: at least two lowercase segments, e.g. "fairness.psi" or
 # "model.model_metadata.version".

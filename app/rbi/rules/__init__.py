@@ -14,6 +14,23 @@ WHAT THIS IS NOT
       does not cover model fairness, drift, or explainability, so it
       would be wrong to cite it here (CLAUDE.md sections 12, 21).
 
+THRESHOLD AUTHORITY (docs/decisions.md, "Analytical threshold authority")
+    This module does not define, and must not define, any fairness/drift
+    pass-fail threshold. The single authoritative source is
+    ``app/config/thresholds.py`` / docs/thresholds.md, owned by Arushi.
+
+    - RBI-FAIR-01 / RBI-DRIFT-01 use the ``mirror_status`` operator: they
+      consume ``fairness.status`` / ``drift.status`` -- the status the
+      fairness/drift modules already computed from the canonical
+      thresholds -- rather than re-deriving severity from the raw
+      disparate-impact-ratio / PSI value with a rule-local band.
+    - RBI-FAIR-02 (demographic parity difference) and RBI-DRIFT-02 (KS
+      statistic) use ``presence`` only. docs/thresholds.md §4 explicitly
+      defines **no** threshold for either metric -- inventing one here
+      would be exactly the "create a demographic-parity/KS threshold"
+      CLAUDE.md tells this module not to do. They are reported for human
+      review, not classified.
+
 Each rule follows the schema in ``app/rbi/schema.py``.
 """
 from app.rbi.schema import validate_rules
@@ -31,33 +48,43 @@ _RULES: list[dict] = [
             "group (disparate impact ratio should stay high)."
         ),
         "category": "fairness",
-        "technical_finding_ref": "fairness.disparate_impact_ratio",
-        "evaluation": {"operator": "min_ratio", "fail_below": 0.8, "warn_below": 0.9},
+        "technical_finding_ref": "fairness.status",
+        "evaluation": {"operator": "mirror_status"},
         "rbi_source": _ILLUSTRATIVE,
         "clause_reference": None,
         "rationale": (
             "A large gap in favourable-outcome rates between groups is a "
-            "core fairness concern for credit-scoring models. The 0.8 "
-            "placeholder mirrors the commonly cited four-fifths rule of "
-            "thumb; it is not an RBI-specified threshold."
+            "core fairness concern for credit-scoring models. The status "
+            "mirrors app/fairness/fairness.py's own classification of the "
+            "disparate impact ratio, which is computed from the "
+            "authoritative threshold in app/config/thresholds.py (the "
+            "commonly cited four-fifths rule of thumb; not an RBI-specified "
+            "threshold -- see docs/thresholds.md sec 3.1). This rule does "
+            "not re-derive that threshold; it attaches the RBI mapping to "
+            "the technical module's own result."
         ),
         "is_mock": True,
     },
     {
         "rule_id": "RBI-FAIR-02",
-        "title": "Demographic parity difference",
+        "title": "Demographic parity difference reported",
         "rule_description": (
             "The absolute difference in favourable-outcome rates between "
-            "protected-attribute groups should be small."
+            "protected-attribute groups must be reported for review."
         ),
         "category": "fairness",
         "technical_finding_ref": "fairness.demographic_parity_diff",
-        "evaluation": {"operator": "max_abs", "fail_above": 0.2, "warn_above": 0.1},
+        "evaluation": {"operator": "presence"},
         "rbi_source": _ILLUSTRATIVE,
         "clause_reference": None,
         "rationale": (
-            "Complements the ratio-based check with an absolute-difference "
-            "view. Thresholds are placeholders for demonstration."
+            "docs/thresholds.md sec 4.2 defines no PASS/WARNING/FAIL "
+            "threshold for demographic parity difference -- no standard "
+            "cut-off exists and none has been adopted by the team. This "
+            "rule therefore only confirms the metric was reported, so it "
+            "is available for human review; it does not classify it, "
+            "which would otherwise invent a threshold this project has "
+            "explicitly declined to set."
         ),
         "is_mock": True,
     },
@@ -70,32 +97,39 @@ _RULES: list[dict] = [
             "stay low)."
         ),
         "category": "drift",
-        "technical_finding_ref": "drift.psi",
-        "evaluation": {"operator": "max_value", "fail_above": 0.25, "warn_above": 0.1},
+        "technical_finding_ref": "drift.status",
+        "evaluation": {"operator": "mirror_status"},
         "rbi_source": _ILLUSTRATIVE,
         "clause_reference": None,
         "rationale": (
-            "PSI > 0.1 is a widely used 'investigate' signal and > 0.25 a "
-            "'significant shift' signal in model-monitoring practice. "
-            "These are industry rules of thumb, not RBI-specified values."
+            "The status mirrors app/drift/drift.py's own classification of "
+            "PSI, which is computed from the authoritative threshold in "
+            "app/config/thresholds.py (credit-industry convention; not an "
+            "RBI-specified value -- see docs/thresholds.md sec 3.2). This "
+            "rule does not re-derive that threshold; it attaches the RBI "
+            "mapping to the technical module's own result."
         ),
         "is_mock": True,
     },
     {
         "rule_id": "RBI-DRIFT-02",
-        "title": "Kolmogorov-Smirnov (KS) drift statistic",
+        "title": "Kolmogorov-Smirnov (KS) drift statistic reported",
         "rule_description": (
             "The KS statistic comparing production inputs to the training "
-            "distribution should stay low."
+            "distribution must be reported alongside PSI as corroborating "
+            "drift evidence."
         ),
         "category": "drift",
         "technical_finding_ref": "drift.ks_statistic",
-        "evaluation": {"operator": "max_value", "fail_above": 0.3, "warn_above": 0.15},
+        "evaluation": {"operator": "presence"},
         "rbi_source": _ILLUSTRATIVE,
         "clause_reference": None,
         "rationale": (
-            "A second, distribution-shape view of input drift alongside "
-            "PSI. Thresholds are placeholders for demonstration."
+            "docs/thresholds.md sec 4.1 defines no standalone threshold for "
+            "the KS statistic -- there is no universal cut-off, so one is "
+            "not invented here. This rule only confirms the metric was "
+            "reported; it is interpreted alongside the PSI-driven drift "
+            "status (RBI-DRIFT-01), not classified on its own."
         ),
         "is_mock": True,
     },

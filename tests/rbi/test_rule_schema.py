@@ -113,3 +113,29 @@ def test_is_mock_must_be_true():
 def test_validate_rules_flags_duplicate_ids():
     problems = validate_rules([_rule(), _rule()])
     assert any("duplicate rule_id" in p for p in problems)
+
+
+# --- mirror_status operator ----------------------------------------------
+
+def test_mirror_status_needs_no_threshold_config():
+    rule = _rule(
+        technical_finding_ref="fairness.status",
+        evaluation={"operator": "mirror_status"},
+    )
+    assert validate_rule(rule) == []
+
+
+# --- threshold authority: shipped rules do not compete with app/config/thresholds.py --
+
+def test_fairness_and_drift_metric_rules_do_not_define_private_thresholds():
+    """RBI-FAIR-01 and RBI-DRIFT-01 must consume the technical module's own
+    status (mirror_status) rather than re-deriving severity from the raw
+    metric with a rule-local band; RBI-FAIR-02 and RBI-DRIFT-02 must not
+    invent a threshold docs/thresholds.md sec 4 says does not exist. See
+    docs/decisions.md, "Analytical threshold authority".
+    """
+    rules = {r["rule_id"]: r for r in load_rules()}
+    for rule_id in ("RBI-FAIR-01", "RBI-DRIFT-01"):
+        assert rules[rule_id]["evaluation"] == {"operator": "mirror_status"}
+    for rule_id in ("RBI-FAIR-02", "RBI-DRIFT-02"):
+        assert rules[rule_id]["evaluation"] == {"operator": "presence"}

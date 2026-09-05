@@ -794,3 +794,70 @@ even though no interface shape changed.
 `app/compliance/`, `app/rbi/rules/`, and their tests/docs to match the
 already-approved 2026-08-27 decision; does not introduce new policy. Full
 test suite passing (185 tests). Not yet committed/pushed — pending review.
+
+---
+
+## 2026-09-05 — Phase 1 checkpoint sign-off and Phase 2 start
+
+**Decision:** Phase 1 (Independent Module Development) is complete. The
+team formally moves to **Phase 2 — Integration**.
+
+**What this checkpoint records:**
+
+1. **Phase 1 implementation is complete.** Every owner has replaced their
+   Phase 0 stub with real logic behind the interfaces recorded in
+   `docs/module-interfaces.md`, without changing those interfaces.
+2. **All Phase 1 owner work has been merged into `main`**, including each
+   owner's follow-up stabilization pull request.
+3. **The final Phase 1 evaluation found no blockers.**
+4. **The full test suite passed 246/246 tests** at the time of that
+   evaluation — no failures, no skipped tests.
+
+**Per-owner state at sign-off:**
+
+| Owner | Module | State |
+|---|---|---|
+| Namitha | `app/models/` | Real scikit-learn `Pipeline` (one-hot + scaling → `LogisticRegression`) on UCI German Credit; real train/evaluate/predict/save/load |
+| Manas | `app/explainability/` | Real SHAP + LIME computed against the real model via `app.models.model.load()` |
+| Arushi | `app/fairness/`, `app/drift/` | Real demographic parity, disparate impact, PSI and KS; drift scenario generator explicitly synthetic |
+| Nidhi | `app/rbi/`, `app/compliance/` | Real rule engine over illustrative sample rules (output still `is_mock: True`) |
+| Khushi | `app/api/`, `dashboard/` | Real schema-validated endpoints and real Streamlit UI, mock-backed by design in Phase 1 |
+
+**What Phase 2 begins:** cross-module integration — wiring the analytical
+modules together, connecting them through the API and dashboard, and
+building `run_assurance.py`.
+
+**What this checkpoint does NOT claim:** it does **not** state that Phase 2
+integration is complete, or in progress, or that any cross-module
+orchestration exists. At sign-off there is no `run_assurance.py`, the API
+still serves fixtures from `app/api/mock_data.py` rather than the
+analytical modules, and no module imports another owner's module except
+explainability's use of `app.models.model.load()`, which
+`docs/module-interfaces.md` already designates as Phase 1 work. This entry
+records the completion of module development only.
+
+**Known non-blocking items carried into Phase 2.** These were identified
+by the final Phase 1 evaluation and did not block sign-off. They are
+recorded here as open, not as approved resolutions — each still needs a
+decision by its owner:
+
+- No canonical end-to-end integration test exists; every current test
+  exercises a single module in isolation.
+- The `feature_matrix` DataFrame → `list[dict]` conversion for the API is
+  documented in `docs/module-interfaces.md` but not implemented, and has
+  no assigned owner.
+- `is_mock` still carries a different meaning per module and has no
+  project-wide definition.
+- `joblib` and `pydantic` are imported directly but not declared in
+  `requirements.txt`; CI pins Python 3.11 while local environments run
+  3.12.
+- The trained model artifact is gitignored and `load()` does not check it
+  against the current `FEATURE_COLUMNS`, so a stale local artifact fails
+  with a confusing error rather than a clear one.
+
+**Why:** the project is phase-gated (CLAUDE.md §4, §5), and every previous
+gate has an explicit sign-off entry in this log. Recording Phase 1's close
+the same way keeps the gate record complete and gives Phase 2 a dated,
+agreed baseline to work from.
+
+**Status:** Approved by the team, 2026-09-05.

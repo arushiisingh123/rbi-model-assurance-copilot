@@ -130,12 +130,12 @@ def test_preprocess_shapes_and_target_polarity(preprocessed_data):
     assert (y == 1).sum() == 300
 
 
-def test_preprocess_preserves_personal_status_sex(preprocessed_data):
-    """Verify raw personal_status_sex is preserved without converting to fairness groups."""
+def test_preprocess_preserves_personal_status_and_sex(preprocessed_data):
+    """Verify Attribute 9 is preserved without converting to fairness groups."""
     X = preprocessed_data["X"]
-    assert "personal_status_sex" in X.columns
-    # Check that categories (A91, A92, A93, A94) are preserved
-    unique_vals = set(X["personal_status_sex"].unique())
+    assert "personal_status_and_sex" in X.columns
+    # Check that categories (A91, A92, A93, A94, A95) are preserved
+    unique_vals = set(X["personal_status_and_sex"].unique())
     assert unique_vals.issubset({"A91", "A92", "A93", "A94", "A95"})
 
 

@@ -21,7 +21,7 @@ CATEGORICAL_FEATURES: List[str] = [
     "purpose",
     "savings_account",
     "present_employment",
-    "personal_status_sex",
+    "personal_status_and_sex",
     "other_debtors",
     "property",
     "other_installment_plans",
@@ -50,7 +50,7 @@ FEATURE_COLUMNS: List[str] = [
     "savings_account",
     "present_employment",
     "installment_rate",
-    "personal_status_sex",
+    "personal_status_and_sex",
     "other_debtors",
     "present_residence",
     "property",
@@ -96,6 +96,10 @@ def load_dataset(path: str = DEFAULT_DATASET_PATH) -> pd.DataFrame:
 
     df = pd.read_csv(path)
 
+    # Normalize Attribute 9 to the project's canonical name.
+    if "personal_status_sex" in df.columns:
+        df = df.rename(columns={"personal_status_sex": "personal_status_and_sex"})
+
     # Validate required feature columns
     missing_features = [col for col in FEATURE_COLUMNS if col not in df.columns]
     if missing_features:
@@ -135,7 +139,7 @@ def preprocess(
     - Original raw `1` (Good Credit) -> `0` (Good credit / low risk)
     - Original raw `2` (Bad Credit)  -> `1` (Bad credit / high risk)
 
-    Note: The raw `personal_status_sex` column is preserved unmodified in `X`.
+    Note: The raw `personal_status_and_sex` column is preserved unmodified in `X`.
     Fairness grouping belongs strictly to downstream fairness modules.
 
     Parameters

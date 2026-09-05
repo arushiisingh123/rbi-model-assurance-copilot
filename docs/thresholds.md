@@ -41,15 +41,20 @@ two different things.
 
 ## 2. Status vocabulary
 
-Previously undefined anywhere in the project. These are the only valid
-status values for fairness and drift results:
+These are the only valid status values for fairness and drift results:
 
 | Status | Meaning |
 |---|---|
 | `PASS` | Metric is within the project's acceptable range. |
 | `WARNING` | Metric warrants review. Not automatically a failure. |
 | `FAIL` | Metric breaches the project's acceptable range. |
-| `PENDING` | Not yet evaluated (used by the compliance module before evaluation). |
+| `PENDING` | The assessment could not be performed. |
+
+`PENDING` is the honest answer when there is nothing to measure — fewer
+than two groups to compare, no group receiving the favourable outcome, no
+shared numeric features, or no usable data. It must never be replaced by
+`PASS` (which would claim the check succeeded) or by `FAIL` (which would
+report absent data as evidence of a problem).
 
 These are **technical** statuses describing a measurement. A *compliance*
 status against an RBI rule is a separate judgement, owned by the
@@ -96,6 +101,30 @@ written as "0.70–0.79" is ambiguous for a value such as `0.795`; the
 comparisons above are not. Implementations must follow the comparisons
 exactly, and tests should cover each boundary value.
 
+### 3.4 Classify the reported value
+
+The status must be derived from the **rounded metric that is actually
+reported**, not from the full-precision intermediate value. Reports round
+metrics to 4 decimal places; classifying the unrounded value lets a report
+show `0.8` (a PASS-range number) beside a `WARNING`, or `0.1` beside a
+`PASS`. In an assurance report the number and its status must never
+disagree.
+
+### 3.5 Aggregating across features
+
+Drift evaluates several features but the Phase 1 output carries a single
+`psi` and a single `ks_statistic`. Both are the **maximum (worst case)
+across the evaluated features**, computed **independently** — so the two
+values may originate from different features.
+
+Maximum, not mean: the mean of several per-feature PSIs is not itself a
+PSI, so the bands in §3.2 would be applied to a quantity they were never
+defined for. Maximum also keeps the aggregate monotone — adding a stable
+feature can never lower reported drift — which is the correct direction
+for a risk tool.
+
+Per-feature detail is not part of the Phase 1 output contract.
+
 ---
 
 ## 4. Metrics reported without a threshold
@@ -128,8 +157,9 @@ review, but it does not drive an automated status.
 ## 5. Where these live in code
 
 **Authoritative code location: `app/config/thresholds.py`** (owner:
-Arushi). This file does **not exist yet** — creating it is the first step
-of Phase 1 fairness/drift implementation.
+Arushi). Implemented in Phase 1. It exposes the four threshold constants,
+the status constants, `VALID_STATUSES`, and the two classifiers
+`classify_disparate_impact()` and `classify_psi()`.
 
 Rules:
 
@@ -152,15 +182,24 @@ CLAUDE.md §7 approval flow.
 
 ---
 
-## 6. Consistency with the existing Phase 0 stubs
+## 6. Current implementation status
 
-The adopted thresholds are consistent with the placeholder values already
-returned by the Phase 0 stubs, so no stub is now misleading:
+Phase 1 replaced the Phase 0 stubs with real calculations.
+`app/fairness/fairness.py` and `app/drift/drift.py` compute their metrics
+from real inputs, import every threshold from `app/config/thresholds.py`,
+and return `is_mock: False`.
 
-- `app/fairness/fairness.py` returns `disparate_impact_ratio: 0.78` with
-  `status: "WARNING"` → correct under §3.1 (`0.70 <= 0.78 < 0.80`).
-- `app/drift/drift.py` returns `psi: 0.09` with `status: "PASS"` →
-  correct under §3.2 (`0.09 < 0.10`).
+`is_mock: False` describes the **arithmetic only**. It does not mean the
+result is verified regulatory evidence, and — for drift — it does not mean
+the input data was observed in production. Drift computed against a
+dataset from `app/drift/scenario.py` is synthetic by construction and
+demonstrates that detection works; it is not evidence of drift in any real
+lending population.
+
+Threshold-to-status mapping is exercised at every boundary by
+`tests/config/test_thresholds.py`, and the modules are tested for
+agreement between the reported metric and the reported status
+(`tests/fairness/test_fairness.py`, `tests/drift/test_drift.py`).
 
 ---
 

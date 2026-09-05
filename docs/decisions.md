@@ -1,7 +1,7 @@
 # Decisions Log
 
 This file records project-level decisions the team has explicitly approved.
-CLAUDE.md remains the primary source of truth for the project. If a decision
+CLAUDE.md remains the primary source of truth. If a decision
 recorded here changes a rule currently written in CLAUDE.md, that conflict is
 called out below, and CLAUDE.md should be updated deliberately by the team —
 not silently overridden by this log.
@@ -108,8 +108,8 @@ smoke test (approved in "RAG scope for Phase 0 and Phase 1" above) is:
 
 **Source authority:** Official Reserve Bank of India (RBI) website.
 
-**Purpose:** This is the ONE real RBI source used for the Phase 0 RAG
-smoke test — not a production compliance corpus.
+**Purpose:** This is the ONE real RBI source used for the Phase 0 RAG smoke
+test — not a production compliance corpus.
 
 **Scope (unchanged from the original RAG-scope decision):**
 - Download/use the official RBI-hosted document.
@@ -210,8 +210,8 @@ accurate gender split without saying so.
 **Status:** Approved (recorded 2026-08-25). Decision/documentation only —
 no dataset download, no preprocessing, and no changes to
 `app/models/` or `app/fairness/` have been made as part of this entry;
-that remains Phase 1 implementation work. See `docs/TASK.md` §14 (now
-checked off) for the original open item.
+that remains Phase 1 implementation work. See
+`docs/TASK.md` §14 (now checked off) for the original open item.
 
 **Amendment (2026-08-27) — reaffirmed as a Phase 1 requirement.** The team
 reconfirmed this entry at the Phase 0 sign-off. The Attribute 9 caveat
@@ -322,7 +322,7 @@ CLAUDE.md edit were already complete; only the `docs/TASK.md` tracking
 checkbox was stale.
 
 **Status:** Approved (originally 2026-08-24; CLAUDE.md §8 updated
-2026-08-25; `docs/TASK.md` §14 checkbox closed 2026-08-25).
+2026-08-25; `docs/TASK.md` checkbox closed 2026-08-25).
 
 ---
 
@@ -368,7 +368,7 @@ request and confirm CI goes green, and have each of the five members
 clone, install, and run the project once and confirm it.
 
 **Criterion 10** was met by closing the gaps found in the 2026-08-27
-architecture consistency check: stale Phase 0 phase declarations, two
+architecture consistency check: stale Phase 1 phase declarations, two
 broken references to a non-existent "Phase 0 stabilization report", the
 `requirements.txt` ownership contradiction, unassigned ownership of
 `tests/api/` / `.github/workflows/` / `docs/`, the absence of any defined
@@ -577,7 +577,7 @@ Scope is unchanged otherwise: still just checkout, set up Python, install
 requirements, run `pytest -q`. No deployment, Docker, cloud, or
 lint/format gates.
 
-**Status:** Approved (2026-08-27).
+**Status:** Approved (recorded 2026-08-27).
 
 ---
 
@@ -600,9 +600,9 @@ renaming the identifiers (e.g. `SAMPLE-FAIR-01`), carrying an explicit
 `is_mock` / provenance marker through to display, or replacing the
 placeholders with rules citing real RBI provisions.
 
-**Why:** consistent with the "Analytical thresholds are not RBI
-requirements" decision above. The rule identifier is the most visible
-place where a convention could be mistaken for a regulation.
+**Why:** consistent with the "Analytical thresholds are not RBI requirements"
+decision above. The rule identifier is the most visible place where a
+convention could be mistaken for a regulation.
 
 **Status:** Open follow-up, assigned to Nidhi for Phase 1
 (recorded 2026-08-27). Application code deliberately not modified as part
@@ -638,7 +638,10 @@ Khushi can sign off (or push back) on the pull request.
    (the engine never raises on missing data).
 
 **Why:** The Phase 0 stub returned hardcoded `PENDING` statuses and took no
-inputs. Implementing the real Phase 1 rule engine required deciding what status to assign when a metric is missing / unparseable, and what dictionary structure `evaluate_compliance()` expects as input. Documenting both explicitly avoids silent interface divergence during Phase 2 integration.
+inputs. Implementing the real Phase 1 rule engine required deciding what status
+to assign when a metric is missing / unparseable, and what dictionary structure
+`evaluate_compliance()` expects as input. Documenting both explicitly avoids
+silent interface divergence during Phase 2 integration.
 
 **Open for Phase 2:** Arushi returns fairness and drift from two separate
 functions (`fairness_report()` and `drift_report()`), and Khushi's API currently
@@ -653,6 +656,76 @@ project-wide value (see "Analytical threshold authority", 2026-08-27, and
 here was a mistake made without checking the already-approved decision. The
 input-shape sub-item is clarified but still pending Arushi/Khushi sign-off
 on the PR — see the entry below.
+
+---
+
+## 2026-09-04 — Phase 1 stabilization: fairness and drift
+
+**Decision:** Applying the team's approved project-wide contracts to the
+fairness and drift modules. No threshold value, output key, or function name
+was changed. Scope limited to `app/fairness/`, `app/drift/`, `app/config/`
+consumers, their tests, and the fairness/drift sections of the docs.
+
+**1. `favorable_label` now defaults to `0`.** The model target is encoded
+`0 = GOOD`, `1 = BAD` (`data/german_credit/README.md`), so the previous
+default of `1` measured the rate of receiving a *bad* credit decision as if
+it were favourable. On the real dataset the same predictions gave a
+disparate impact ratio of ~0.67 (FAIL) under the old default versus ~0.82
+(PASS) under the correct reading — the same data, an inverted verdict.
+`favorable_label` remains an explicit caller-supplied keyword and is never
+inferred from the data; `None` now raises `ValueError`.
+
+**2. A zero maximum selection rate now returns `PENDING`, not `PASS`.** When
+no group receives the favourable outcome the ratio is undefined. The previous
+behaviour returned a neutral ratio of 1.0, which `classify_disparate_impact`
+then reported `PASS` — an unassessable run presented as a passing check.
+
+**3. Status is derived from the reported (rounded) metric.** Both modules
+round metrics to 4 decimal places but previously classified the unrounded
+value, so a report could show a ratio of `0.8` beside a `WARNING`, or a PSI
+of `0.1` beside a `PASS`. In an assurance report the number and its status
+must never disagree. Recorded in `docs/thresholds.md` §3.4.
+
+**4. Drift feature eligibility tightened, and `features_evaluated` made
+truthful.** Non-finite values (`NaN`, `±inf`) are now excluded per feature:
+`np.quantile` over an infinity produced NaN bin edges, a meaningless PSI of
+~2.6, and a spurious `FAIL` on data that had not drifted. Boolean columns are
+excluded (pandas reports them as numeric, but they are semantically
+categorical). A feature left with no usable values is dropped from
+`features_evaluated` rather than silently contributing a zero, so the field
+never claims coverage the calculation did not provide. If nothing remains
+evaluable the result is `PENDING` — absent data is never reported as `FAIL`.
+
+**5. MAX aggregation documented.** The existing behaviour (aggregate PSI and
+KS are each the maximum across evaluated features, computed independently)
+was implemented in Phase 1 but never written down. Now recorded in
+`docs/thresholds.md` §3.5, closing the documentation debt noted at the time.
+Maximum rather than mean: the mean of several per-feature PSIs is not itself
+a PSI, so the §3.2 bands would be applied to a quantity they were never
+defined for.
+
+**Explicitly unchanged:** threshold values (`0.80`, `0.70`, `0.10`, `0.25`);
+both output key sets; both function names; the `PASS`/`WARNING`/`FAIL`/
+`PENDING` vocabulary; the raw Attribute 9 grouping (no derived sex grouping,
+no codebook); PSI/KS formulas and binning strategy; `app/drift/scenario.py`
+behaviour. `docs/thresholds.md` §3.5 records the aggregation rule but adds no
+KS or demographic-parity threshold — those remain deliberately undefined.
+
+**Why:** these were correctness defects against contracts the team had
+already approved, not new design. Each produced a plausible-looking but wrong
+status, which is the most damaging failure mode for an assurance tool.
+
+**Status:** Implemented 2026-09-04 (Arushi). Not committed — pending team
+review of the diff.
+
+**Open, outside this module's ownership — needs team resolution:**
+`app/rbi/rules/__init__.py` evaluates `fairness.disparate_impact_ratio` and
+`drift.psi` against thresholds embedded in the rules themselves rather than
+importing `app/config/thresholds.py`, and those values disagree with the
+authoritative ones (e.g. a ratio of 0.78 classifies as `WARNING` centrally
+and `FAIL` by rule). The rules also define KS and demographic-parity threshold
+bands that `docs/thresholds.md` §4 deliberately declines to define. Not
+changed here — that is Nidhi's module.
 
 ---
 
@@ -706,14 +779,14 @@ clarified — see that entry — but formal Arushi/Khushi sign-off is still
 pending.
 
 **Why:** the compliance module is the one place in the system that turns a
-technical measurement into a stated judgement; letting it silently carry a
-second, competing definition of "how bad is this number" than the module
+technical measurement into a stated judgement; letting it silently carry
+a second, competing definition of "how bad is this number" than the module
 that actually computed it would make the two disagree on the same input,
 which is worse than either being wrong alone.
 
-**Cross-module note:** this changes what status `RBI-FAIR-01` reports for
-the same mock input (`WARNING`, previously `FAIL`) — worth a quick heads-up
-to Arushi (whose `app/config/thresholds.py` this now imports directly) and
+**Cross-module note:** this changes what status `RBI-FAIR-01` reports for the
+same mock input (`WARNING`, previously `FAIL`) — worth a quick heads-up to
+Arushi (whose `app/config/thresholds.py` this now imports directly) and
 Khushi (whose API schema this now actually satisfies) on the pull request,
 even though no interface shape changed.
 

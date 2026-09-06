@@ -26,7 +26,7 @@ Per `docs/decisions.md` ("rbi/ vs compliance/ module split"):
 | Module | Question it answers | Phase 1 contents |
 |---|---|---|
 | `app/rbi/` | "What does the rule say?" | `schema.py` (rule shape + validator), `rules/` (the rule set + `load_rules()` / `get_rule()`), `metadata.py` (version + disclaimer). No evaluation logic. |
-| `app/compliance/` | "Given our technical findings, how do they score?" | `engine.py` (resolve a value, apply an operator → status), `compliance.py` (`evaluate_compliance()` orchestrator), `mock_findings.py` (Phase 1 test input). |
+| `app/compliance/` | "Given our technical findings, how do they score?" | `engine.py` (resolve a value, apply an operator → status), `compliance.py` (`evaluate_compliance()` orchestrator), `technical_findings.py` (Phase 2: `build_technical_findings()` / `run_compliance()` assemble the four real module outputs), `mock_findings.py` (fast deterministic engine-test input). |
 
 `app/rag/` is unchanged in Phase 1 — the Phase 0 one-document smoke test
 only. Full RAG is Phase 3.
@@ -105,11 +105,27 @@ threshold authority + status vocabulary correction".
 ## 4. `evaluate_compliance()` — input and output
 
 ```python
-from app.compliance import evaluate_compliance
+from app.compliance import evaluate_compliance, build_technical_findings, run_compliance
+
+# Phase 2: assemble the four real module outputs, then evaluate.
+technical_findings = build_technical_findings(
+    model=..., explainability=..., fairness=..., drift=...
+)
 result = evaluate_compliance(technical_findings)
+
+# one-call equivalent:
+result = run_compliance(model=..., explainability=..., fairness=..., drift=...)
 ```
 
-### Input (assumed shape — see `app/compliance/mock_findings.py`)
+`build_technical_findings()` / `run_compliance()`
+(`app/compliance/technical_findings.py`) are the Phase 2 connector: they
+assemble the input dict from the real `predict_batch()` / `explain()` /
+`fairness_report()` / `drift_report()` outputs, passing each value through
+untouched. A section given as `None` is omitted and its rules resolve to
+`PENDING`. The real end-to-end chain is covered by
+`tests/compliance/test_phase2_integration.py`.
+
+### Input shape (see `app/compliance/mock_findings.py` for a worked example)
 
 ```python
 {
@@ -199,3 +215,4 @@ and all `clause_reference` values are `None`.
 | `tests/compliance/test_engine.py` | path resolution edge cases; every operator at PASS/WARNING/FAIL boundaries; `mirror_status` passthrough + non-status-value handling; missing/`None`/bool/non-numeric → `PENDING`; unknown operator → `ValueError`; `map_findings_to_rules()` |
 | `tests/compliance/test_evaluate_compliance.py` | end-to-end shape (exact 5 keys, `evidence_chunks == []`); mock findings → known status mix; mock fairness/drift status consistent with `app/config/thresholds.py`'s classifiers; `None`/non-dict input → `PENDING` |
 | `tests/compliance/test_compliance_skeleton.py` | Phase 0 no-arg contract still holds |
+| `tests/compliance/test_phase2_integration.py` | real `predict_batch()` / `explain()` / `fairness_report()` / `drift_report()` → `build_technical_findings()` → `evaluate_compliance()`; every rule produces a traceable finding; fairness/drift status consumed via `fairness.status` / `drift.status` and never recomputed; missing sections → `PENDING`, not errors |

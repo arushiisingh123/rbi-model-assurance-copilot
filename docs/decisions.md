@@ -108,8 +108,8 @@ smoke test (approved in "RAG scope for Phase 0 and Phase 1" above) is:
 
 **Source authority:** Official Reserve Bank of India (RBI) website.
 
-**Purpose:** This is the ONE real RBI source used for the Phase 0 RAG smoke
-test — not a production compliance corpus.
+**Purpose:** This is the ONE real RBI source used for the Phase 0
+RAG smoke test — not a production compliance corpus.
 
 **Scope (unchanged from the original RAG-scope decision):**
 - Download/use the official RBI-hosted document.
@@ -122,8 +122,8 @@ test — not a production compliance corpus.
 
 This remains a Phase 0 proof of concept ONLY. It explicitly does **not**
 authorize: building the full RAG system, adding multiple RBI documents,
-building a production retrieval pipeline, tuning embeddings, building LLM
-integration, generating compliance reports, or any other Phase 3
+building a production retrieval pipeline, tuning embeddings, building
+LLM integration, generating compliance reports, or any other Phase 3
 functionality. No RBI clauses or compliance requirements have been
 invented or interpreted as part of this decision — this entry records
 document *selection* only, not regulatory analysis. Draft RBI guidance
@@ -279,9 +279,9 @@ Phase 1 starts (scikit-learn/XGBoost, SHAP, LIME, Fairlearn, LangChain,
 etc.); a lightweight, non-blocking review step keeps `requirements.txt`
 clean without making Khushi a bottleneck.
 
-**Status:** Approved (recorded 2026-08-25). See `docs/TASK.md` §14 (now
-checked off) for the original open item. No dependencies were added by
-this decision.
+**Status:** Approved (recorded 2026-08-25). See `docs/TASK.md` §14
+(now checked off) for the original open item. No dependencies were added
+by this decision.
 
 ---
 
@@ -588,10 +588,10 @@ owner (Nidhi)**. No code was changed by this entry.
 
 `app/rbi/rules/__init__.py` currently defines placeholder rules with the
 identifiers `RBI-FAIR-01` and `RBI-DRIFT-01`. These are explicitly sample
-rules, but the `RBI-` prefix implies regulatory authority the rules do
-not have — and once a real threshold drives their status, the system
-would render an RBI-labelled identifier whose pass/fail line is actually
-a project or US-derived convention.
+rules, but the `RBI-` prefix implies regulatory authority the rules do not
+have — and once a real threshold drives their status, the system would
+render an RBI-labelled identifier whose pass/fail line is actually a
+project or US-derived convention.
 
 **Required before these rules drive any displayed compliance status:**
 placeholder and sample rules must not imply that an associated threshold
@@ -638,10 +638,10 @@ Khushi can sign off (or push back) on the pull request.
    (the engine never raises on missing data).
 
 **Why:** The Phase 0 stub returned hardcoded `PENDING` statuses and took no
-inputs. Implementing the real Phase 1 rule engine required deciding what status
-to assign when a metric is missing / unparseable, and what dictionary structure
-`evaluate_compliance()` expects as input. Documenting both explicitly avoids
-silent interface divergence during Phase 2 integration.
+inputs. Implementing the real Phase 1 rule engine required deciding what
+status to assign when a metric is missing / unparseable, and what dictionary
+structure `evaluate_compliance()` expects as input. Documenting both
+explicitly avoids silent interface divergence during Phase 2 integration.
 
 **Open for Phase 2:** Arushi returns fairness and drift from two separate
 functions (`fairness_report()` and `drift_report()`), and Khushi's API currently
@@ -650,8 +650,8 @@ above are Nidhi's assumption and must be confirmed with Arushi and Khushi before
 Phase 2 wiring.
 
 **Status:** Superseded in part (see 2026-09-05 entry below): the status-
-vocabulary sub-item was withdrawn — `PENDING` was already the approved
-project-wide value (see "Analytical threshold authority", 2026-08-27, and
+vocabulary sub-item was withdrawn — `PENDING` was already the approved project-
+wide value (see "Analytical threshold authority", 2026-08-27, and
 `docs/module-interfaces.md`, Arushi's section), so proposing `NOT_EVALUATED`
 here was a mistake made without checking the already-approved decision. The
 input-shape sub-item is clarified but still pending Arushi/Khushi sign-off
@@ -689,8 +689,8 @@ must never disagree. Recorded in `docs/thresholds.md` §3.4.
 **4. Drift feature eligibility tightened, and `features_evaluated` made
 truthful.** Non-finite values (`NaN`, `±inf`) are now excluded per feature:
 `np.quantile` over an infinity produced NaN bin edges, a meaningless PSI of
-~2.6, and a spurious `FAIL` on data that had not drifted. Boolean columns are
-excluded (pandas reports them as numeric, but they are semantically
+~2.6, and a spurious `FAIL` on data that had not drifted. Boolean columns
+are excluded (pandas reports them as numeric, but they are semantically
 categorical). A feature left with no usable values is dropped from
 `features_evaluated` rather than silently contributing a zero, so the field
 never claims coverage the calculation did not provide. If nothing remains
@@ -906,8 +906,9 @@ avoid coupling this suite to another owner's code.
 - **Khushi (API):** `app/api/schemas.py` `ModelMetadata` does not include
   the additive `label_semantics` key, so the API silently drops it on
   serialization. `favorable_outcome_label` / `positive_class` are the
-  contract that stops fairness inverting its verdict — the API should carry
-  them through (add an optional `label_semantics` field to `ModelMetadata`).
+  contract that stops fairness inverting its verdict — the API should
+  carry them through (add an optional `label_semantics` field to
+  `ModelMetadata`).
 - **Khushi (API):** the documented `feature_matrix` `DataFrame → list[dict]`
   conversion is still not implemented in the API layer (noted 2026-09-05).
   The model side returns a `DataFrame` as contracted; the round-trip is
@@ -924,3 +925,126 @@ item from the Phase 1 sign-off.
 
 **Status:** Implemented by Namitha (module owner), 2026-09-06. Not committed
 — pending team review of the diff. Full suite passing (257 tests).
+
+---
+
+## 2026-09-05 — Phase 2 (Nidhi): compliance consumes real technical findings
+
+**Decision / implementation:** Nidhi's Phase 2 responsibility — "connect
+technical findings to the RBI rule engine and compliance mapping" — is
+implemented as a small assembly layer, `app/compliance/technical_findings.py`:
+
+- `build_technical_findings(*, model, explainability, fairness, drift)` —
+  combines the four real analytical-module outputs
+  (`predict_batch()` / `explain()` / `fairness_report()` / `drift_report()`)
+  into the `{"model", "explainability", "fairness", "drift"}` dict the rule
+  engine already consumes. Each value is passed through untouched; a
+  section given as `None` is omitted and its rules resolve to `PENDING`.
+- `run_compliance(...)` — one-call `evaluate_compliance(build_technical_findings(...))`.
+
+**No engine change was needed.** `evaluate_compliance()` / the rule engine
+already resolve `technical_finding_ref` paths against an arbitrary dict and
+already degrade missing paths to `PENDING`, so they accepted the real
+findings shape as-is. The rule engine, the status vocabulary
+(`PASS`/`WARNING`/`FAIL`/`PENDING`), the thresholds, the approved 5-key
+finding shape, `evidence_chunks: []`, and `is_mock: True` are all
+unchanged. Compliance still does not recompute fairness/drift severity —
+`RBI-FAIR-01` / `RBI-DRIFT-01` mirror `fairness.status` / `drift.status`
+(see "Analytical threshold authority").
+
+**Tests:** `tests/compliance/test_phase2_integration.py` exercises the full
+real chain (real model → real SHAP → real fairness → real drift →
+`build_technical_findings` → `evaluate_compliance`) and asserts every rule
+produces a traceable finding, statuses are valid, the fairness/drift
+statuses are consumed verbatim, and missing sections yield `PENDING` not
+errors. It provisions the real model artifact via Namitha's `train()`,
+matching `tests/explainability/conftest.py`.
+
+**Still Khushi's Phase 2 work:** unwrapping the API `fairness_drift`
+container into the top-level `fairness` / `drift` arguments, wiring the
+analytical modules through FastAPI, and `run_assurance.py`.
+
+**Not done here (out of scope):** RAG / evidence retrieval / LLM (Phase 3);
+the `RBI-`-prefixed sample rule ID follow-up (2026-08-27), still open.
+
+**Status:** Implemented by Nidhi, 2026-09-05. Full suite passing
+(264 tests). Not yet committed — pending review.
+
+---
+
+## 2026-09-06 — Phase 2 fairness and drift integration
+
+**Decision:** Record how fairness and drift connect to the real model and real
+data in Phase 2, and what the drift reference/current pair actually represents.
+Scope: `tests/fairness/`, `tests/drift/`, and the Arushi sections of
+`docs/module-interfaces.md`. **No production fairness or drift code changed** —
+the Phase 1 interfaces already supported the integration unmodified.
+
+**1. Fairness integration path.** `predict_batch()` →
+`fairness_report(predictions, feature_matrix["personal_status_and_sex"],
+favorable_label=0)`. The protected attribute is a named column inside the
+model's `feature_matrix`, so no additional plumbing is required, and
+`protected_attribute` resolves to the canonical name from the Series name.
+
+**2. Favourable label is explicit and matches the model's own declaration.**
+`favorable_label=0` (GOOD). The model publishes this as
+`model_metadata.label_semantics.favorable_outcome_label`, and a test asserts
+that using the declared value reproduces the same result as passing `0`
+directly — so the two can never drift apart silently.
+
+**3. Attribute 9 is used as raw combined categories.** `A91`–`A94` are observed
+in the dataset; `A95` has no instances. No derived sex grouping is applied and
+no codebook is asserted. The canonical name is `personal_status_and_sex`
+everywhere; `personal_status_sex` is not used downstream, and the module
+rejects `gender`/`sex` as reported names.
+
+**4. Drift reference/current for Phase 2 = the German Credit train/test
+splits.** `reference = X_train`, `current = X_test`, from the existing
+`split_data(X, y, test_size=0.2, random_state=42)`.
+
+This is a **controlled integration check on real data, not production drift
+evidence.** It measures distribution differences between the development
+training split and the held-out test split of one static dataset. Nothing in
+this repository observes a live lending population. The result must never be
+presented as production drift, and `build_drift_scenario()` remains the tool
+for explicitly synthetic drift demonstrations — which are exercised separately
+and labelled synthetic wherever they appear.
+
+`predict_batch()["feature_matrix"]` is exactly that test split, so drift fed
+from the model output and drift fed from the split are asserted to be
+identical. The two paths cannot diverge.
+
+**5. Coverage limit recorded.** Drift evaluates the 7 numeric German Credit
+features; the 13 categorical features are excluded, **including
+`personal_status_and_sex`**. A drift result therefore carries no signal about
+the protected attribute. Pinned by test so the limit stays visible rather than
+being assumed away at integration time.
+
+**6. DataFrames in, records at the edge.** `drift_report()` raises `ValueError`
+on serialized `list[dict]` input, and a test asserts it. Orchestration must
+call the analytics in-process with DataFrames; serialization belongs at the
+API boundary.
+
+**Also noted (not a defect):** `demographic_parity_diff` is mathematically
+invariant under binary label inversion — each group's selection rate under
+label `0` is `1 - rate` under label `1`, so `max - min` is unchanged. Only
+the disparate impact ratio distinguishes the two readings. This is pinned by
+test so it is not later mistaken for a bug, and so it is on record that DPD
+alone cannot detect a flipped favourable label.
+
+**Test-environment note.** The trained model artifact is gitignored, so
+integration tests provision it once per session via Namitha's public
+`train()`, following the pattern in `tests/explainability/conftest.py`.
+Verified to pass both with an existing artifact and from a simulated fresh
+checkout. The fixtures are deliberately not `autouse`, so the fairness/drift
+unit tests do not pay for a model they never use.
+
+**Status:** Implemented 2026-09-06 (Arushi). Targeted 24 integration tests
+passed; fairness/drift/config suites 98 passed; full suite 270 passed, 0
+failures. Not committed — pending team review of the diff.
+
+**Open, outside this module's ownership:** the committed local model artifact
+was pickled with scikit-learn 1.8.0 while the environment now has 1.9.0, so
+loading it emits `InconsistentVersionWarning`. Regenerating it
+(`python -m app.models.train`) removes the warning. Belongs to the model owner
+and to the unpinned-dependency question, not to fairness/drift.

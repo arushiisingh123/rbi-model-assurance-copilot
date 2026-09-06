@@ -178,9 +178,11 @@ Use `method="shap"` for rows with out-of-vocabulary categories.
     "is_mock": False
 }
 
-# drift_report()
+# drift_report(reference_data: DataFrame, current_data: DataFrame)
 {
-    "features_evaluated": ["income", "age", "credit_history_len"],
+    "features_evaluated": ["duration_months", "credit_amount", "installment_rate",
+                           "present_residence", "age", "existing_credits",
+                           "num_dependents"],
     "psi": 0.09,
     "ks_statistic": 0.11,
     "status": "PASS",
@@ -277,6 +279,64 @@ Phase 1: both functions perform real calculations and return
 `is_mock: False`. That flag describes the arithmetic only — a real
 calculation is not, by itself, verified regulatory evidence.
 
+### Phase 2 integration path (2026-09-06)
+
+Both integrations run against the real model and real data with **no
+change to `fairness.py` or `drift.py`** — the Phase 1 interfaces were
+already sufficient. Covered by
+`tests/fairness/test_fairness_integration.py` and
+`tests/drift/test_drift_integration.py`.
+
+**Fairness — real model → fairness.** The protected attribute is a named
+column inside the model's `feature_matrix`, so no extra plumbing is
+needed:
+
+```python
+out = predict_batch()                       # real sklearn Pipeline
+fairness_report(
+    out["predictions"],                                  # list[int], 0=GOOD 1=BAD
+    out["feature_matrix"]["personal_status_and_sex"],     # real Attribute 9
+    favorable_label=0,                                    # GOOD is favourable
+)
+```
+
+`favorable_label=0` is not a guess: the model declares it as
+`model_metadata.label_semantics.favorable_outcome_label`. Because the
+Series is already named `personal_status_and_sex`, `protected_attribute`
+resolves to the canonical name automatically. Attribute 9 is used as raw
+combined categories (`A91`–`A94` observed; `A95` has no instances) — no
+derived sex grouping is applied.
+
+**Drift — real data → drift.** Reference and current are the German
+Credit development splits, passed as DataFrames:
+
+```python
+X_train, X_test, _, _ = split_data(X, y, test_size=0.2, random_state=42)
+drift_report(X_train, X_test)               # reference, current
+```
+
+`predict_batch()["feature_matrix"]` is exactly that test split, so
+feeding drift from the model output produces an identical result — the
+two paths cannot diverge.
+
+> **This train/test setup is a controlled integration check, not
+> production drift evidence.** It measures distribution differences
+> between the development training split and the held-out test split of
+> one static dataset. Nothing in this repository observes a live lending
+> population, and this result must never be reported as production drift.
+> `build_drift_scenario()` remains the tool for explicitly **synthetic**
+> drift demonstrations.
+
+**Coverage limit worth knowing at integration time:** drift evaluates the
+7 numeric German Credit features. The other 13 are categorical and are
+excluded — **including `personal_status_and_sex` itself**, so a drift
+result carries no signal about the protected attribute.
+
+**Serialization boundary.** `drift_report()` requires DataFrames and
+raises `ValueError` on the API's `list[dict]` form. Orchestration must
+call it in-process with DataFrames; serialization belongs at the API
+edge.
+
 ## Nidhi's output — `app/compliance/compliance.py`
 
 ```python
@@ -315,7 +375,7 @@ with no defined threshold (demographic parity difference, KS statistic —
 `docs/thresholds.md` §4) it checks presence only. See
 `docs/decisions.md`, "Analytical threshold authority".
 
-**Assumed input shape for `evaluate_compliance(technical_findings)`:**
+**Input shape for `evaluate_compliance(technical_findings)`:**
 
 ```python
 {
@@ -328,15 +388,35 @@ with no defined threshold (demographic parity difference, KS statistic —
 
 Rule references index into this (`"fairness.status"` →
 `tf["fairness"]["status"]`). `None` / missing paths → `PENDING`, never an
-error. **Clarified:** Khushi's API section below shows `fairness_drift`
-wraps the two reports as `{"fairness": {...}, "drift": {...}}` — separate
-objects, not merged, matching this assumption. **Still open for Phase 2:**
-the code that unwraps `fairness_drift` into this shape has not been
-written yet.
+error.
 
-Phase 1: `evaluate_compliance()` runs a real rule engine over illustrative
-sample rules in `app/rbi/`; output still carries `is_mock: True` and
-`evidence_chunks: []`.
+**Phase 2 assembly (implemented — `app/compliance/technical_findings.py`).**
+The compliance module now assembles this dict from the four real module
+outputs:
+
+```python
+from app.compliance import build_technical_findings, run_compliance
+
+tf = build_technical_findings(model=..., explainability=..., fairness=..., drift=...)
+result = evaluate_compliance(tf)
+# or, in one call:
+result = run_compliance(model=..., explainability=..., fairness=..., drift=...)
+```
+
+`build_technical_findings()` passes each value through untouched (no
+recompute, no reclassification) and omits any section given as `None`
+(those rules resolve to `PENDING`). A section that is not available never
+raises.
+
+**Still owned by Khushi (Phase 2):** unwrapping the API `fairness_drift`
+container (`{"fairness": {...}, "drift": {...}}`, see Khushi's API section
+below) back into the top-level `fairness` / `drift` arguments above, and
+building `run_assurance.py` that calls all modules and then
+`run_compliance()`.
+
+Phase 2: `evaluate_compliance()` / `run_compliance()` run the real rule
+engine over illustrative sample rules in `app/rbi/`; output still carries
+`is_mock: True` and `evidence_chunks: []` (evidence retrieval is Phase 3).
 
 ## Khushi's API — `app/api/main.py`
 

@@ -861,3 +861,66 @@ the same way keeps the gate record complete and gives Phase 2 a dated,
 agreed baseline to work from.
 
 **Status:** Approved by the team, 2026-09-05.
+
+---
+
+## 2026-09-06 — Phase 2 model-integration: output contract review + stale-artifact guard
+
+**Decision:** Phase 2 stabilization of the model module's output contract so
+the explainability, fairness, drift, and API modules can consume a stable
+real-model output. Scope limited to `app/models/`, `tests/models/`, and the
+model sections of `docs/`. **No interface shape, output key, function name,
+label semantics, threshold, or feature name was changed.**
+
+**1. `predict_batch()` output contract — reviewed, no change needed.** The
+Phase 1 shape is stable and correct for downstream use: `predictions`
+(`list[int]`, `0`=GOOD / `1`=BAD), `probabilities` (`list[float]`, P(class==1)
+= P(BAD)), `feature_matrix` (`pandas.DataFrame`, the 20 raw
+`FEATURE_COLUMNS` in canonical order), `model_metadata` (including the
+additive `label_semantics`), `is_mock: False`. Downstream consumption was
+verified end to end: `explain()` (SHAP + LIME), `fairness_report()`,
+`drift_report()`, and the API `ModelResult` schema all accept the real
+`predict_batch()` output.
+
+**2. `load()` feature-schema guard (the one code change).** `load()` now
+raises `ValueError` naming the differing columns when an artifact
+deserializes but was trained on a feature set that no longer matches
+`app.models.preprocessing.FEATURE_COLUMNS`. Previously a stale local
+`.joblib` produced an opaque sklearn column error deep inside `predict`.
+`predict_batch()`'s internal default-artifact path treats that as a rebuild
+trigger and self-heals. Signature, return type, and the existing
+`FileNotFoundError` behaviour are unchanged. Closes the stale-artifact item
+in the 2026-09-05 Phase 1 sign-off.
+
+**3. Integration tests added.** `tests/models/test_pipeline_integration.py`
+(11 tests) proves the unattended chain CSV → `load_dataset` → `preprocess`
+→ `split_data` → `build_pipeline`+fit → `save`/`load` → `predict_batch`,
+asserting the full output schema, prediction labels, probability structure,
+feature-matrix structure, metadata structure, cross-call stability, the
+API-boundary `DataFrame → list[dict]` round-trip, and stale-artifact
+handling. Model-scoped by design — downstream modules are not imported, to
+avoid coupling this suite to another owner's code.
+
+**Items for other owners (not changed here):**
+
+- **Khushi (API):** `app/api/schemas.py` `ModelMetadata` does not include
+  the additive `label_semantics` key, so the API silently drops it on
+  serialization. `favorable_outcome_label` / `positive_class` are the
+  contract that stops fairness inverting its verdict — the API should carry
+  them through (add an optional `label_semantics` field to `ModelMetadata`).
+- **Khushi (API):** the documented `feature_matrix` `DataFrame → list[dict]`
+  conversion is still not implemented in the API layer (noted 2026-09-05).
+  The model side returns a `DataFrame` as contracted; the round-trip is
+  tested model-side.
+- **Project:** `is_mock` still has no project-wide definition (noted
+  2026-09-05). The model module uses `is_mock: False` = "real model, real
+  data, real arithmetic".
+
+**Why:** Phase 2 wires the real modules together; downstream code is about
+to depend on `predict_batch()` output for real. A stale artifact silently
+producing wrong predictions, or crashing confusingly, is the failure mode
+most damaging to an assurance tool, and it was the one open model-side
+item from the Phase 1 sign-off.
+
+**Status:** Implemented by Namitha (module owner), 2026-09-06. Not committed
+— pending team review of the diff. Full suite passing (257 tests).

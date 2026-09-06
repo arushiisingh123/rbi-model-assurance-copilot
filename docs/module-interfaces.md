@@ -89,6 +89,19 @@ This is a documentation note only — no Phase 0 code changes follow from
 it. Implementing the real `save()`/`load()` persistence and wiring
 `explain()` to call it is Phase 1 work.
 
+### `load()` feature-schema guard (Phase 2 integration, 2026-09-06)
+
+`load()` still returns a fitted `sklearn.pipeline.Pipeline` and still raises
+`FileNotFoundError` when the artifact is absent — no signature or output
+change. Added: if the artifact deserializes but was trained on a feature
+set that no longer matches `app.models.preprocessing.FEATURE_COLUMNS` (a
+stale local `.joblib` from an earlier schema), `load()` now raises
+`ValueError` naming the differing columns, instead of letting an opaque
+sklearn column error surface later inside `predict`. `predict_batch()`'s
+internal default-artifact path treats that as a rebuild trigger, so it
+self-heals and never serves output from a stale model. Closes the stale-
+artifact item recorded in the 2026-09-05 Phase 1 checkpoint sign-off.
+
 ## Manas's output — `app/explainability/explain.py`
 
 ```python

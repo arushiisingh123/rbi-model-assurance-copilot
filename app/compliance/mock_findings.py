@@ -18,17 +18,20 @@ ASSUMED INPUT SHAPE
     The rule ``technical_finding_ref`` strings index into this, e.g.
     "fairness.disparate_impact_ratio" -> tf["fairness"]["disparate_impact_ratio"].
 
-    CLARIFIED (see docs/module-interfaces.md, Khushi's API section):
+    PHASE 2: assembling this dict from the four real module outputs is now
+    done -- ``app/compliance/technical_findings.build_technical_findings()``
+    (and the ``run_compliance()`` one-call wrapper). This MOCK fixture
+    stays for fast, deterministic unit tests of the engine; the real chain
+    is covered by ``tests/compliance/test_phase2_integration.py``.
+
     Khushi's `/fairness-drift` endpoint and `FairnessDriftResult` schema
     wrap the two reports as `{"fairness": {...}, "drift": {...}}` under a
     `fairness_drift` key -- fairness and drift stay separate objects, they
-    are not merged. This dict's top-level "fairness" / "drift" keys match
-    that nesting once unwrapped. STILL OPEN for Phase 2: the actual code
-    that assembles `evaluate_compliance()`'s input from a real
-    `assurance-result` payload (i.e. unwrapping `fairness_drift`) has not
-    been written yet -- that is Khushi's Phase 2 wiring work. Until then
-    the engine degrades to "PENDING" for any path it cannot resolve, so a
-    mismatch cannot crash it.
+    are not merged. STILL OPEN for Phase 2: the code that unwraps that
+    `fairness_drift` container back into top-level "fairness" / "drift"
+    arguments is Khushi's API wiring work. Until then the engine degrades
+    to "PENDING" for any path it cannot resolve, so a mismatch cannot
+    crash it.
 
 The sub-dicts below mirror the field names in docs/module-interfaces.md
 and each carries ``is_mock: True``. The fairness/drift ``status`` values

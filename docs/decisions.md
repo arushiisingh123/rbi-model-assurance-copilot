@@ -861,3 +861,47 @@ the same way keeps the gate record complete and gives Phase 2 a dated,
 agreed baseline to work from.
 
 **Status:** Approved by the team, 2026-09-05.
+
+---
+
+## 2026-09-05 — Phase 2 (Nidhi): compliance consumes real technical findings
+
+**Decision / implementation:** Nidhi's Phase 2 responsibility — "connect
+technical findings to the RBI rule engine and compliance mapping" — is
+implemented as a small assembly layer, `app/compliance/technical_findings.py`:
+
+- `build_technical_findings(*, model, explainability, fairness, drift)` —
+  combines the four real analytical-module outputs
+  (`predict_batch()` / `explain()` / `fairness_report()` / `drift_report()`)
+  into the `{"model", "explainability", "fairness", "drift"}` dict the rule
+  engine already consumes. Each value is passed through untouched; a
+  section given as `None` is omitted and its rules resolve to `PENDING`.
+- `run_compliance(...)` — one-call `evaluate_compliance(build_technical_findings(...))`.
+
+**No engine change was needed.** `evaluate_compliance()` / the rule engine
+already resolve `technical_finding_ref` paths against an arbitrary dict and
+already degrade missing paths to `PENDING`, so they accepted the real
+findings shape as-is. The rule engine, the status vocabulary
+(`PASS`/`WARNING`/`FAIL`/`PENDING`), the thresholds, the approved 5-key
+finding shape, `evidence_chunks: []`, and `is_mock: True` are all
+unchanged. Compliance still does not recompute fairness/drift severity —
+`RBI-FAIR-01` / `RBI-DRIFT-01` mirror `fairness.status` / `drift.status`
+(see "Analytical threshold authority").
+
+**Tests:** `tests/compliance/test_phase2_integration.py` exercises the full
+real chain (real model → real SHAP → real fairness → real drift →
+`build_technical_findings` → `evaluate_compliance`) and asserts every rule
+produces a traceable finding, statuses are valid, the fairness/drift
+statuses are consumed verbatim, and missing sections yield `PENDING` not
+errors. It provisions the real model artifact via Namitha's `train()`,
+matching `tests/explainability/conftest.py`.
+
+**Still Khushi's Phase 2 work:** unwrapping the API `fairness_drift`
+container into the top-level `fairness` / `drift` arguments, wiring the
+analytical modules through FastAPI, and `run_assurance.py`.
+
+**Not done here (out of scope):** RAG / evidence retrieval / LLM (Phase 3);
+the `RBI-`-prefixed sample rule ID follow-up (2026-08-27), still open.
+
+**Status:** Implemented by Nidhi, 2026-09-05. Full suite passing
+(264 tests). Not yet committed — pending review.

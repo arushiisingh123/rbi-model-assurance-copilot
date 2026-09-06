@@ -302,7 +302,7 @@ with no defined threshold (demographic parity difference, KS statistic —
 `docs/thresholds.md` §4) it checks presence only. See
 `docs/decisions.md`, "Analytical threshold authority".
 
-**Assumed input shape for `evaluate_compliance(technical_findings)`:**
+**Input shape for `evaluate_compliance(technical_findings)`:**
 
 ```python
 {
@@ -315,15 +315,35 @@ with no defined threshold (demographic parity difference, KS statistic —
 
 Rule references index into this (`"fairness.status"` →
 `tf["fairness"]["status"]`). `None` / missing paths → `PENDING`, never an
-error. **Clarified:** Khushi's API section below shows `fairness_drift`
-wraps the two reports as `{"fairness": {...}, "drift": {...}}` — separate
-objects, not merged, matching this assumption. **Still open for Phase 2:**
-the code that unwraps `fairness_drift` into this shape has not been
-written yet.
+error.
 
-Phase 1: `evaluate_compliance()` runs a real rule engine over illustrative
-sample rules in `app/rbi/`; output still carries `is_mock: True` and
-`evidence_chunks: []`.
+**Phase 2 assembly (implemented — `app/compliance/technical_findings.py`).**
+The compliance module now assembles this dict from the four real module
+outputs:
+
+```python
+from app.compliance import build_technical_findings, run_compliance
+
+tf = build_technical_findings(model=..., explainability=..., fairness=..., drift=...)
+result = evaluate_compliance(tf)
+# or, in one call:
+result = run_compliance(model=..., explainability=..., fairness=..., drift=...)
+```
+
+`build_technical_findings()` passes each value through untouched (no
+recompute, no reclassification) and omits any section given as `None`
+(those rules resolve to `PENDING`). A section that is not available never
+raises.
+
+**Still owned by Khushi (Phase 2):** unwrapping the API `fairness_drift`
+container (`{"fairness": {...}, "drift": {...}}`, see Khushi's API section
+below) back into the top-level `fairness` / `drift` arguments above, and
+building `run_assurance.py` that calls all modules and then
+`run_compliance()`.
+
+Phase 2: `evaluate_compliance()` / `run_compliance()` run the real rule
+engine over illustrative sample rules in `app/rbi/`; output still carries
+`is_mock: True` and `evidence_chunks: []` (evidence retrieval is Phase 3).
 
 ## Khushi's API — `app/api/main.py`
 

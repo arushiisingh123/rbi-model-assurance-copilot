@@ -18,3 +18,5 @@ chromadb
 scikit-learn
 shap
 lime
+joblib
+pydantic

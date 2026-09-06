@@ -43,3 +43,30 @@ def test_api_client_import_survives_streamlit_style_sys_path():
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout
     assert "ImportError" not in result.stderr
+
+
+def test_dashboard_app_source_contains_drift_disclaimer():
+    """Verify that dashboard_app.py source code contains the approved synthetic drift disclaimer."""
+    source_text = (DASHBOARD_DIR / "dashboard_app.py").read_text(encoding="utf-8")
+    assert "Synthetic / controlled drift scenario" in source_text
+    assert "NOT observed production drift" in source_text
+    assert "2026-08-27" in source_text
+
+
+def test_dashboard_app_renders_without_error_and_shows_disclaimer():
+    """Run dashboard_app via Streamlit AppTest and verify zero exceptions and disclaimer presence."""
+    from streamlit.testing.v1 import AppTest
+
+    app_path = str(DASHBOARD_DIR / "dashboard_app.py")
+    at = AppTest.from_file(app_path)
+    at.run(timeout=30)
+    assert not at.exception, f"Dashboard raised unexpected exception: {at.exception}"
+
+    caption_texts = [c.value for c in at.caption]
+    matching = [
+        c for c in caption_texts
+        if "Synthetic / controlled drift scenario" in c and "NOT observed production drift" in c
+    ]
+    assert len(matching) >= 1, (
+        f"Expected visible synthetic drift disclaimer in dashboard captions, found: {caption_texts}"
+    )

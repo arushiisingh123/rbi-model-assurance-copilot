@@ -5,14 +5,16 @@ fairness & drift, and RBI compliance assurance.
 """
 from fastapi import FastAPI, HTTPException, Query
 
-from app.api.mock_data import (
-    MOCK_ASSURANCE_RESULT,
-    MOCK_COMPLIANCE_RESULT,
-    MOCK_DRIFT_RESULT,
-    MOCK_EXPLAINABILITY_RESULT_LIME,
-    MOCK_EXPLAINABILITY_RESULT_SHAP,
-    MOCK_FAIRNESS_RESULT,
-    MOCK_MODEL_RESULT,
+from app.api.mock_data import MOCK_ASSURANCE_RESULT
+from app.api.orchestration import (
+    DRIFT_SYNTHETIC_NOTE,
+    build_assurance_result,
+    compute_real_compliance,
+    compute_real_drift,
+    compute_real_explainability,
+    compute_real_fairness,
+    compute_real_model,
+    format_model_for_api,
 )
 from app.api.schemas import (
     AssuranceResult,
@@ -24,7 +26,7 @@ from app.api.schemas import (
 
 app = FastAPI(
     title="AI Model Risk & Assurance Copilot",
-    version="0.1.0-phase1",
+    version="0.2.0-phase2",
     description="API for credit-scoring model assurance and RBI compliance evidence.",
 )
 
@@ -37,8 +39,9 @@ def health() -> dict:
 
 @app.get("/model", response_model=ModelResult)
 def get_model() -> dict:
-    """Retrieve model predictions, feature matrix, and metadata."""
-    return MOCK_MODEL_RESULT
+    """Retrieve real model predictions, feature matrix (list[dict]), and metadata."""
+    raw_model = compute_real_model()
+    return format_model_for_api(raw_model)
 
 
 @app.get("/explainability", response_model=ExplainabilityResult)
@@ -48,38 +51,41 @@ def get_explainability(
         description="Explainability method ('shap' or 'lime')",
     ),
 ) -> dict:
-    """Retrieve explainability results for the credit scoring model (SHAP or LIME)."""
-    method_lower = method.lower()
-    if method_lower == "shap":
-        return MOCK_EXPLAINABILITY_RESULT_SHAP
-    elif method_lower == "lime":
-        return MOCK_EXPLAINABILITY_RESULT_LIME
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid explainability method '{method}'. Supported methods are 'shap' and 'lime'.",
-        )
+    """Retrieve real explainability results for the credit scoring model (SHAP or LIME)."""
+    raw_model = compute_real_model()
+    try:
+        return compute_real_explainability(raw_model, method=method)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/fairness-drift", response_model=FairnessDriftResult)
 def get_fairness_drift() -> dict:
-    """Retrieve fairness metrics and drift detection analysis."""
+    """Retrieve real fairness metrics and synthetic scenario drift detection analysis."""
+    raw_model = compute_real_model()
+    fairness_res = compute_real_fairness(raw_model)
+    drift_res = compute_real_drift(raw_model)
     return {
-        "fairness": MOCK_FAIRNESS_RESULT,
-        "drift": MOCK_DRIFT_RESULT,
+        "fairness": fairness_res,
+        "drift": drift_res,
+        "note": DRIFT_SYNTHETIC_NOTE,
     }
 
 
 @app.get("/compliance", response_model=ComplianceResult)
 def get_compliance() -> dict:
-    """Retrieve RBI compliance findings mapped against technical checks."""
-    return MOCK_COMPLIANCE_RESULT
+    """Retrieve RBI compliance findings mapped against real technical checks."""
+    raw_model = compute_real_model()
+    explain_res = compute_real_explainability(raw_model, method="shap")
+    fairness_res = compute_real_fairness(raw_model)
+    drift_res = compute_real_drift(raw_model)
+    return compute_real_compliance(raw_model, explain_res, fairness_res, drift_res)
 
 
 @app.get("/assurance-result", response_model=AssuranceResult)
 def get_assurance_result() -> dict:
     """Retrieve aggregated assurance results across all four evaluation domains."""
-    return MOCK_ASSURANCE_RESULT
+    return build_assurance_result()
 
 
 @app.get("/mock-assurance-result", response_model=AssuranceResult, deprecated=True)

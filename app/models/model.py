@@ -281,6 +281,35 @@ def save(
     return {"status": "saved", "path": path}
 
 
+def _artifact_feature_schema_error(model: Any) -> Optional[str]:
+    """Return a human-readable reason a loaded artifact fails the current
+    raw feature schema, or ``None`` if it matches.
+
+    A joblib artifact deserializes cleanly even when it was trained on an
+    older or different ``FEATURE_COLUMNS`` set; that mismatch would otherwise
+    only surface as an opaque sklearn column error deep inside ``predict``.
+    Downstream modules (explainability, fairness, drift, API) consume this
+    model's output, so the check belongs here at the model boundary.
+
+    Lenient by design: an estimator without ``feature_names_in_`` (it was not
+    fitted on a named DataFrame) is not rejected -- only a definite name
+    mismatch is.
+    """
+    names = getattr(model, "feature_names_in_", None)
+    if names is None:
+        return None
+    actual = list(names)
+    if set(actual) != set(FEATURE_COLUMNS) or len(actual) != len(FEATURE_COLUMNS):
+        missing = sorted(set(FEATURE_COLUMNS) - set(actual))
+        unexpected = sorted(set(actual) - set(FEATURE_COLUMNS))
+        return (
+            f"expected {len(FEATURE_COLUMNS)} raw features "
+            f"(app.models.preprocessing.FEATURE_COLUMNS), got {len(actual)} "
+            f"(missing={missing}, unexpected={unexpected})"
+        )
+    return None
+
+
 def load(
     path: str = DEFAULT_MODEL_ARTIFACT_PATH,
 ) -> Pipeline:
@@ -300,13 +329,27 @@ def load(
     ------
     FileNotFoundError
         If the model artifact does not exist on disk.
+    ValueError
+        If the artifact loads but was trained on a feature schema that no
+        longer matches ``app.models.preprocessing.FEATURE_COLUMNS`` (e.g. a
+        stale local artifact left over from an earlier schema). The message
+        names the differing columns instead of letting a confusing sklearn
+        error surface later during prediction.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"Model artifact not found at '{path}'. "
             "Please train and save the model first using train() or 'python -m app.models.train'."
         )
-    return joblib.load(path)
+    model = joblib.load(path)
+
+    reason = _artifact_feature_schema_error(model)
+    if reason is not None:
+        raise ValueError(
+            f"Model artifact at '{path}' does not match the current feature "
+            f"schema: {reason}. Retrain with 'python -m app.models.train'."
+        )
+    return model
 
 
 def _get_or_train_default_model() -> Pipeline:
@@ -323,8 +366,10 @@ def _get_or_train_default_model() -> Pipeline:
         try:
             return load(DEFAULT_MODEL_ARTIFACT_PATH)
         except Exception:
-            # Corrupt / incompatible artifact (e.g. trained on an older
-            # feature schema): fall back to a fresh deterministic rebuild.
+            # Corrupt, unreadable, or stale-schema artifact (load() now raises
+            # ValueError for a feature-schema mismatch): fall back to a fresh
+            # deterministic rebuild so predict_batch() self-heals rather than
+            # handing downstream modules output from a stale model.
             pass
 
     # Train and save default model if artifact not present

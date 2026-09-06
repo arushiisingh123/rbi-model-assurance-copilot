@@ -861,3 +861,81 @@ the same way keeps the gate record complete and gives Phase 2 a dated,
 agreed baseline to work from.
 
 **Status:** Approved by the team, 2026-09-05.
+---
+
+## 2026-09-06 — Phase 2 fairness and drift integration
+
+**Decision:** Record how fairness and drift connect to the real model and real
+data in Phase 2, and what the drift reference/current pair actually represents.
+Scope: `tests/fairness/`, `tests/drift/`, and the Arushi sections of
+`docs/module-interfaces.md`. **No production fairness or drift code changed** —
+the Phase 1 interfaces already supported the integration unmodified.
+
+**1. Fairness integration path.** `predict_batch()` →
+`fairness_report(predictions, feature_matrix["personal_status_and_sex"],
+favorable_label=0)`. The protected attribute is a named column inside the
+model's `feature_matrix`, so no additional plumbing is required, and
+`protected_attribute` resolves to the canonical name from the Series name.
+
+**2. Favourable label is explicit and matches the model's own declaration.**
+`favorable_label=0` (GOOD). The model publishes this as
+`model_metadata.label_semantics.favorable_outcome_label`, and a test asserts
+that using the declared value reproduces the same result as passing `0`
+directly — so the two can never drift apart silently.
+
+**3. Attribute 9 is used as raw combined categories.** `A91`–`A94` are observed
+in the dataset; `A95` has no instances. No derived sex grouping is applied and
+no codebook is asserted. The canonical name is `personal_status_and_sex`
+everywhere; `personal_status_sex` is not used downstream, and the module
+rejects `gender`/`sex` as reported names.
+
+**4. Drift reference/current for Phase 2 = the German Credit train/test
+splits.** `reference = X_train`, `current = X_test`, from the existing
+`split_data(X, y, test_size=0.2, random_state=42)`.
+
+This is a **controlled integration check on real data, not production drift
+evidence.** It measures distribution differences between the development
+training split and the held-out test split of one static dataset. Nothing in
+this repository observes a live lending population. The result must never be
+presented as production drift, and `build_drift_scenario()` remains the tool
+for explicitly synthetic drift demonstrations — which are exercised separately
+and labelled synthetic wherever they appear.
+
+`predict_batch()["feature_matrix"]` is exactly that test split, so drift fed
+from the model output and drift fed from the split are asserted to be
+identical. The two paths cannot diverge.
+
+**5. Coverage limit recorded.** Drift evaluates the 7 numeric German Credit
+features; the 13 categorical features are excluded, **including
+`personal_status_and_sex`**. A drift result therefore carries no signal about
+the protected attribute. Pinned by test so the limit stays visible rather than
+being assumed away at integration time.
+
+**6. DataFrames in, records at the edge.** `drift_report()` raises `ValueError`
+on serialized `list[dict]` input, and a test asserts it. Orchestration must
+call the analytics in-process with DataFrames; serialization belongs at the API
+boundary.
+
+**Also noted (not a defect):** `demographic_parity_diff` is mathematically
+invariant under binary label inversion — each group's selection rate under
+label `0` is `1 - rate` under label `1`, so `max - min` is unchanged. Only the
+disparate impact ratio distinguishes the two readings. This is pinned by test
+so it is not later mistaken for a bug, and so it is on record that DPD alone
+cannot detect a flipped favourable label.
+
+**Test-environment note.** The trained model artifact is gitignored, so
+integration tests provision it once per session via Namitha's public `train()`,
+following the pattern in `tests/explainability/conftest.py`. Verified to pass
+both with an existing artifact and from a simulated fresh checkout. The
+fixtures are deliberately not `autouse`, so the fairness/drift unit tests do
+not pay for a model they never use.
+
+**Status:** Implemented 2026-09-06 (Arushi). Targeted 24 integration tests
+passed; fairness/drift/config suites 98 passed; full suite 270 passed, 0
+failures. Not committed — pending team review of the diff.
+
+**Open, outside this module's ownership:** the committed local model artifact
+was pickled with scikit-learn 1.8.0 while the environment now has 1.9.0, so
+loading it emits `InconsistentVersionWarning`. Regenerating it
+(`python -m app.models.train`) removes the warning. Belongs to the model owner
+and to the unpinned-dependency question, not to fairness/drift.

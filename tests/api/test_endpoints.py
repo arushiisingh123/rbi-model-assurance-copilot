@@ -75,15 +75,10 @@ def test_fairness_drift_endpoint():
     assert parsed.fairness.protected_attribute == "personal_status_and_sex"
     assert parsed.fairness.status in {"PASS", "WARNING", "FAIL", "PENDING"}
 
-    # Drift is real detection on synthetic scenario
+    # Drift is real detection on the development train/test split
     assert parsed.drift.is_mock is False
     assert parsed.drift.status in {"PASS", "WARNING", "FAIL", "PENDING"}
-    assert parsed.drift.note is not None
-    assert "SYNTHETIC" in parsed.drift.note.upper()
-    assert "OBSERVED" in parsed.drift.note.upper()
-    assert "duration_months" in parsed.drift.note
-    assert "credit_amount" in parsed.drift.note
-    assert "0.5" in parsed.drift.note
+    assert parsed.drift.note is None
 
 
 def test_compliance_endpoint():
@@ -110,9 +105,8 @@ def test_assurance_result_endpoint():
     assert parsed.fairness_drift.drift.is_mock is False
     assert parsed.compliance.is_mock is True
 
-    # Drift synthetic origin labeled in drift note
-    assert parsed.fairness_drift.drift.note is not None
-    assert "synthetic" in parsed.fairness_drift.drift.note.lower()
+    # Drift uses the development train/test split and has no synthetic note
+    assert parsed.fairness_drift.drift.note is None
 
     # Overall note documents per-section status
     assert parsed.note != ""

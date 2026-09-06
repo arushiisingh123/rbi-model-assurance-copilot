@@ -7,7 +7,6 @@ from fastapi import FastAPI, HTTPException, Query
 
 from app.api.mock_data import MOCK_ASSURANCE_RESULT
 from app.api.orchestration import (
-    DRIFT_SYNTHETIC_NOTE,
     build_assurance_result,
     compute_real_compliance,
     compute_real_drift,
@@ -61,14 +60,13 @@ def get_explainability(
 
 @app.get("/fairness-drift", response_model=FairnessDriftResult)
 def get_fairness_drift() -> dict:
-    """Retrieve real fairness metrics and synthetic scenario drift detection analysis."""
+    """Retrieve real fairness metrics and train/test drift detection analysis."""
     raw_model = compute_real_model()
     fairness_res = compute_real_fairness(raw_model)
     drift_res = compute_real_drift(raw_model)
     return {
         "fairness": fairness_res,
         "drift": drift_res,
-        "note": DRIFT_SYNTHETIC_NOTE,
     }
 
 

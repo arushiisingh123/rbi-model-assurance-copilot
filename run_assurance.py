@@ -9,7 +9,6 @@ import sys
 from typing import List, Optional
 
 from app.api.orchestration import (
-    DRIFT_SYNTHETIC_NOTE,
     build_assurance_result,
     summarize,
 )
@@ -47,7 +46,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("\n" + "-" * 60)
         print("Disclaimers & Scenario Notes:")
         print("  Drift Scenario:")
-        print(f"    {DRIFT_SYNTHETIC_NOTE}")
         print("\n  Compliance Evaluation:")
         print(
             "    Compliance findings are evaluated against illustrative sample RBI "

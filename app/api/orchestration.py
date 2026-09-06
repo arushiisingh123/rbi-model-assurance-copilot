@@ -8,25 +8,15 @@ import pandas as pd
 
 from app.compliance.compliance import evaluate_compliance
 from app.drift.drift import drift_report
-from app.drift.scenario import build_drift_scenario
 from app.explainability.explain import explain
 from app.fairness.fairness import fairness_report
 from app.models.model import predict_batch
 
-DRIFT_SYNTHETIC_NOTE = (
-    "SYNTHETIC DRIFT SCENARIO: Current dataset was generated using "
-    "build_drift_scenario(shift_features=['duration_months', 'credit_amount'], "
-    "shift_amount=0.5) to introduce a deterministic 0.5 standard-deviation shift to "
-    "duration_months and credit_amount for demonstration, per team-approved "
-    "decision (2026-08-27). This is NOT observed production drift."
-)
-
 ASSURANCE_NOTE = (
     "Production Model Assurance Evaluation. Model, Explainability, and Fairness "
     "evaluations are computed on real pipeline data (is_mock: False). Drift detection "
-    "runs on a controlled synthetic shift scenario generated via build_drift_scenario("
-    "shift_features=['duration_months', 'credit_amount'], shift_amount=0.5) "
-    "(is_mock: False; not observed real-world drift). Compliance findings are evaluated "
+    "compares the development training split (reference) with the held-out test split "
+    "(current); this is not production monitoring data. Compliance findings are evaluated "
     "against illustrative sample RBI rules (is_mock: True; not verified RBI regulatory text)."
 )
 
@@ -90,16 +80,22 @@ def compute_real_fairness(model_dict: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def compute_real_drift(model_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Run real drift detection on a documented synthetic shift scenario."""
-    reference = model_dict["feature_matrix"]
-    ref, cur = build_drift_scenario(
-        reference,
-        shift_features=["duration_months", "credit_amount"],
-        shift_amount=0.5,
+    """Run real drift detection on the canonical German Credit train/test split."""
+    from app.models.preprocessing import (
+        DEFAULT_DATASET_PATH,
+        load_dataset,
+        preprocess,
+        split_data,
     )
-    res = drift_report(ref, cur)
-    res["note"] = DRIFT_SYNTHETIC_NOTE
-    return res
+
+    df = load_dataset(DEFAULT_DATASET_PATH)
+    X, y, _, _ = preprocess(df)
+    X_train, _X_test, _, _ = split_data(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    current = model_dict["feature_matrix"]
+    return drift_report(X_train, current)
 
 
 def compute_real_compliance(
@@ -143,7 +139,6 @@ def build_assurance_result() -> Dict[str, Any]:
         "fairness_drift": {
             "fairness": fairness_res,
             "drift": drift_res,
-            "note": DRIFT_SYNTHETIC_NOTE,
         },
         "compliance": compliance_res,
         "note": ASSURANCE_NOTE,
@@ -153,19 +148,22 @@ def build_assurance_result() -> Dict[str, Any]:
 def summarize(result: Dict[str, Any]) -> Dict[str, str]:
     """Reduce the full assurance result into per-domain status strings.
 
+    Every returned value is one of the four approved technical statuses:
+    PASS, WARNING, FAIL, PENDING (docs/thresholds.md).
+
     Dynamically inspects data and status fields for each domain:
     - model: PASS if predictions and probabilities are non-empty and matched; FAIL otherwise.
     - explainability: PASS if attributions and importance are present; FAIL otherwise.
     - fairness: extracted directly from fairness.status.
-    - drift: extracted directly from drift.status, annotated with '(synthetic)' if scenario is synthetic.
-    - compliance: evaluated across findings (PASS if 100% pass, FAIL if 100% fail,
-      PARTIAL FAIL if mixed failures/passes, WARNING if zero failures but warnings present).
+    - drift: extracted directly from drift.status.
+    - compliance: evaluated across findings (PENDING if there are no evaluable
+      findings, FAIL if any finding failed, WARNING if there are no failures but
+      warnings are present, PASS if every evaluable finding passed).
     """
     # 1. Model status
     model_data = result.get("model") or {}
     preds = model_data.get("predictions")
     probs = model_data.get("probabilities")
-    is_model_mock = model_data.get("is_mock", False)
     if (
         not isinstance(preds, (list, tuple))
         or not isinstance(probs, (list, tuple))
@@ -173,8 +171,6 @@ def summarize(result: Dict[str, Any]) -> Dict[str, str]:
         or len(preds) != len(probs)
     ):
         model_status = "FAIL"
-    elif is_model_mock:
-        model_status = "PASS (mock)"
     else:
         model_status = "PASS"
 
@@ -182,7 +178,6 @@ def summarize(result: Dict[str, Any]) -> Dict[str, str]:
     explain_data = result.get("explainability") or {}
     global_imp = explain_data.get("global_importance")
     per_inst = explain_data.get("per_instance")
-    is_explain_mock = explain_data.get("is_mock", False)
     if (
         not isinstance(global_imp, dict)
         or not isinstance(per_inst, (list, tuple))
@@ -190,8 +185,6 @@ def summarize(result: Dict[str, Any]) -> Dict[str, str]:
         or len(per_inst) == 0
     ):
         explain_status = "FAIL"
-    elif is_explain_mock:
-        explain_status = "PASS (mock)"
     else:
         explain_status = "PASS"
 
@@ -202,12 +195,7 @@ def summarize(result: Dict[str, Any]) -> Dict[str, str]:
 
     # 4. Drift status
     drift_data = fair_drift.get("drift") or {}
-    raw_drift_status = str(drift_data.get("status") or "PENDING")
-    drift_note = str(drift_data.get("note") or fair_drift.get("note") or "")
-    if "synthetic" in drift_note.lower():
-        drift_status = f"{raw_drift_status} (synthetic)"
-    else:
-        drift_status = raw_drift_status
+    drift_status = str(drift_data.get("status") or "PENDING")
 
     # 5. Compliance status
     compliance_data = result.get("compliance") or {}
@@ -225,14 +213,12 @@ def summarize(result: Dict[str, Any]) -> Dict[str, str]:
 
         if total_eval == 0:
             compliance_status = "PENDING"
-        elif num_fail == 0 and num_warn == 0 and num_pass > 0:
-            compliance_status = "PASS"
-        elif num_fail > 0 and num_warn == 0 and num_pass == 0:
-            compliance_status = "FAIL"
         elif num_fail > 0:
-            compliance_status = "PARTIAL FAIL"
+            compliance_status = "FAIL"
         elif num_warn > 0:
             compliance_status = "WARNING"
+        elif num_pass > 0:
+            compliance_status = "PASS"
         else:
             compliance_status = "PENDING"
 

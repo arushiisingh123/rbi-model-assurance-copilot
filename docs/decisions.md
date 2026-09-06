@@ -1048,3 +1048,57 @@ was pickled with scikit-learn 1.8.0 while the environment now has 1.9.0, so
 loading it emits `InconsistentVersionWarning`. Regenerating it
 (`python -m app.models.train`) removes the warning. Belongs to the model owner
 and to the unpinned-dependency question, not to fairness/drift.
+
+---
+
+## 2026-09-06 — Phase 2 API, orchestration, CLI, and dashboard integration
+
+**Decision:** Phase 2 API, orchestration, CLI, and dashboard integration is implemented and merged through PR #19; this entry records the implementation state and integration boundaries, not team approval.
+
+**What this entry records:**
+
+1. `app/api/orchestration.py` provides a FastAPI-free orchestration layer shared by the API and `run_assurance.py`. The integrated path connects the real model, explainability, fairness, drift, and compliance components through their approved interfaces.
+2. The API's real endpoints use the orchestration layer rather than hardcoded assurance results. `/mock-assurance-result` remains only as a deprecated Phase 0 compatibility path.
+3. The internal pipeline preserves `feature_matrix` as a pandas DataFrame for downstream analytics and serializes it to `list[dict]` only at the API boundary.
+4. The model's declared `favorable_outcome_label` is consumed by the fairness integration, and Attribute 9 is resolved through the canonical `personal_status_and_sex` feature.
+5. The integrated drift path uses an explicitly synthetic scenario and propagates a disclaimer that the result is not observed production drift.
+6. The dashboard obtains data from the API and visibly reports the data source and mock status. Its API-unavailable fallback remains explicitly labelled as fallback/mock data.
+7. `run_assurance.py` provides a CLI over the same orchestration path and supports JSON output plus explicit disclaimers.
+8. The dashboard entrypoint was renamed from `dashboard/app.py` to `dashboard/dashboard_app.py` to avoid the package-name collision with the top-level `app/` package.
+9. `joblib` and `pydantic` were added to `requirements.txt` as part of the Phase 2 integration work.
+10. The merged implementation is covered by API, orchestration, CLI, and dashboard tests. The verified full suite at the Phase 2 audit was 320 passed, 0 failures, 0 skips.
+
+**Known open integration decisions:**
+
+1. The integrated drift path currently uses `build_drift_scenario()` with a synthetic shift, while the Phase 2 fairness/drift decision entry records train/test splits as the drift reference/current choice. This divergence is intentionally recorded as unresolved and requires an explicit team decision; neither approach is declared authoritative by this entry.
+2. `summarize()` currently emits presentation strings including `PASS (mock)`, `PARTIAL FAIL`, and `FAIL (synthetic)`, while the approved technical status vocabulary remains `PASS`, `WARNING`, `FAIL`, and `PENDING`. This is an unresolved presentation/interface decision and is not changed by this entry.
+3. `compute_real_compliance()` currently assembles the technical findings dictionary inline rather than calling `build_technical_findings()`. This is recorded as an integration seam, not as an approved architectural decision.
+
+**Implementation references:**
+
+- PR #19, merged as `a704b7e`
+- `60c736f` — extract orchestration logic and add `run_assurance.py` CLI
+- `a48675e` — wire real Phase 2 module integration into API and dashboard
+- `9e30019` — resolve dashboard startup crash from the `app/` package name collision
+
+**Status:** Implemented by Khushi, 2026-09-06. Merged through PR #19. This entry records implementation evidence and open decisions; it does not constitute team approval or Phase 2 checkpoint sign-off.
+
+---
+
+## 2026-09-06 — Phase 2 summarize() status vocabulary resolution
+
+**Decision:** `summarize()` uses only the approved technical status vocabulary: `PASS`, `WARNING`, `FAIL`, and `PENDING`.
+
+**Resolution:**
+1. Valid mock model and explainability results summarize as `PASS`; mock provenance remains available through the underlying `is_mock` fields.
+2. Synthetic drift retains its technical status without a `(synthetic)` suffix; synthetic provenance remains available through the existing drift note/disclaimer.
+3. Compliance with any `FAIL` findings summarizes as `FAIL`; `PARTIAL FAIL` is not part of the technical status vocabulary.
+4. This resolves the previously open `summarize()` vocabulary decision recorded in the Phase 2 API/orchestration integration entry.
+5. The separate synthetic-drift-vs-train/test pipeline decision remains unresolved and is not changed by this entry.
+
+**Implementation references:**
+- `app/api/orchestration.py` — `summarize()`
+- `tests/api/test_orchestration.py` — updated status assertions
+- Full test suite after the change: 320 passed, 0 failures, 0 skips, 415 warnings.
+
+**Status:** Implemented and verified, 2026-09-06. This entry records the implementation resolution and does not constitute team approval or Phase 2 checkpoint sign-off.

@@ -19,11 +19,14 @@ CLAUDE.md §17.
 
 ## Current phase
 
-**PHASE 1 — INDEPENDENT MODULE DEVELOPMENT.**
+**PHASE 2 — CROSS-MODULE INTEGRATION.**
 
 Phase 0 was signed off on 2026-08-27, with two accepted limitations that
 must be closed early in Phase 1 — see `docs/decisions.md`, "Phase 0
 checkpoint sign-off and Phase 1 start".
+
+Phase 1 was signed off on 2026-09-05 — see `docs/decisions.md`, "Phase 1
+checkpoint sign-off and Phase 2 start".
 
 ## Phase 0 checkpoint criteria (from docs/TASK.md §7)
 

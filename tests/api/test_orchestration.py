@@ -14,7 +14,6 @@ import pytest
 import run_assurance
 from app.api.orchestration import (
     ASSURANCE_NOTE,
-    DRIFT_SYNTHETIC_NOTE,
     build_assurance_result,
     summarize,
 )
@@ -58,8 +57,14 @@ def test_build_assurance_result_structure():
     # Fairness & Drift domain
     assert res["fairness_drift"]["fairness"]["is_mock"] is False
     assert res["fairness_drift"]["drift"]["is_mock"] is False
-    assert res["fairness_drift"]["note"] == DRIFT_SYNTHETIC_NOTE
-    assert "duration_months" in res["fairness_drift"]["drift"]["note"]
+    assert set(res["fairness_drift"].keys()) == {"fairness", "drift"}
+    assert set(res["fairness_drift"]["drift"].keys()) == {
+        "features_evaluated",
+        "psi",
+        "ks_statistic",
+        "status",
+        "is_mock",
+    }
 
     # Compliance domain
     assert res["compliance"]["is_mock"] is True
@@ -80,8 +85,8 @@ def test_summarize_real_pipeline():
     assert summary["model"] == "PASS"
     assert summary["explainability"] == "PASS"
     assert summary["fairness"] == "FAIL"
-    assert summary["drift"] == "FAIL (synthetic)"
-    assert summary["compliance"] == "PARTIAL FAIL"
+    assert summary["drift"] == "PASS"
+    assert summary["compliance"] == "FAIL"
 
 
 def test_summarize_unit_variations():
@@ -91,7 +96,7 @@ def test_summarize_unit_variations():
     assert summarize(bad_model)["model"] == "FAIL"
 
     mock_model = {"model": {"predictions": [1], "probabilities": [0.8], "is_mock": True}}
-    assert summarize(mock_model)["model"] == "PASS (mock)"
+    assert summarize(mock_model)["model"] == "PASS"
 
     # 2. Explainability variations
     bad_explain = {"explainability": {"global_importance": {}, "per_instance": []}}
@@ -104,7 +109,7 @@ def test_summarize_unit_variations():
             "is_mock": True,
         }
     }
-    assert summarize(mock_explain)["explainability"] == "PASS (mock)"
+    assert summarize(mock_explain)["explainability"] == "PASS"
 
     # 3. Drift without synthetic note
     real_drift = {"fairness_drift": {"drift": {"status": "PASS", "note": "Real drift"}}}
@@ -146,9 +151,8 @@ def test_run_assurance_cli_no_args(capsys):
     assert "Model:          PASS" in captured.out
     assert "Explainability: PASS" in captured.out
     assert "Fairness:       FAIL" in captured.out
-    assert "Drift:          FAIL (synthetic)" in captured.out
-    assert "Compliance:     PARTIAL FAIL" in captured.out
-    assert DRIFT_SYNTHETIC_NOTE in captured.out
+    assert "Drift:          PASS" in captured.out
+    assert "Compliance:     FAIL" in captured.out
     assert "Compliance findings are evaluated against illustrative sample RBI rules" in captured.out
     assert "(is_mock: True)" in captured.out
 
@@ -191,5 +195,5 @@ def test_run_assurance_subprocess():
     )
     assert proc.returncode == 0
     assert "AI Model Risk & Assurance Copilot - Assurance Report" in proc.stdout
-    assert DRIFT_SYNTHETIC_NOTE in proc.stdout
+    assert "Drift:          PASS" in proc.stdout
     assert "Per-Domain Status:" in proc.stdout

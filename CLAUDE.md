@@ -949,26 +949,31 @@ A phase is complete only when its checkpoint criteria have been satisfied and th
 
 Current phase:
 
-PHASE 1 — INDEPENDENT MODULE DEVELOPMENT
+PHASE 2 — CROSS-MODULE INTEGRATION
 
 Phase 0 (Foundation) was completed and signed off on 2026-08-27, with two
 accepted limitations that must be closed early in Phase 1. See
 docs/decisions.md, "Phase 0 checkpoint sign-off and Phase 1 start".
 
-Each owner now implements real logic inside their own module, using mock
-inputs where an upstream module is not ready (see section 6).
+Phase 1 (Independent Module Development) was completed and signed off before the
+project entered Phase 2. The Phase 1 module contracts remain authoritative
+unless explicitly superseded by a later approved decision in docs/decisions.md.
 
-Now in scope — within your own assigned module only:
+The current objective is cross-module integration: connect the independently
+completed model, explainability, fairness, drift, RBI-rule, compliance, API,
+and dashboard components through their approved interfaces without changing
+their established contracts.
 
-Real preprocessing, training, evaluation, prediction, save/load
-Real SHAP / LIME explainability
-Real Fairlearn, demographic parity, disparate impact, PSI, KS
-RBI rule repository, rule structure, rule engine foundation
-Real API endpoints and Streamlit views over mock/sample data
+Now in scope — Phase 2 integration:
+
+- Connect real model outputs to downstream explainability, fairness, and drift modules.
+- Connect technical findings to the RBI rule engine and compliance layer.
+- Connect the integrated assurance flow to the API and CLI.
+- Verify the end-to-end data flow, contracts, serialization boundaries, and error handling.
+- Add and maintain integration tests and documentation required for Phase 2 sign-off.
 
 Still out of scope until the team explicitly begins the relevant phase:
 
-Cross-module integration and run_assurance.py (Phase 2)
 Full multi-document RAG pipeline (Phase 3) — the existing one-document
 smoke test continues as-is
 LLM compliance report generation (Phase 3)
@@ -980,9 +985,9 @@ docs/thresholds.md. Those thresholds are project/industry conventions,
 NOT RBI requirements, and must never be presented as RBI requirements
 without a cited RBI source.
 
-The immediate goal is for each owner to replace their Phase 0 stub with
-real, tested logic behind the interfaces recorded in
-docs/module-interfaces.md, without changing those interfaces.
+The immediate goal is to complete and verify the Phase 2 end-to-end assurance
+chain while preserving the approved module interfaces and keeping Phase 3 and
+Phase 4 functionality out of scope until explicitly authorized.
 
 21. Default Behavior for Claude Code
 

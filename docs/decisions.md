@@ -1102,3 +1102,29 @@ and to the unpinned-dependency question, not to fairness/drift.
 - Full test suite after the change: 320 passed, 0 failures, 0 skips, 415 warnings.
 
 **Status:** Implemented and verified, 2026-09-06. This entry records the implementation resolution and does not constitute team approval or Phase 2 checkpoint sign-off.
+
+---
+
+## 2026-09-07 — Phase 2 checkpoint sign-off and Phase 3 start
+
+**Decision:** Phase 2 — Cross-Module Integration is complete and approved by the team.
+
+**Checkpoint evidence:**
+- Real end-to-end assurance chain is integrated:
+  German Credit dataset → real model → real explainability → real fairness → real drift → illustrative compliance → API/CLI/dashboard.
+- Model, explainability, fairness, and drift integrations are verified with `is_mock: False`.
+- Drift detection uses the canonical development training split as reference and held-out test split as current data; it is not production monitoring evidence.
+- Compliance remains explicitly illustrative (`is_mock: True`) and does not claim verified RBI regulatory text.
+- Technical status vocabulary is limited to `PASS`, `WARNING`, `FAIL`, and `PENDING`.
+- API and CLI expose the integrated assurance flow.
+- Dashboard consumes the API and retains a clearly labelled fallback when the API is unavailable.
+- Phase 2 integration and regression tests pass: 320 passed, 0 failures.
+- Governance and phase documentation have been updated to reflect Phase 2.
+
+**Approval:** The team reviewed the Phase 2 implementation and approved the checkpoint. Phase 2 is therefore formally signed off.
+
+**Phase transition:** The project may now enter Phase 3 — RAG + LLM integration, subject to the Phase 3 scope and approval requirements defined in `docs/development-phases.md`.
+
+**Status:** COMPLETE — team-approved Phase 2 sign-off.
+
+**Reference:** Phase 2 implementation and cleanup commit `02e0730`.

@@ -1,4 +1,5 @@
 """Unit tests for FastAPI endpoints (Owner: Khushi)."""
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from app.api.main import app
@@ -9,6 +10,7 @@ from app.api.schemas import (
     FairnessDriftResult,
     ModelResult,
 )
+from app.models.preprocessing import FEATURE_COLUMNS
 
 client = TestClient(app)
 
@@ -24,9 +26,17 @@ def test_model_endpoint():
     assert response.status_code == 200
     body = response.json()
     parsed = ModelResult(**body)
-    assert parsed.is_mock is True
-    assert len(parsed.predictions) == 3
-    assert parsed.model_metadata.feature_names == ["income", "age", "credit_history_len"]
+    assert parsed.is_mock is False
+    assert len(parsed.predictions) == 200
+    assert len(parsed.probabilities) == 200
+    assert parsed.model_metadata.feature_names == FEATURE_COLUMNS
+    assert parsed.model_metadata.label_semantics is not None
+    assert parsed.model_metadata.label_semantics.favorable_outcome_label == 0
+
+    # Feature matrix round-trips via DataFrame
+    df_recovered = pd.DataFrame(body["feature_matrix"])
+    assert len(df_recovered) == 200
+    assert list(df_recovered.columns) == FEATURE_COLUMNS
 
 
 def test_explainability_default_endpoint():
@@ -34,8 +44,10 @@ def test_explainability_default_endpoint():
     assert response.status_code == 200
     body = response.json()
     parsed = ExplainabilityResult(**body)
-    assert parsed.is_mock is True
+    assert parsed.is_mock is False
     assert parsed.method == "shap"
+    assert len(parsed.per_instance) > 0
+    assert len(parsed.global_importance) == len(FEATURE_COLUMNS)
 
 
 def test_explainability_lime_endpoint():
@@ -43,13 +55,15 @@ def test_explainability_lime_endpoint():
     assert response.status_code == 200
     body = response.json()
     parsed = ExplainabilityResult(**body)
-    assert parsed.is_mock is True
+    assert parsed.is_mock is False
     assert parsed.method == "lime"
+    assert len(parsed.per_instance) <= 20
+    assert len(parsed.global_importance) == len(FEATURE_COLUMNS)
 
 
 def test_explainability_invalid_method_returns_4xx():
     response = client.get("/explainability?method=bogus")
-    assert response.status_code >= 400 and response.status_code < 500
+    assert response.status_code == 400
 
 
 def test_fairness_drift_endpoint():
@@ -57,10 +71,19 @@ def test_fairness_drift_endpoint():
     assert response.status_code == 200
     body = response.json()
     parsed = FairnessDriftResult(**body)
-    assert parsed.fairness.is_mock is True
-    assert parsed.drift.is_mock is True
+    assert parsed.fairness.is_mock is False
+    assert parsed.fairness.protected_attribute == "personal_status_and_sex"
     assert parsed.fairness.status in {"PASS", "WARNING", "FAIL", "PENDING"}
+
+    # Drift is real detection on synthetic scenario
+    assert parsed.drift.is_mock is False
     assert parsed.drift.status in {"PASS", "WARNING", "FAIL", "PENDING"}
+    assert parsed.drift.note is not None
+    assert "SYNTHETIC" in parsed.drift.note.upper()
+    assert "OBSERVED" in parsed.drift.note.upper()
+    assert "duration_months" in parsed.drift.note
+    assert "credit_amount" in parsed.drift.note
+    assert "0.5" in parsed.drift.note
 
 
 def test_compliance_endpoint():
@@ -69,7 +92,10 @@ def test_compliance_endpoint():
     body = response.json()
     parsed = ComplianceResult(**body)
     assert parsed.is_mock is True
-    assert len(parsed.findings) >= 2
+    assert len(parsed.findings) == 6
+    # Active evaluated statuses (not all pending)
+    statuses = {f.status for f in parsed.findings}
+    assert statuses - {"PENDING"} != set(), "Compliance findings should evaluate real statuses, not all PENDING"
 
 
 def test_assurance_result_endpoint():
@@ -77,19 +103,27 @@ def test_assurance_result_endpoint():
     assert response.status_code == 200
     body = response.json()
     parsed = AssuranceResult(**body)
-    assert parsed.model.is_mock is True
-    assert parsed.explainability.is_mock is True
-    assert parsed.fairness_drift.fairness.is_mock is True
-    assert parsed.fairness_drift.drift.is_mock is True
+    # Each section independently reports is_mock
+    assert parsed.model.is_mock is False
+    assert parsed.explainability.is_mock is False
+    assert parsed.fairness_drift.fairness.is_mock is False
+    assert parsed.fairness_drift.drift.is_mock is False
     assert parsed.compliance.is_mock is True
+
+    # Drift synthetic origin labeled in drift note
+    assert parsed.fairness_drift.drift.note is not None
+    assert "synthetic" in parsed.fairness_drift.drift.note.lower()
+
+    # Overall note documents per-section status
     assert parsed.note != ""
+    assert "is_mock: False" in parsed.note
+    assert "is_mock: True" in parsed.note
 
 
-def test_mock_assurance_result_endpoint_matches_assurance_result():
+def test_mock_assurance_result_deprecated_endpoint():
     mock_resp = client.get("/mock-assurance-result")
-    canon_resp = client.get("/assurance-result")
     assert mock_resp.status_code == 200
-    assert canon_resp.status_code == 200
-    assert mock_resp.json() == canon_resp.json()
     parsed = AssuranceResult(**mock_resp.json())
     assert parsed.model.is_mock is True
+    assert parsed.compliance.is_mock is True
+

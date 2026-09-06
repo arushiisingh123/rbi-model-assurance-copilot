@@ -76,6 +76,11 @@ def get_fairness_drift() -> tuple[dict, str]:
         fallback = {
             "fairness": MOCK_FAIRNESS_RESULT,
             "drift": MOCK_DRIFT_RESULT,
+            "note": (
+                "SYNTHETIC DRIFT SCENARIO: Controlled synthetic shift scenario "
+                "(shift_features=['duration_months', 'credit_amount'], shift_amount=0.5) "
+                "for interface validation."
+            ),
         }
         return fallback, "fallback"
 

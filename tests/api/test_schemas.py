@@ -10,6 +10,7 @@ from app.api.schemas import (
     ExplainabilityResult,
     FairnessDriftResult,
     FairnessResult,
+    LabelSemantics,
     ModelMetadata,
     ModelResult,
     PerInstanceContribution,
@@ -259,3 +260,41 @@ def test_assurance_result_valid():
     assert assurance.fairness_drift.fairness.status == "WARNING"
     assert assurance.compliance.findings[0].rule_id == "RBI-FAIR-01"
     assert "SYNTHETIC" in assurance.note
+
+
+def test_model_metadata_with_label_semantics():
+    sem = LabelSemantics(
+        **{
+            "0": "GOOD - low credit risk",
+            "1": "BAD - high credit risk / likely default",
+            "positive_class": 1,
+            "probabilities_represent": "P(class == 1) = P(BAD / high credit risk)",
+            "favorable_outcome_label": 0,
+        }
+    )
+    meta = ModelMetadata(
+        model_type="logistic_regression",
+        version="0.1.0",
+        trained_on="data/german_credit/german_credit.csv",
+        feature_names=["duration_months", "credit_amount"],
+        label_semantics=sem,
+    )
+    assert meta.label_semantics is not None
+    assert meta.label_semantics.favorable_outcome_label == 0
+    assert meta.label_semantics.positive_class == 1
+    dumped = meta.model_dump(by_alias=True)
+    assert dumped["label_semantics"]["0"] == "GOOD - low credit risk"
+    assert dumped["label_semantics"]["1"] == "BAD - high credit risk / likely default"
+
+
+def test_drift_result_with_note():
+    res = DriftResult(
+        features_evaluated=["duration_months", "credit_amount"],
+        psi=0.09,
+        ks_statistic=0.11,
+        status="PASS",
+        is_mock=False,
+        note="SYNTHETIC DRIFT SCENARIO: Controlled shift.",
+    )
+    assert res.note == "SYNTHETIC DRIFT SCENARIO: Controlled shift."
+    assert res.is_mock is False

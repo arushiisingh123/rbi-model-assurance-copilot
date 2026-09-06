@@ -25,9 +25,11 @@ def test_mock_model_result_validity_and_shape():
     assert len(parsed.predictions) == 3
     assert len(parsed.probabilities) == 3
     assert len(parsed.feature_matrix) == 3
-    assert parsed.model_metadata.feature_names == ["income", "age", "credit_history_len"]
+    assert len(parsed.model_metadata.feature_names) == 20
+    assert "personal_status_and_sex" in parsed.model_metadata.feature_names
     for row in parsed.feature_matrix:
-        assert set(row.keys()) == {"income", "age", "credit_history_len"}
+        assert len(row) == 20
+        assert "personal_status_and_sex" in row
 
 
 def test_mock_explainability_shap_validity_and_shape():
@@ -36,8 +38,10 @@ def test_mock_explainability_shap_validity_and_shape():
     assert parsed.method == "shap"
     assert len(parsed.per_instance) == 3
     for inst in parsed.per_instance:
-        assert set(inst.contributions.keys()) == {"income", "age", "credit_history_len"}
-    assert set(parsed.global_importance.keys()) == {"income", "age", "credit_history_len"}
+        assert len(inst.contributions) == 20
+        assert "duration_months" in inst.contributions
+    assert len(parsed.global_importance) == 20
+    assert "duration_months" in parsed.global_importance
 
 
 def test_mock_explainability_lime_validity_and_shape():
@@ -46,22 +50,33 @@ def test_mock_explainability_lime_validity_and_shape():
     assert parsed.method == "lime"
     assert len(parsed.per_instance) == 3
     for inst in parsed.per_instance:
-        assert set(inst.contributions.keys()) == {"income", "age", "credit_history_len"}
-    assert set(parsed.global_importance.keys()) == {"income", "age", "credit_history_len"}
+        assert len(inst.contributions) == 20
+        assert "duration_months" in inst.contributions
+    assert len(parsed.global_importance) == 20
+    assert "duration_months" in parsed.global_importance
 
 
 def test_mock_fairness_result_validity():
     parsed = FairnessResult(**MOCK_FAIRNESS_RESULT)
     assert parsed.is_mock is True
-    assert parsed.protected_attribute == "gender"
+    assert parsed.protected_attribute == "personal_status_and_sex"
     assert parsed.status in {"PASS", "WARNING", "FAIL", "PENDING"}
 
 
 def test_mock_drift_result_validity():
     parsed = DriftResult(**MOCK_DRIFT_RESULT)
     assert parsed.is_mock is True
-    assert parsed.features_evaluated == ["income", "age", "credit_history_len"]
+    assert parsed.features_evaluated == [
+        "duration_months",
+        "credit_amount",
+        "installment_rate",
+        "present_residence",
+        "age",
+        "existing_credits",
+        "num_dependents",
+    ]
     assert parsed.status in {"PASS", "WARNING", "FAIL", "PENDING"}
+    assert parsed.note is not None
 
 
 def test_mock_compliance_result_validity():

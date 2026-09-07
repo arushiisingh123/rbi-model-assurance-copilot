@@ -25,7 +25,6 @@ thresholds used here are project/industry conventions, not RBI requirements
 
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from app.config.thresholds import (
@@ -64,18 +63,91 @@ def _resolve_protected_attribute_name(sensitive_feature: Any) -> str:
     return DEFAULT_PROTECTED_ATTRIBUTE
 
 
-def _pending_result(attr_name: str) -> dict:
-    """Neutral result used when fairness cannot be meaningfully assessed.
+def _analyse_fairness(
+    predictions: Any,
+    sensitive_feature: Any,
+    favorable_label: Any,
+) -> dict:
+    """Run the shared fairness arithmetic once.
 
-    Metrics are neutral placeholders (no disparity measured), and the status is
-    PENDING rather than PASS so an unassessable run is never reported as a pass.
+    Single source of truth for both ``fairness_report()`` (the Phase 2 public
+    contract) and ``app.fairness.evidence.fairness_evidence()`` (the Phase 3
+    evidence layer), so the two can never disagree about a rate, a metric, or a
+    status. Neither caller recomputes anything.
+
+    Returns:
+        protected_attribute (str): resolved reported name.
+        groups (list[dict]): per-group ``group`` / ``group_count`` /
+            ``favorable_count`` / ``selection_rate``, in first-observed order.
+        demographic_parity_diff (float): rounded aggregate.
+        disparate_impact_ratio (float): rounded aggregate.
+        status (str): PASS, WARNING, FAIL, or PENDING.
+
+    ``groups`` is populated whenever the inputs validate -- including both
+    PENDING cases. A comparison that could not be made still has observable
+    group counts, and withholding them would leave a report with nothing to
+    show for an input that was perfectly readable.
     """
+    if favorable_label is None:
+        raise ValueError(
+            "favorable_label must not be None. The favourable outcome is "
+            "domain-specific and is never inferred from the data; for the "
+            "current credit model 0 = GOOD (favourable) and 1 = BAD."
+        )
+
+    # Resolve the reported name before cleaning, so a Series name survives.
+    attr_name = _resolve_protected_attribute_name(sensitive_feature)
+
+    clean_preds, clean_sens = validate_fairness_inputs(predictions, sensitive_feature)
+
+    # pd.unique preserves first-observed order; metrics and evidence share it.
+    observed_groups = pd.unique(clean_sens)
+
+    groups = []
+    selection_rates = []
+    for group in observed_groups:
+        member_preds = clean_preds[clean_sens == group]
+        group_count = int(len(member_preds))
+        favorable_count = int((member_preds == favorable_label).sum())
+        # Selection rate: P(pred == favorable_label | group), i.e. favourable
+        # predictions over group size.
+        rate = favorable_count / group_count
+        selection_rates.append(rate)
+        groups.append(
+            {
+                "group": group,
+                "group_count": group_count,
+                "favorable_count": favorable_count,
+                "selection_rate": round(rate, _ROUNDING_DP),
+            }
+        )
+
+    max_rate = max(selection_rates)
+    min_rate = min(selection_rates)
+
+    # Two ways the comparison cannot be made: fewer than two groups to compare,
+    # or no group receives the favourable outcome at all (leaving the ratio
+    # undefined). Both report neutral aggregates with PENDING -- never PASS.
+    if len(observed_groups) < 2 or max_rate == 0.0:
+        return {
+            "protected_attribute": attr_name,
+            "groups": groups,
+            "demographic_parity_diff": 0.0,
+            "disparate_impact_ratio": 1.0,
+            "status": STATUS_PENDING,
+        }
+
+    dp_diff = round(float(max_rate - min_rate), _ROUNDING_DP)
+    di_ratio = round(float(min_rate / max_rate), _ROUNDING_DP)
+
     return {
         "protected_attribute": attr_name,
-        "demographic_parity_diff": 0.0,
-        "disparate_impact_ratio": 1.0,
-        "status": STATUS_PENDING,
-        "is_mock": False,
+        "groups": groups,
+        "demographic_parity_diff": dp_diff,
+        "disparate_impact_ratio": di_ratio,
+        # Classify the reported value, not the pre-rounding value, so the ratio
+        # shown in a report always matches the status shown beside it.
+        "status": classify_disparate_impact(di_ratio),
     }
 
 
@@ -122,50 +194,15 @@ def fairness_report(
         Demographic parity difference is reported as a metric only; it is never
         classified, because no threshold is defined for it (docs/thresholds.md).
     """
-    if favorable_label is None:
-        raise ValueError(
-            "favorable_label must not be None. The favourable outcome is "
-            "domain-specific and is never inferred from the data; for the "
-            "current credit model 0 = GOOD (favourable) and 1 = BAD."
-        )
+    analysis = _analyse_fairness(predictions, sensitive_feature, favorable_label)
 
-    # Resolve the reported name before cleaning, so a Series name survives.
-    attr_name = _resolve_protected_attribute_name(sensitive_feature)
-
-    clean_preds, clean_sens = validate_fairness_inputs(predictions, sensitive_feature)
-
-    groups = pd.unique(clean_sens)
-
-    # Fewer than 2 distinct groups -> nothing to compare against.
-    if len(groups) < 2:
-        return _pending_result(attr_name)
-
-    # Selection rate per group: P(pred == favorable_label | group == g)
-    selection_rates = []
-    for group in groups:
-        group_preds = clean_preds[clean_sens == group]
-        selection_rates.append(float(np.mean(group_preds == favorable_label)))
-
-    max_rate = max(selection_rates)
-    min_rate = min(selection_rates)
-
-    # No group receives the favourable outcome at all. The ratio is undefined
-    # and there is no disparity to measure, so this is not a pass -- it is an
-    # assessment that could not be performed.
-    if max_rate == 0.0:
-        return _pending_result(attr_name)
-
-    dp_diff = round(float(max_rate - min_rate), _ROUNDING_DP)
-    di_ratio = round(float(min_rate / max_rate), _ROUNDING_DP)
-
-    # Classify the reported value, not the pre-rounding value, so the ratio
-    # shown in a report always matches the status shown beside it.
-    status = classify_disparate_impact(di_ratio)
-
+    # Exactly the five approved keys -- the Phase 3 evidence layer
+    # (app.fairness.evidence) exposes the per-group detail instead, so this
+    # contract stays unchanged.
     return {
-        "protected_attribute": attr_name,
-        "demographic_parity_diff": dp_diff,
-        "disparate_impact_ratio": di_ratio,
-        "status": status,
+        "protected_attribute": analysis["protected_attribute"],
+        "demographic_parity_diff": analysis["demographic_parity_diff"],
+        "disparate_impact_ratio": analysis["disparate_impact_ratio"],
+        "status": analysis["status"],
         "is_mock": False,
     }

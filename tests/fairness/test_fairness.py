@@ -366,3 +366,74 @@ def test_raw_attribute_9_categories_are_used_as_is():
 def test_non_series_sensitive_feature_uses_default_name():
     res = fairness_report([1, 0, 1, 0], ["A", "A", "B", "B"], favorable_label=1)
     assert res["protected_attribute"] == "personal_status_and_sex"
+
+
+# --------------------------------------------------------------------------
+# Shared-arithmetic invariants (Phase 3 evidence refactor)
+#
+# fairness_report() and app.fairness.evidence.fairness_evidence() now share one
+# private calculation. These pin the parts of that contract a refactor could
+# silently change.
+# --------------------------------------------------------------------------
+
+
+def test_aggregates_use_full_precision_rates_not_rounded_ones():
+    """The ratio is computed from unrounded selection rates.
+
+    Group A: 1/7 = 0.142857...   Group B: 1/3 = 0.333333...
+    Full precision -> (1/7) / (1/3) = 3/7 = 0.428571... -> reported 0.4286
+    Rounding the rates first  -> 0.1429 / 0.3333        -> would give 0.4287
+
+    The two differ in the last place, so this distinguishes them.
+    """
+    preds = [1, 0, 0, 0, 0, 0, 0] + [1, 0, 0]
+    sens = ["A"] * 7 + ["B"] * 3
+
+    res = fairness_report(preds, sens, favorable_label=1)
+
+    assert res["disparate_impact_ratio"] == 0.4286
+    assert res["disparate_impact_ratio"] != 0.4287
+
+
+def test_evidence_reports_rounded_rates_while_report_keeps_full_precision():
+    """Evidence rounds the per-group rate for display; the metric does not."""
+    from app.fairness import fairness_evidence
+
+    preds = [1, 0, 0, 0, 0, 0, 0] + [1, 0, 0]
+    sens = ["A"] * 7 + ["B"] * 3
+
+    groups = [
+        r
+        for r in fairness_evidence(preds, sens, favorable_label=1)
+        if r["evidence_type"] == "fairness_group"
+    ]
+    by_group = {g["group"]: g for g in groups}
+
+    assert by_group["A"]["selection_rate"] == 0.1429  # round(1/7, 4)
+    assert by_group["B"]["selection_rate"] == 0.3333  # round(1/3, 4)
+
+    # ...yet the aggregate still comes from the unrounded values.
+    assert fairness_report(preds, sens, favorable_label=1)[
+        "disparate_impact_ratio"
+    ] == 0.4286
+
+
+def test_selection_rate_definition_is_shared_by_both_entry_points():
+    """Both surfaces agree on favourable/total, group by group."""
+    from app.fairness import fairness_evidence
+
+    preds = [1, 1, 0, 1, 0, 0]
+    sens = ["A", "A", "A", "B", "B", "B"]
+
+    groups = [
+        r
+        for r in fairness_evidence(preds, sens, favorable_label=1)
+        if r["evidence_type"] == "fairness_group"
+    ]
+    rates = {g["group"]: g["selection_rate"] for g in groups}
+
+    assert rates["A"] == pytest.approx(2 / 3, abs=1e-4)
+    assert rates["B"] == pytest.approx(1 / 3, abs=1e-4)
+
+    report = fairness_report(preds, sens, favorable_label=1)
+    assert report["disparate_impact_ratio"] == round((1 / 3) / (2 / 3), 4)

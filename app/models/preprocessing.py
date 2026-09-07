@@ -19,6 +19,20 @@ and the fairness module. It is a combined marital-status + sex categorical
 field (categories ``A91``-``A95``); it is NOT a standalone gender/sex
 column and is preserved raw for downstream fairness grouping.
 
+Stable per-record identity (Phase 3, team decision 2026-09-07)
+-------------------------------------------------------------
+The raw UCI CSV ships no identifier column, so ``load_dataset()`` attaches a
+deterministic ``instance_id`` column (``INSTANCE_ID_COLUMN``): source row
+``i`` -> ``f"gc-{i:04d}"``. It is stable across reloads because the CSV and
+its fixed row order never change, and it travels with each record as a
+column *value*, so it survives ``preprocess()`` (which drops it, keeping
+``X`` to the 20 model features), the stratified shuffle in ``split_data()``,
+and any later ``reset_index()``. ``instance_id`` is identity metadata only
+-- it is never a model feature, is not part of ``FEATURE_COLUMNS``, and
+never enters the pipeline's ColumnTransformer / OneHotEncoder / scaler.
+Downstream modules (explainability, reporting/LLM) must key record identity
+on this value, never on a DataFrame row position or a reset index.
+
 Target label semantics (project-agreed, do not reverse)
 ------------------------------------------------------
 - ``0`` = GOOD  (low credit risk)
@@ -100,6 +114,34 @@ FEATURE_COLUMNS: List[str] = [
 TARGET_COLUMN = "credit_risk"
 EXPECTED_ROW_COUNT = 1000
 
+# Stable per-record identity (Phase 3). Not a model feature -- see the module
+# docstring. Kept out of FEATURE_COLUMNS on purpose.
+INSTANCE_ID_COLUMN = "instance_id"
+DATASET_INSTANCE_ID_PREFIX = "gc-"
+FALLBACK_INSTANCE_ID_PREFIX = "row-"
+
+
+def make_dataset_instance_ids(n: int) -> List[str]:
+    """Deterministic identifiers for the static German Credit CSV.
+
+    Source row ``i`` -> ``f"gc-{i:04d}"``. Deterministic (no uuid/timestamp/
+    randomness) and stable across reloads because the CSV row order is fixed.
+    """
+    return [f"{DATASET_INSTANCE_ID_PREFIX}{i:04d}" for i in range(n)]
+
+
+def make_fallback_instance_ids(n: int) -> List[str]:
+    """Deterministic identifiers for a custom prediction batch with no IDs.
+
+    Used only when a caller-supplied ``feature_matrix`` carries no
+    ``instance_id`` column. Positional (``f"row-{i:04d}"``) and derived purely
+    from the supplied batch order, so repeated calls on the same batch return
+    identical IDs. A distinct prefix from the dataset scheme makes clear these
+    are batch-local placeholders, not German Credit record identities. Callers
+    that need durable identity must supply their own ``instance_id`` column.
+    """
+    return [f"{FALLBACK_INSTANCE_ID_PREFIX}{i:04d}" for i in range(n)]
+
 
 def load_dataset(path: str = DEFAULT_DATASET_PATH) -> pd.DataFrame:
     """Load the credit dataset from CSV and validate its structure.
@@ -160,6 +202,21 @@ def load_dataset(path: str = DEFAULT_DATASET_PATH) -> pd.DataFrame:
             f"Dataset contains unexpected missing values in columns: {cols_with_nulls}"
         )
 
+    # Attach a stable per-record identifier (Phase 3). The raw CSV has none, so
+    # a deterministic one is synthesized from the fixed source row order. If a
+    # future dataset ships its own identifier column it is validated and kept
+    # rather than overwritten.
+    if INSTANCE_ID_COLUMN in df.columns:
+        supplied_ids = df[INSTANCE_ID_COLUMN]
+        if supplied_ids.isnull().any() or supplied_ids.duplicated().any():
+            raise ValueError(
+                f"Dataset at '{path}' has an '{INSTANCE_ID_COLUMN}' column with "
+                "null or duplicate values; identifiers must be unique and non-null."
+            )
+        df[INSTANCE_ID_COLUMN] = supplied_ids.astype(str)
+    else:
+        df[INSTANCE_ID_COLUMN] = make_dataset_instance_ids(len(df))
+
     return df
 
 
@@ -177,6 +234,11 @@ def preprocess(
 
     Note: The raw `personal_status_and_sex` column is preserved unmodified in
     `X`. Fairness grouping belongs strictly to downstream fairness modules.
+
+    `X` contains exactly the 20 `FEATURE_COLUMNS`. Any `instance_id` column
+    added by `load_dataset()` is identity metadata, not a model feature, and
+    is intentionally not carried into `X` here. `predict_batch()` re-aligns
+    identity to predictions separately.
 
     Parameters
     ----------

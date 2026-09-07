@@ -1128,3 +1128,95 @@ and to the unpinned-dependency question, not to fairness/drift.
 **Status:** COMPLETE — team-approved Phase 2 sign-off.
 
 **Reference:** Phase 2 implementation and cleanup commit `02e0730`.
+
+---
+
+## 2026-09-07 — Phase 3 (Namitha): stable per-record identity (`instance_id`) at the data/model boundary
+
+**Decision (team-approved architectural change):** Every input record carries
+a stable `instance_id` generated or preserved at the data/model boundary.
+Explainability and later reporting/LLM components must key record identity on
+this identifier instead of a `row_index`, a pandas row position, or a value
+from `reset_index()`.
+
+**Scope of this change (model-side only):** `app/models/preprocessing.py`,
+`app/models/model.py`, `app/models/__init__.py`, `tests/models/`,
+`tests/models/fixtures/sample_model_output.json`, and the model sections of
+`docs/module-interfaces.md`. **No teammate implementation module was
+modified.** No interface key was renamed or removed; `instance_ids` is a new
+additive output key.
+
+**What was implemented:**
+
+1. **Origin — `load_dataset()`.** The raw UCI German Credit CSV has no
+   identifier column, so `load_dataset()` attaches a deterministic
+   `instance_id` column (`INSTANCE_ID_COLUMN = "instance_id"`): source row
+   `i` → `f"gc-{i:04d}"`. Deterministic — no `uuid4()`, timestamp, or
+   randomness — and identical on every reload because the CSV row order is
+   fixed. A future dataset that ships its own `instance_id` column is
+   validated (unique, non-null) and kept rather than overwritten.
+
+2. **Carried by value, not by index.** `instance_id` is a column value, so it
+   survives `preprocess()` (which still returns `X` as exactly the 20
+   `FEATURE_COLUMNS`, dropping the id), the stratified shuffle in
+   `split_data()`, prediction, `reset_index()`, and repeated calls.
+
+3. **`predict_batch()` — additive `instance_ids` output.** A batch-aligned
+   `list[str]`: `instance_ids[i]` identifies the same record as
+   `predictions[i]` / `probabilities[i]` / `feature_matrix` row `i`.
+   - `feature_matrix=None`: the `gc-NNNN` ids for the held-out test split,
+     aligned to the shuffled rows via the pre-reset index as a join key back
+     to the ids captured at load (the id *value* is the identity, not the
+     index).
+   - custom `feature_matrix` **with** an `instance_id` column: values kept
+     verbatim (cast to `str`), dropped before scoring, never fed to the
+     model; null values raise `ValueError`.
+   - custom `feature_matrix` **without** an `instance_id` column:
+     deterministic positional placeholders `row-NNNN` from the supplied batch
+     order (distinct prefix, so they are visibly batch-local, not dataset
+     identities). No random id is ever generated at prediction time.
+
+4. **Not an ML feature.** `instance_id` is excluded from `FEATURE_COLUMNS`
+   and never reaches the `ColumnTransformer` / `OneHotEncoder` /
+   `StandardScaler` / `LogisticRegression`. Verified: predictions and
+   probabilities for the same feature rows are unchanged (the frozen fixture
+   predictions `[0, 0, 1, 0, 0]` still hold).
+
+**Custom-input contract — not ambiguous, so no breaking change was needed.**
+The existing custom path already selected `feature_matrix[FEATURE_COLUMNS]`,
+so an extra `instance_id` column is an additive, non-breaking input. The
+"no id column supplied" case is resolved with a documented deterministic
+positional fallback rather than a new required argument.
+
+**Predictions changed:** No. Model behaviour and metrics are identical.
+
+**Tests:** `tests/models/test_instance_id.py` added (25 test functions across
+dataset-level identity, survival through preprocessing/splitting/shuffling,
+`instance_id` not a feature, `predict_batch()` alignment/determinism, custom
+input preservation, no random generation, row-reset/reorder not redefining
+identity, and prediction semantics unchanged). Existing `tests/models/`
+updated for the additive key. Model suite: 67 passed. Full suite: 345 passed.
+
+**Downstream handoffs (not implemented here):**
+
+- **Manas (explainability):** `per_instance[*].row_index` is a position
+  within the explained batch, not a durable identity. Aligning it to
+  `instance_id` (renaming or adding a key to `per_instance`) is a
+  Manas-owned change. This entry only makes the identifier available in the
+  model output.
+- **Khushi (API):** `app/api/schemas.py` `ModelResult` does not declare
+  `instance_ids`, so the API drops it on serialization. Adding
+  `instance_ids: list[str]` to `ModelResult` is a Khushi-owned API
+  follow-up. `format_model_for_api()` already passes the value through.
+
+**Why:** downstream identity currently rests on `row_index` / a reset pandas
+index, which is a position within whatever batch happened to be passed, not a
+record identity. The stratified split shuffles, so "row 0" of a split is not
+record 0 of the dataset; any explanation or report keyed that way silently
+mislabels records once batching or ordering changes. A deterministic id
+generated once at the data boundary removes that failure mode without
+altering the model.
+
+**Status:** Implemented by Namitha (module owner), 2026-09-07, on
+`feature/namitha-phase3-instance-id`. Not committed — pending team review of
+the diff.

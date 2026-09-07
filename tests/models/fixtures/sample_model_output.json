@@ -13,6 +13,13 @@
     0.4933570818824489,
     0.15016186936184733
   ],
+  "instance_ids": [
+    "gc-0030",
+    "gc-0128",
+    "gc-0289",
+    "gc-0216",
+    "gc-0966"
+  ],
   "feature_matrix": [
     {
       "status_checking_account": "A12",

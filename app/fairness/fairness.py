@@ -87,9 +87,14 @@ def fairness_report(
     """Calculate demographic parity difference and disparate impact ratio.
 
     Args:
-        predictions: Model predictions (binary or discrete labels).
+        predictions: Model predictions (binary or discrete labels). Paired with
+            ``sensitive_feature`` by position: element i of each describes the
+            same record. A pandas input whose index is not ``0..n-1`` is
+            rejected rather than silently re-paired by index -- pass
+            ``.reset_index(drop=True)`` or ``.to_numpy()``.
         sensitive_feature: Protected / sensitive attribute categories. Used
-            as-is; no codebook or derived sex grouping is applied.
+            as-is; no codebook or derived sex grouping is applied. Same
+            positional pairing rule as ``predictions``.
         favorable_label: The prediction value that counts as the favourable
             outcome. Defaults to ``DEFAULT_FAVORABLE_LABEL`` (0), matching the
             current credit model where 0 = GOOD and 1 = BAD. Pass explicitly
@@ -106,8 +111,9 @@ def fairness_report(
             is_mock (bool): False -- the calculation is real.
 
     Raises:
-        ValueError: if favorable_label is None, if either input is None, if the
-            inputs have mismatched lengths, or if no valid rows remain.
+        ValueError: if favorable_label is None, if either input is None, if
+            either pandas input has a non-positional index, if the inputs have
+            mismatched lengths, or if no valid rows remain.
 
     Notes:
         PENDING is returned when the assessment cannot be performed meaningfully:

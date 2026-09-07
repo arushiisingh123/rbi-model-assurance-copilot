@@ -15,6 +15,7 @@ test agrees with itself.
 Contract references: ``docs/module-interfaces.md`` (Arushi's section) and
 ``docs/decisions.md``, "Phase 2 fairness and drift integration".
 """
+
 import math
 
 import pandas as pd
@@ -39,7 +40,9 @@ def sensitive_feature(real_model_output: dict) -> pd.Series:
 
 
 @pytest.fixture(scope="module")
-def integration_report(real_model_output: dict, sensitive_feature: pd.Series) -> dict:
+def integration_report(
+    real_model_output: dict, sensitive_feature: pd.Series
+) -> dict:
     """The Phase 2 fairness result for the real model, favourable outcome = 0."""
     return fairness_report(
         real_model_output["predictions"],
@@ -59,7 +62,10 @@ def test_model_output_supplies_everything_fairness_needs(real_model_output: dict
 
     assert isinstance(feature_matrix, pd.DataFrame)
     assert "personal_status_and_sex" in feature_matrix.columns
-    assert "personal_status_and_sex" in real_model_output["model_metadata"]["feature_names"]
+    assert (
+        "personal_status_and_sex"
+        in real_model_output["model_metadata"]["feature_names"]
+    )
     assert real_model_output["is_mock"] is False
     # The deprecated spelling must not reappear anywhere downstream.
     assert "personal_status_sex" not in feature_matrix.columns
@@ -73,6 +79,38 @@ def test_predictions_and_sensitive_feature_are_aligned(
     assert len(predictions) == len(sensitive_feature)
     assert len(predictions) > 0
     assert set(predictions).issubset({0, 1})
+
+
+def test_model_output_satisfies_the_positional_pairing_contract(
+    sensitive_feature: pd.Series,
+):
+    """The real integration path must not depend on luck.
+
+    Fairness pairs predictions to groups by position, and rejects a pandas input
+    whose index is not 0..n-1. predict_batch() resets its feature_matrix index,
+    so the sensitive feature satisfies that contract -- this pins the dependency
+    so a future change upstream fails here rather than silently downstream.
+    """
+    assert sensitive_feature.index.equals(pd.RangeIndex(len(sensitive_feature)))
+
+
+def test_unreset_feature_matrix_index_is_rejected(
+    real_model_output: dict, sensitive_feature: pd.Series
+):
+    """A pandas Series with a non-positional index must fail loudly.
+
+    This simulates an upstream caller passing a feature Series whose original
+    row labels were not reset before pairing it with the positional prediction
+    list. The fairness boundary rejects it rather than allowing pandas to align
+    by index.
+    """
+    unreset = sensitive_feature.copy()
+    unreset.index = range(1000, 1000 + len(unreset))
+
+    with pytest.raises(ValueError, match="non-positional index"):
+        fairness_report(
+            real_model_output["predictions"], unreset, favorable_label=0
+        )
 
 
 def test_real_model_fairness_report_contract(integration_report: dict):
@@ -116,7 +154,9 @@ def test_protected_attribute_is_resolved_from_the_column_name(
     assert unnamed["protected_attribute"] == "personal_status_and_sex"
 
 
-def test_attribute_9_is_used_as_raw_combined_categories(sensitive_feature: pd.Series):
+def test_attribute_9_is_used_as_raw_combined_categories(
+    sensitive_feature: pd.Series,
+):
     """No derived sex grouping is applied: the raw A9x categories are the groups.
 
     Attribute 9 combines marital/personal status with sex, so these labels must
@@ -137,7 +177,9 @@ def test_attribute_9_is_used_as_raw_combined_categories(sensitive_feature: pd.Se
 
 
 def test_favorable_label_matches_model_declared_semantics(
-    real_model_output: dict, sensitive_feature: pd.Series, integration_report: dict
+    real_model_output: dict,
+    sensitive_feature: pd.Series,
+    integration_report: dict,
 ):
     """The model declares its favourable label; fairness must agree with it."""
     declared = real_model_output["model_metadata"]["label_semantics"][
@@ -154,7 +196,9 @@ def test_favorable_label_matches_model_declared_semantics(
 
 
 def test_polarity_regression_on_real_model_output(
-    real_model_output: dict, sensitive_feature: pd.Series, integration_report: dict
+    real_model_output: dict,
+    sensitive_feature: pd.Series,
+    integration_report: dict,
 ):
     """Reading the favourable label backwards changes the measured disparity.
 
@@ -181,7 +225,9 @@ def test_polarity_regression_on_real_model_output(
 
 
 def test_demographic_parity_difference_is_invariant_under_label_inversion(
-    real_model_output: dict, sensitive_feature: pd.Series, integration_report: dict
+    real_model_output: dict,
+    sensitive_feature: pd.Series,
+    integration_report: dict,
 ):
     """DPD cannot detect a flipped favourable label, but the ratio can.
 
@@ -202,7 +248,9 @@ def test_demographic_parity_difference_is_invariant_under_label_inversion(
 
 
 def test_integration_is_deterministic(
-    real_model_output: dict, sensitive_feature: pd.Series, integration_report: dict
+    real_model_output: dict,
+    sensitive_feature: pd.Series,
+    integration_report: dict,
 ):
     """Re-running the same evaluation yields an identical result."""
     again = fairness_report(

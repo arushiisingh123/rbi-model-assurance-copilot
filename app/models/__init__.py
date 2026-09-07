@@ -19,12 +19,15 @@ from app.models.preprocessing import (
     CATEGORICAL_FEATURES,
     FAVORABLE_OUTCOME_LABEL,
     FEATURE_COLUMNS,
+    INSTANCE_ID_COLUMN,
     LABEL_BAD,
     LABEL_GOOD,
     NUMERIC_FEATURES,
     POSITIVE_CLASS,
     TARGET_COLUMN,
     load_dataset,
+    make_dataset_instance_ids,
+    make_fallback_instance_ids,
     preprocess,
     split_data,
 )
@@ -43,6 +46,10 @@ __all__ = [
     "CATEGORICAL_FEATURES",
     "NUMERIC_FEATURES",
     "TARGET_COLUMN",
+    # Stable per-record identity (Phase 3) -- metadata, NOT a model feature
+    "INSTANCE_ID_COLUMN",
+    "make_dataset_instance_ids",
+    "make_fallback_instance_ids",
     # Target label semantics (0 = GOOD, 1 = BAD = positive class)
     "LABEL_GOOD",
     "LABEL_BAD",

@@ -21,6 +21,7 @@ The shared contract most other modules depend on.
 {
     "predictions": [0, 1, 0, ...],
     "probabilities": [0.12, 0.81, 0.33, ...],
+    "instance_ids": ["gc-0007", "gc-0042", "gc-0113", ...],
     "feature_matrix": <pandas.DataFrame>,
     "model_metadata": {
         "model_type": "xgboost", "version": "0.1.0",
@@ -68,6 +69,61 @@ low-friction additive change per "Changing an interface" below):
 `P(class == 1)` = `P(BAD)`. The **favorable** credit outcome is label `0`,
 so consumers (e.g. `fairness_report(..., favorable_label=...)`) must not
 assume the favorable label is `1`.
+
+### Additive field — `instance_ids` (Phase 3, team decision 2026-09-07)
+
+`predict_batch()` output carries **`instance_ids`**: a batch-aligned
+`list[str]` of stable per-record identifiers. Position `i` describes the
+**same record** as `predictions[i]`, `probabilities[i]`, and
+`feature_matrix` row `i`, so:
+
+```
+len(instance_ids) == len(predictions) == len(probabilities) == len(feature_matrix)
+```
+
+**What it is.** A stable identity for each input record. Downstream
+consumers (explainability, and later reporting / the LLM) must key record
+identity on this value.
+
+**Where it originates.** The raw UCI German Credit CSV ships no identifier
+column, so `app/models/preprocessing.py` `load_dataset()` attaches a
+deterministic one — source row `i` → `f"gc-{i:04d}"` (`INSTANCE_ID_COLUMN`
+= `"instance_id"`). It is deterministic (no `uuid4()`, timestamp, or
+randomness) and identical on every reload because the CSV row order is
+fixed. It travels with each record **as a column value**, so it survives
+`preprocess()` (which keeps `X` to the 20 model features and drops the id),
+the stratified shuffle in `split_data()`, prediction, `reset_index()`, and
+repeated calls.
+
+**Deterministic behaviour of `predict_batch()`:**
+
+| Input | `instance_ids` returned |
+|---|---|
+| `feature_matrix=None` (default demo path) | the `gc-NNNN` ids for the held-out test split, carried through the shuffle by value |
+| custom `feature_matrix` **with** an `instance_id` column | those values, verbatim (cast to `str`); null values raise `ValueError` |
+| custom `feature_matrix` **without** an `instance_id` column | deterministic positional placeholders `row-NNNN` from the supplied batch order |
+
+Repeated calls with the same input always return identical ids. No random
+id is ever generated at prediction time.
+
+**It is identity metadata, NOT an ML feature.** `instance_id` is not in
+`FEATURE_COLUMNS`, is never passed to the pipeline's `ColumnTransformer` /
+`OneHotEncoder` / `StandardScaler` / `LogisticRegression`, and a supplied
+`instance_id` column is dropped before scoring. Adding it did not change
+any prediction or probability for the same feature rows.
+
+**Downstream guidance.** Explainability's `per_instance[*].row_index` is a
+**position within the explained batch**, not a record identity. To attach an
+explanation to a durable record, zip it with the `instance_ids` of the
+`feature_matrix` that was explained. Reporting / LLM code must cite records
+by `instance_id`. **Never use a pandas row position, `.index`, or a value
+from `reset_index()` as record identity** — the stratified split shuffles,
+so row `0` of a split is not record `0` of the dataset.
+
+Aligning `instance_ids` with explainability's `row_index` (renaming or
+adding an `instance_id` to `per_instance`) is a **separate, Manas-owned**
+change and is not implemented here; this entry only records that the
+identifier now exists in the model output for that work to build on.
 
 ### Model artifact access (Phase 1 clarification, approved 2026-08-25)
 
@@ -545,6 +601,17 @@ This does **not** change the in-process contract between Python modules —
 they still pass a real DataFrame to each other. It only fixes the JSON
 form used by the API and dashboard. `pd.DataFrame(payload["feature_matrix"])`
 round-trips it. Additive and non-breaking; flagged to Namitha 2026-09-03.
+
+### `instance_ids` over HTTP (Phase 3 handoff to Khushi, 2026-09-07)
+
+`predict_batch()` now returns a top-level `instance_ids` (`list[str]`, see
+Namitha's section above). It is already JSON-native, and
+`app/api/orchestration.py::format_model_for_api()` spreads the model dict,
+so the value reaches the response payload — but `app/api/schemas.py`
+`ModelResult` does not declare the field, so pydantic currently drops it on
+serialization. Carrying it through (add `instance_ids: list[str]` to
+`ModelResult`) is Khushi's call, tracked as a Phase 3 API follow-up. No
+model-side change is needed for it.
 
 ## Changing an interface
 

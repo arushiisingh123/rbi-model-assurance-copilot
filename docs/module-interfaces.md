@@ -166,6 +166,81 @@ unseen value, and substituting a known category or reporting a
 contribution anyway would describe a row the surrogate never represented.
 Use `method="shap"` for rows with out-of-vocabulary categories.
 
+### Phase 3 — explanation evidence for reporting (`app/explainability/evidence.py`)
+
+**Purpose.** A pure reshaping layer between explainability and the
+reporting/LLM layer. It joins values that already exist — `explain()`
+output plus per-instance prediction records — into flat, self-describing
+evidence records that a report can cite.
+
+**It calculates nothing.** No SHAP value, LIME weight, global importance,
+prediction, probability, or regulatory conclusion is computed or re-derived
+here. Every number is passed through unchanged from the module that owns
+it. `explain()` itself is untouched: its signature and 4-key output are
+unchanged.
+
+**Public functions.**
+
+```python
+build_instance_evidence(explanation, prediction_records, *, model_version) -> list[dict]
+build_global_evidence(explanation, *, model_version) -> list[dict]
+```
+
+**Inputs.** `explanation` is the dict returned by `explain()`.
+`prediction_records` is one mapping per explained row, **in the same order
+as `explanation["per_instance"]`**, each carrying `instance_id`,
+`prediction` and `probability`; an optional `row_index` is cross-checked
+against the explanation when present. `model_version` is required
+explicitly (e.g. `predict_batch()["model_metadata"]["version"]`) because
+`explain()` output carries no version and it must never be guessed.
+
+**Output.** Per-instance records, one per (instance, feature):
+
+```python
+{
+    "evidence_type": "instance_contribution",
+    "instance_id": "applicant-000",
+    "feature": "status_checking_account",
+    "importance": 0.5322,
+    "prediction": 1,
+    "probability": 0.73,
+    "provenance": {"method": "shap", "scale": "log_odds",
+                   "model_version": "0.1.0", "is_mock": False}
+}
+```
+
+Global records are returned by a **separate function** and are tagged
+`evidence_type: "global_importance"`. They carry no `instance_id`,
+`prediction` or `probability` — global importance is a dataset-level
+summary and describes no individual applicant, so the two kinds can never
+be silently mixed.
+
+**`instance_id` is required, never inferred.** `explain()`'s `row_index` is
+a *position within the frame that was explained*, not a record identity —
+explaining a non-leading subset restarts it at 0. Joining
+`predictions[row_index]` would therefore attribute one applicant's outcome
+to another. The model layer does not emit a stable `instance_id` yet, so
+the caller supplies it; when the model layer does emit one, those records
+drop in unchanged.
+
+**Scale is carried, never normalised.** `scale` is `"log_odds"` for SHAP
+and `"probability"` for LIME, matching the semantics documented above. The
+evidence layer does not convert between them and must not be extended to.
+
+**Safety behaviour — these raise `ValueError`, they never fall back to a
+positional join:** row counts differ between explanation and prediction
+records; `instance_id` missing, blank, or duplicated; a declared
+`row_index` that disagrees with the explanation; a malformed explanation or
+unknown method; a non-numeric prediction/probability; a missing or empty
+`model_version`.
+
+**For downstream reporting and LLM use.** These records are *structured
+evidence*, not conclusions. An LLM may quote, summarise, or explain them
+and connect them to retrieved sources, but must not recompute them,
+convert between scales, compare SHAP and LIME magnitudes, or turn them into
+regulatory claims. `provenance.is_mock` is passed through from the
+explanation and must be surfaced wherever the evidence is presented.
+
 ## Arushi's output — `app/fairness/fairness.py` + `app/drift/drift.py`
 
 ```python

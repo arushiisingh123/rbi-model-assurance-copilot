@@ -50,6 +50,7 @@ from app.models.preprocessing import (
 CONTRACT_KEYS = {
     "predictions",
     "probabilities",
+    "instance_ids",
     "feature_matrix",
     "model_metadata",
     "is_mock",
@@ -93,6 +94,7 @@ def test_full_pipeline_runs_end_to_end_without_manual_intervention(tmp_path):
     assert result["is_mock"] is False
     assert len(result["predictions"]) == len(X_test)
     assert len(result["probabilities"]) == len(X_test)
+    assert len(result["instance_ids"]) == len(X_test)
     assert len(result["feature_matrix"]) == len(X_test)
 
 
@@ -162,6 +164,7 @@ def test_output_lengths_are_mutually_consistent():
     n = len(result["feature_matrix"])
     assert len(result["predictions"]) == n
     assert len(result["probabilities"]) == n
+    assert len(result["instance_ids"]) == n
 
 
 # =====================================================================
@@ -176,6 +179,7 @@ def test_predict_batch_default_output_is_stable_across_calls():
 
     assert a["predictions"] == b["predictions"]
     assert a["probabilities"] == b["probabilities"]
+    assert a["instance_ids"] == b["instance_ids"]
     pd.testing.assert_frame_equal(a["feature_matrix"], b["feature_matrix"])
     assert a["model_metadata"] == b["model_metadata"]
 

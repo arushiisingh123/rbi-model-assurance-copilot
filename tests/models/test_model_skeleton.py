@@ -89,9 +89,13 @@ def test_dataset_file_exists():
 
 
 def test_dataset_row_and_column_counts(raw_dataset):
-    """Verify dataset contains 1,000 instances and 21 columns (20 features + target)."""
+    """Verify dataset contains 1,000 instances and 22 columns.
+
+    20 raw features + ``credit_risk`` target + the ``instance_id`` identity
+    column attached by ``load_dataset()`` (Phase 3).
+    """
     assert len(raw_dataset) == EXPECTED_ROW_COUNT
-    assert raw_dataset.shape == (1000, 21)
+    assert raw_dataset.shape == (1000, 22)
 
 
 def test_dataset_required_columns_exist(raw_dataset):
@@ -520,6 +524,7 @@ def test_serialized_output_fixture_matches_current_contract():
     assert set(fixture.keys()) == {
         "predictions",
         "probabilities",
+        "instance_ids",
         "feature_matrix",
         "model_metadata",
         "is_mock",
@@ -527,6 +532,12 @@ def test_serialized_output_fixture_matches_current_contract():
     # feature_matrix is the serialized list[dict] form (API boundary shape)
     assert isinstance(fixture["feature_matrix"], list)
     assert set(fixture["feature_matrix"][0].keys()) == set(FEATURE_COLUMNS)
+
+    # instance_ids is batch-aligned identity metadata, never a feature column
+    assert isinstance(fixture["instance_ids"], list)
+    assert len(fixture["instance_ids"]) == len(fixture["predictions"])
+    assert all(isinstance(i, str) for i in fixture["instance_ids"])
+    assert "instance_id" not in fixture["feature_matrix"][0]
 
     meta = fixture["model_metadata"]
     assert meta["model_type"] == MODEL_TYPE

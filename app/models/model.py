@@ -12,6 +12,12 @@ Public model contract (Phase 1)
   (see the function docstring). Internally always a ``pandas.DataFrame``;
   serialization to ``list[dict]`` is the API layer's concern, not this
   module's.
+- ``predict_batch()`` output carries ``instance_ids`` (Phase 3, additive):
+  a batch-aligned ``list[str]`` of stable per-record identifiers, position
+  ``i`` describing the same record as ``predictions[i]`` /
+  ``probabilities[i]`` / ``feature_matrix`` row ``i``. Identity metadata
+  only -- never a model feature. See ``app.models.preprocessing`` for the
+  deterministic scheme.
 - Expected input: the 20 RAW German-Credit features named and ordered by
   ``app.models.preprocessing.FEATURE_COLUMNS``. The pipeline one-hot expands
   categoricals internally; those expanded columns are NOT part of the input
@@ -47,9 +53,11 @@ from app.models.preprocessing import (
     DEFAULT_DATASET_PATH,
     FAVORABLE_OUTCOME_LABEL,
     FEATURE_COLUMNS,
+    INSTANCE_ID_COLUMN,
     NUMERIC_FEATURES,
     POSITIVE_CLASS,
     load_dataset,
+    make_fallback_instance_ids,
     preprocess,
     split_data,
 )
@@ -389,6 +397,9 @@ def predict_batch(
     {
         "predictions": [0, 1, 0, ...],       # 0 = GOOD, 1 = BAD (positive class)
         "probabilities": [0.12, 0.81, ...],  # probabilities[i] = P(class 1) = P(BAD)
+        "instance_ids": ["gc-0007", ...],    # additive: stable per-record identity,
+                                             #   aligned 1:1 with predictions / probabilities
+                                             #   / feature_matrix rows. NOT a model feature.
         "feature_matrix": <pandas.DataFrame>,  # the 20 RAW features, FEATURE_COLUMNS order
         "model_metadata": {
             "model_type": "logistic_regression",
@@ -404,17 +415,37 @@ def predict_batch(
     representation). The API layer serializes it to ``list[dict]`` at the
     HTTP boundary; this function does not.
 
+    Record identity (``instance_ids``)
+    ----------------------------------
+    The returned dict carries ``instance_ids``: a ``list[str]`` aligned 1:1
+    with ``predictions`` / ``probabilities`` / ``feature_matrix`` rows.
+
+    - ``feature_matrix is None`` (default demo path): identity is the
+      deterministic ``instance_id`` attached by ``load_dataset()`` (``gc-NNNN``
+      from the fixed CSV row order), carried through the stratified split by
+      value so a shuffled test row keeps its original identifier.
+    - Caller supplies ``feature_matrix`` **with** an ``instance_id`` column:
+      those values are preserved verbatim (cast to ``str``), never fed to the
+      model, and never replaced. Null values raise ``ValueError``.
+    - Caller supplies ``feature_matrix`` **without** an ``instance_id`` column:
+      deterministic positional placeholders (``row-NNNN``) derived from the
+      supplied batch order. No random IDs are ever generated.
+
+    ``instance_id`` is identity metadata, not a predictive feature: it is
+    excluded from ``FEATURE_COLUMNS`` and never reaches the pipeline.
+
     Parameters
     ----------
     feature_matrix : Optional[pd.DataFrame]
         Input features DataFrame. If None, uses the held-out test split of the
-        German Credit dataset for a runnable demonstration.
+        German Credit dataset for a runnable demonstration. May optionally
+        carry an ``instance_id`` column (see "Record identity" above).
 
     Returns
     -------
     Dict[str, Any]
-        Shared dictionary containing predictions, probabilities, raw feature
-        matrix, metadata, and is_mock=False.
+        Shared dictionary containing predictions, probabilities, batch-aligned
+        instance_ids, raw feature matrix, metadata, and is_mock=False.
     """
     model = _get_or_train_default_model()
 
@@ -422,7 +453,12 @@ def predict_batch(
         # Provide held-out test split as sensible default
         df = load_dataset(DEFAULT_DATASET_PATH)
         X, y, _, _ = preprocess(df)
+        id_series = df[INSTANCE_ID_COLUMN]
         _, X_test, _, _ = split_data(X, y, test_size=0.2, random_state=42)
+        # Align identity to the shuffled test rows BEFORE reset_index: the
+        # pre-reset index labels are only a join key back to the identifiers
+        # captured at load; the identity itself is the instance_id value.
+        instance_ids: List[str] = id_series.loc[X_test.index].astype(str).tolist()
         feature_matrix = X_test.reset_index(drop=True)
     else:
         if not isinstance(feature_matrix, pd.DataFrame):
@@ -430,6 +466,19 @@ def predict_batch(
                 f"Expected feature_matrix to be a pandas DataFrame, got {type(feature_matrix)}."
             )
         feature_matrix = feature_matrix.copy().reset_index(drop=True)
+        if INSTANCE_ID_COLUMN in feature_matrix.columns:
+            supplied_ids = feature_matrix[INSTANCE_ID_COLUMN]
+            if supplied_ids.isnull().any():
+                raise ValueError(
+                    f"feature_matrix '{INSTANCE_ID_COLUMN}' column contains null "
+                    "values; supply a valid identifier for every row or omit the "
+                    "column entirely."
+                )
+            instance_ids = supplied_ids.astype(str).tolist()
+            # Identity metadata must never be handed to the model.
+            feature_matrix = feature_matrix.drop(columns=[INSTANCE_ID_COLUMN])
+        else:
+            instance_ids = make_fallback_instance_ids(len(feature_matrix))
 
     # Ensure required features exist in input matrix
     missing_cols = [c for c in FEATURE_COLUMNS if c not in feature_matrix.columns]
@@ -450,6 +499,7 @@ def predict_batch(
     return {
         "predictions": predictions,
         "probabilities": probabilities,
+        "instance_ids": instance_ids,
         "feature_matrix": scored_features,
         "model_metadata": {
             "model_type": MODEL_TYPE,

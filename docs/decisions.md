@@ -1220,3 +1220,41 @@ altering the model.
 **Status:** Implemented by Namitha (module owner), 2026-09-07, on
 `feature/namitha-phase3-instance-id`. Not committed — pending team review of
 the diff.
+
+### 2026-09-08 — generate_report() ownership handoff to Khushi (Phase 3)
+
+**Status:** Approved (Nidhi + Khushi, via team agreement; see
+docs/phase3-allocation.md "Phase 3D: LLM Reporting — Khushi + Nidhi"
+for the broader joint-ownership context this handoff sits within)
+
+**Decision:** Nidhi delegates building `generate_report()` (the LLM
+report-generation function) to Khushi, since Nidhi's multi-document RAG
+pipeline work hasn't started yet and Khushi is ready to build the
+report wiring now.
+
+**Scope of the handoff:**
+- Khushi builds `generate_report()` — the LLM call and report
+  formatting logic — using `app/rag/smoke_test.py`'s existing
+  single-document retrieval as the evidence source in the interim.
+- Nidhi retains ownership of the real multi-document RAG pipeline
+  (chunking, embeddings, vector DB across the full RBI corpus).
+- Once Nidhi's real retrieval pipeline is ready, Khushi swaps the
+  retrieval call inside `generate_report()` to use it — no other
+  changes expected.
+
+**Open, not yet decided (flagging, not resolving here):**
+- Module home for `generate_report()` — options: (a) new `app/report/`
+  package, jointly owned; (b) `app/rag/report_generation.py`, authored
+  by Khushi, reviewed by Nidhi. Needs explicit team pick before the
+  file is created.
+- Ownership of the new `tests/integration/` deliverable mentioned in
+  docs/phase3-allocation.md — needs explicit confirmation before anyone
+  claims it.
+- Team decision on LLM provider/library and API key handling
+  (CLAUDE.md §3, "major technology" approval).
+- Nidhi's sign-off on the specific ReportResult schema shape Khushi
+  proposes in her Phase 3 API PR.
+
+**Rationale:** Avoids blocking Khushi's Phase 3 wiring work on Nidhi's
+unstarted, more specialized RAG pipeline; confirmed as no-conflict by
+Nidhi since she hadn't begun this file.

@@ -34,6 +34,7 @@ class ModelResult(BaseModel):
     """Output payload from the Model/Data module."""
     predictions: list[int]
     probabilities: list[float]
+    instance_ids: list[str]
     feature_matrix: list[dict[str, Any]]
     model_metadata: ModelMetadata
     is_mock: bool
@@ -101,3 +102,64 @@ class AssuranceResult(BaseModel):
     fairness_drift: FairnessDriftResult
     compliance: ComplianceResult
     note: str
+
+
+# =============================================================================
+# Phase 3 LLM Reporting Schemas (PROVISIONAL — pending Nidhi + team sign-off)
+# =============================================================================
+
+class TechnicalFinding(BaseModel):
+    """Layer 1: Deterministic analytical result from Python evaluation modules."""
+    ref: str
+    value: Any
+    status: str
+    source_module: str
+    provenance: Literal["observed", "mock", "synthetic_fixture"]
+
+
+class Citation(BaseModel):
+    """Source reference for retrieved regulatory evidence."""
+    source: str
+    locator: str
+    quote: str
+    provenance: Literal["verified", "illustrative", "interim_single_document"]
+
+
+class RetrievedEvidence(BaseModel):
+    """Layer 2: Grounded regulatory evidence from RAG vector retrieval."""
+    evidence_status: Literal["RETRIEVED", "NOT_FOUND", "NOT_ATTEMPTED"]
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class LLMInterpretation(BaseModel):
+    """Layer 3: Synthesized natural language interpretation strictly grounded in evidence."""
+    text: str
+    grounded_in: list[str]
+    regulatory_basis: Literal["cited_evidence", "illustrative_rule_only", "none"]
+    is_mock: bool
+
+
+class ReportSection(BaseModel):
+    """Three-layer report section preserving distinct evidence boundaries (never collapsed)."""
+    heading: str
+    technical_finding: TechnicalFinding
+    retrieved_evidence: RetrievedEvidence
+    llm_interpretation: LLMInterpretation
+
+
+class EvidenceCoverage(BaseModel):
+    """Summary of evidence retrieval coverage across report sections."""
+    retrieved: int
+    not_found: int
+    total: int
+
+
+class ReportResult(BaseModel):
+    """PROVISIONAL: Output payload for LLM-assisted model assurance report."""
+    report_id: str
+    generated_at: str
+    model_version: str
+    sections: list[ReportSection]
+    disclaimers: list[str]
+    evidence_coverage: EvidenceCoverage
+    is_mock: bool

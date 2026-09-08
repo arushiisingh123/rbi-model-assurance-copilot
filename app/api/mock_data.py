@@ -34,6 +34,7 @@ MOCK_FEATURE_NAMES = [
 MOCK_MODEL_RESULT = {
     "predictions": [0, 1, 0],
     "probabilities": [0.12, 0.81, 0.33],
+    "instance_ids": ["gc-0000", "gc-0001", "gc-0002"],
     "feature_matrix": [
         {
             "status_checking_account": "A11",
@@ -352,8 +353,8 @@ MOCK_DRIFT_RESULT = {
     "status": "PASS",
     "is_mock": True,
     "note": (
-        "SYNTHETIC DRIFT SCENARIO: Controlled synthetic shift scenario "
-        "(shift_features=['duration_months', 'credit_amount'], shift_amount=0.5)."
+        "SYNTHETIC DRIFT SCENARIO: Fallback mock scenario for interface validation. "
+        "Production assurance evaluates dev training split vs held-out test split."
     ),
 }
 
@@ -412,11 +413,183 @@ MOCK_ASSURANCE_RESULT = {
         "fairness": MOCK_FAIRNESS_RESULT,
         "drift": MOCK_DRIFT_RESULT,
         "note": (
-            "SYNTHETIC DRIFT SCENARIO: Controlled synthetic shift scenario "
-            "(shift_features=['duration_months', 'credit_amount'], shift_amount=0.5) "
-            "for interface validation."
+            "SYNTHETIC DRIFT SCENARIO: Fallback mock scenario for interface validation. "
+            "Production assurance compares dev training split (reference) with held-out "
+            "test split (current); this is not production monitoring data."
         ),
     },
     "compliance": MOCK_COMPLIANCE_RESULT,
     "note": "SYNTHETIC / MOCK DATA. Not real results. Phase 1 mock fixtures only.",
+}
+
+# =============================================================================
+# Phase 3 Mock Report Result (PROVISIONAL — pending Nidhi + team sign-off)
+# =============================================================================
+
+MOCK_REPORT_RESULT = {
+    "report_id": "rep-mock-001",
+    "generated_at": "2026-09-08T12:00:00Z",
+    "model_version": "0.1.0",
+    "sections": [
+        {
+            "heading": "Credit Scoring Model Evaluation",
+            "technical_finding": {
+                "ref": "model.model_metadata",
+                "value": {
+                    "model_type": "logistic_regression",
+                    "version": "0.1.0",
+                    "predictions": [0, 1, 0],
+                    "probabilities": [0.12, 0.81, 0.33],
+                },
+                "status": "PASS",
+                "source_module": "app.models",
+                "provenance": "synthetic_fixture",
+            },
+            "retrieved_evidence": {
+                "evidence_status": "RETRIEVED",
+                "citations": [
+                    {
+                        "source": "ILLUSTRATIVE — not a real RBI source",
+                        "locator": "§1 (sample)",
+                        "quote": "[sample placeholder] Regulated entities shall maintain model risk management records including model type and performance metrics.",
+                        "provenance": "illustrative",
+                    }
+                ],
+            },
+            "llm_interpretation": {
+                "text": "Model metadata and baseline probability distributions are documented according to sample model governance guidelines.",
+                "grounded_in": ["model.model_metadata", "model.version"],
+                "regulatory_basis": "illustrative_rule_only",
+                "is_mock": True,
+            },
+        },
+        {
+            "heading": "Feature Explainability (SHAP)",
+            "technical_finding": {
+                "ref": "explainability.global_importance",
+                "value": {
+                    "method": "shap",
+                    "top_feature": "duration_months",
+                    "top_importance": 0.35,
+                },
+                "status": "PASS",
+                "source_module": "app.explainability",
+                "provenance": "synthetic_fixture",
+            },
+            "retrieved_evidence": {
+                "evidence_status": "RETRIEVED",
+                "citations": [
+                    {
+                        "source": "ILLUSTRATIVE — not a real RBI source",
+                        "locator": "§3 (sample)",
+                        "quote": "[sample placeholder] Explanations of principal feature drivers must be documented for automated risk scoring.",
+                        "provenance": "illustrative",
+                    }
+                ],
+            },
+            "llm_interpretation": {
+                "text": "SHAP global feature importance identifies duration_months as the primary decision driver, meeting transparency requirements.",
+                "grounded_in": ["explainability.global_importance"],
+                "regulatory_basis": "illustrative_rule_only",
+                "is_mock": True,
+            },
+        },
+        {
+            "heading": "Fairness Evaluation",
+            "technical_finding": {
+                "ref": "fairness.disparate_impact_ratio",
+                "value": {
+                    "protected_attribute": "personal_status_and_sex",
+                    "disparate_impact_ratio": 0.78,
+                    "demographic_parity_diff": 0.14,
+                },
+                "status": "WARNING",
+                "source_module": "app.fairness",
+                "provenance": "synthetic_fixture",
+            },
+            "retrieved_evidence": {
+                "evidence_status": "RETRIEVED",
+                "citations": [
+                    {
+                        "source": "ILLUSTRATIVE — not a real RBI source",
+                        "locator": "§2 (sample)",
+                        "quote": "[sample placeholder] Disparate impact ratio below 0.80 warrants executive risk committee review.",
+                        "provenance": "illustrative",
+                    }
+                ],
+            },
+            "llm_interpretation": {
+                "text": "Disparate impact ratio of 0.78 for personal_status_and_sex evaluates against the project's internal fairness threshold of 0.80 (an internal convention, not an RBI-mandated figure), resulting in a WARNING status that warrants internal review.",
+                "grounded_in": ["fairness.disparate_impact_ratio", "fairness.status"],
+                "regulatory_basis": "illustrative_rule_only",
+                "is_mock": True,
+            },
+        },
+        {
+            "heading": "Data & Prediction Drift Detection",
+            "technical_finding": {
+                "ref": "drift.psi",
+                "value": {
+                    "psi": 0.09,
+                    "ks_statistic": 0.11,
+                    "features_evaluated": ["duration_months", "credit_amount"],
+                },
+                "status": "PASS",
+                "source_module": "app.drift",
+                "provenance": "synthetic_fixture",
+            },
+            "retrieved_evidence": {
+                "evidence_status": "NOT_FOUND",
+                "citations": [],
+            },
+            "llm_interpretation": {
+                "text": "Population Stability Index (PSI 0.09) and KS statistic (0.11) show stable distributions. No governing RBI regulatory requirement was retrieved for population stability thresholds.",
+                "grounded_in": ["drift.psi", "drift.ks_statistic", "drift.status"],
+                "regulatory_basis": "none",
+                "is_mock": True,
+            },
+        },
+        {
+            "heading": "RBI Compliance Rules Mapping",
+            "technical_finding": {
+                "ref": "compliance.findings",
+                "value": {
+                    "total_findings": 6,
+                    "evaluated_statuses": ["PASS", "WARNING"],
+                },
+                "status": "WARNING",
+                "source_module": "app.compliance",
+                "provenance": "synthetic_fixture",
+            },
+            "retrieved_evidence": {
+                "evidence_status": "RETRIEVED",
+                "citations": [
+                    {
+                        "source": "ILLUSTRATIVE — not a real RBI source",
+                        "locator": "§4 (sample)",
+                        "quote": "[sample placeholder] Any unresolved warning across credit compliance evaluations requires mitigation tracking.",
+                        "provenance": "illustrative",
+                    }
+                ],
+            },
+            "llm_interpretation": {
+                "text": "Overall compliance status evaluates to WARNING due to disparate impact finding under RBI-FAIR-01. Action item remediation plan recommended.",
+                "grounded_in": ["compliance.findings", "fairness.status"],
+                "regulatory_basis": "illustrative_rule_only",
+                "is_mock": True,
+            },
+        },
+    ],
+    "disclaimers": [
+        "PROVISIONAL MOCK REPORT: Synthetic fixture for API and Dashboard Phase 3 integration testing.",
+        "No real LLM generation or live vector database retrieval was executed (is_mock: True).",
+        "Citations reference illustrative sample text, not verified RBI regulatory requirements.",
+        "Drift detection in production compares dev train/test splits; synthetic scenarios are testing infrastructure.",
+    ],
+    "evidence_coverage": {
+        "retrieved": 4,
+        "not_found": 1,
+        "total": 5,
+    },
+    "is_mock": True,
 }

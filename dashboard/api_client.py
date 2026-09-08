@@ -15,6 +15,7 @@ from app.api.mock_data import (
     MOCK_EXPLAINABILITY_RESULT_SHAP,
     MOCK_FAIRNESS_RESULT,
     MOCK_MODEL_RESULT,
+    MOCK_REPORT_RESULT,
 )
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000")
@@ -77,9 +78,8 @@ def get_fairness_drift() -> tuple[dict, str]:
             "fairness": MOCK_FAIRNESS_RESULT,
             "drift": MOCK_DRIFT_RESULT,
             "note": (
-                "SYNTHETIC DRIFT SCENARIO: Controlled synthetic shift scenario "
-                "(shift_features=['duration_months', 'credit_amount'], shift_amount=0.5) "
-                "for interface validation."
+                "SYNTHETIC DRIFT SCENARIO: Fallback mock scenario for interface validation. "
+                "Production assurance evaluates dev training split vs held-out test split."
             ),
         }
         return fallback, "fallback"
@@ -105,3 +105,14 @@ def get_assurance_result() -> tuple[dict, str]:
         return response.json(), "api"
     except requests.exceptions.RequestException:
         return MOCK_ASSURANCE_RESULT, "fallback"
+
+
+def get_report() -> tuple[dict, str]:
+    """Fetch compliance assurance report from API or fallback."""
+    url = f"{API_BASE_URL}/report"
+    try:
+        response = requests.get(url, timeout=2)
+        response.raise_for_status()
+        return response.json(), "api"
+    except requests.exceptions.RequestException:
+        return MOCK_REPORT_RESULT, "fallback"

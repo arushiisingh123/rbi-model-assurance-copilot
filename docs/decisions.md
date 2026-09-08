@@ -1220,3 +1220,98 @@ altering the model.
 **Status:** Implemented by Namitha (module owner), 2026-09-07, on
 `feature/namitha-phase3-instance-id`. Not committed — pending team review of
 the diff.
+
+### 2026-09-08 — generate_report() ownership handoff to Khushi (Phase 3)
+
+**Status:** Approved (Nidhi + Khushi, via team agreement; see
+docs/phase3-allocation.md "Phase 3D: LLM Reporting — Khushi + Nidhi"
+for the broader joint-ownership context this handoff sits within)
+
+**Decision:** Nidhi delegates building `generate_report()` (the LLM
+report-generation function) to Khushi, since Nidhi's multi-document RAG
+pipeline work hasn't started yet and Khushi is ready to build the
+report wiring now.
+
+**Scope of the handoff:**
+- Khushi builds `generate_report()` — the LLM call and report
+  formatting logic — using `app/rag/smoke_test.py`'s existing
+  single-document retrieval as the evidence source in the interim.
+- Nidhi retains ownership of the real multi-document RAG pipeline
+  (chunking, embeddings, vector DB across the full RBI corpus).
+- Once Nidhi's real retrieval pipeline is ready, Khushi swaps the
+  retrieval call inside `generate_report()` to use it — no other
+  changes expected.
+
+**Open, not yet decided (flagging, not resolving here):**
+- Module home for `generate_report()` — decided: `app/report/`, a new
+  package separate from Nidhi's `app/rag/` (see entry below).
+- Ownership of the new `tests/integration/` deliverable mentioned in
+  docs/phase3-allocation.md — needs explicit confirmation before anyone
+  claims it.
+- Team decision on LLM provider/library and API key handling
+  (CLAUDE.md §3, "major technology" approval).
+- Nidhi's sign-off on the specific ReportResult schema shape Khushi
+  proposes in her Phase 3 API PR.
+
+**Rationale:** Avoids blocking Khushi's Phase 3 wiring work on Nidhi's
+unstarted, more specialized RAG pipeline; confirmed as no-conflict by
+Nidhi since she hadn't begun this file.
+
+### 2026-09-08 — LLM provider selection for Phase 3 report generation
+
+**Status:** Proposed (Khushi) — pending team confirmation. This is
+Khushi's own decision, not yet separately confirmed by Nidhi or the
+wider team as a "major technology" approval per CLAUDE.md §3.
+
+**Decision:** Groq's `openai/gpt-oss-120b` model, accessed via the Groq
+Python SDK's `chat.completions.create()`.
+
+**Rationale:** Free, no credit card required. Verified limits from
+account: 1,000 requests/day, 30 requests/minute, 8,000 tokens/minute,
+200,000 tokens/day — fixed, published, resets daily. Compared against
+Gemini (inconsistent free-tier limits across sources, failed on first
+real attempt, tight 5-10 RPM) and HuggingFace (the initially considered
+model has zero deployed providers; other free models use an
+unpublished small monthly dollar-credit quota rather than clean daily
+requests).
+
+**Capacity check:** one report generation call is ~3,000-6,000 tokens.
+Realistic total project usage is ~40-60 calls across dev testing, demo,
+and teammate review — well within Groq's daily limit.
+
+**Design constraint:** `generate_report()` makes exactly ONE LLM call
+per report, not one call per section, to stay well within limits.
+
+**API key handling:** environment variable, never committed to the
+repository.
+
+### 2026-09-08 — generate_report() ownership split, clarified
+
+**Status:** Partially confirmed. Nidhi's original delegation of
+generate_report() to Khushi (recorded in the earlier 2026-09-08
+"ownership handoff" entry) is real and confirmed via team chat. The
+SPECIFIC details in THIS entry — the app/report/ module location,
+the ReportResult schema shape, and the Groq LLM choice — are
+Khushi's proposal only and have NOT been separately confirmed by
+Nidhi or the team.
+
+**Decision:** Phase 3D ("LLM Reporting") was originally allocated
+jointly to Khushi + Nidhi (docs/phase3-allocation.md). This entry
+records the actual split both have agreed on:
+
+- **Khushi writes `generate_report()`** — the function that assembles
+  findings + evidence and calls the LLM (Groq, per the entry above) to
+  produce the report text. Lives in a new `app/report/` package.
+- **Nidhi retains full ownership of the real regulatory corpus and
+  retrieval pipeline** — RBI document ingestion, chunking, embeddings,
+  vector search across the full corpus (`app/rag/`). This is unchanged
+  and remains entirely hers.
+- **Connection point:** `generate_report()` initially uses the existing
+  Phase 0 single-document `app/rag/smoke_test.py` as a temporary
+  evidence source. Once Nidhi's real multi-document retrieval pipeline
+  is ready, the retrieval call inside `generate_report()` is swapped to
+  use it — no other change to the function expected.
+- **ReportResult schema** — the shape proposed by Khushi (three-layer
+  structure: technical_finding / retrieved_evidence /
+  llm_interpretation) is Khushi's proposed shape, pending Nidhi's
+  confirmation.

@@ -4,16 +4,23 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     AssuranceResult,
+    Citation,
     ComplianceFinding,
     ComplianceResult,
     DriftResult,
+    EvidenceCoverage,
     ExplainabilityResult,
     FairnessDriftResult,
     FairnessResult,
     LabelSemantics,
+    LLMInterpretation,
     ModelMetadata,
     ModelResult,
     PerInstanceContribution,
+    ReportResult,
+    ReportSection,
+    RetrievedEvidence,
+    TechnicalFinding,
 )
 
 
@@ -41,6 +48,7 @@ def test_model_result_valid():
     res = ModelResult(
         predictions=[0, 1, 0],
         probabilities=[0.12, 0.81, 0.33],
+        instance_ids=["gc-0000", "gc-0001", "gc-0002"],
         feature_matrix=[
             {"income": 45000, "age": 34, "credit_history_len": 5},
             {"income": 120000, "age": 45, "credit_history_len": 12},
@@ -57,15 +65,19 @@ def test_model_result_valid():
     assert res.is_mock is True
     assert len(res.predictions) == 3
     assert len(res.feature_matrix) == 3
+    assert len(res.instance_ids) == 3
+    assert res.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
 
 
 def test_model_result_missing_field():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         ModelResult(
             predictions=[0, 1],
             probabilities=[0.12, 0.81],
-            # missing feature_matrix, model_metadata, is_mock
+            # missing instance_ids, feature_matrix, model_metadata, is_mock
         )
+    missing_fields = {e["loc"][0] for e in exc_info.value.errors()}
+    assert "instance_ids" in missing_fields
 
 
 def test_per_instance_contribution_valid():
@@ -211,6 +223,7 @@ def test_assurance_result_valid():
         model=ModelResult(
             predictions=[0, 1, 0],
             probabilities=[0.12, 0.81, 0.33],
+            instance_ids=["gc-0000", "gc-0001", "gc-0002"],
             feature_matrix=[{"income": 45000}],
             model_metadata=ModelMetadata(
                 model_type="xgboost",
@@ -298,3 +311,160 @@ def test_drift_result_with_note():
     )
     assert res.note == "SYNTHETIC DRIFT SCENARIO: Controlled shift."
     assert res.is_mock is False
+
+
+def test_model_result_instance_ids_valid_dict():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        "instance_ids": ["gc-0000", "gc-0001", "gc-0002"],
+        "feature_matrix": [{"col": 1}, {"col": 2}, {"col": 3}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    result = ModelResult(**payload)
+    assert result.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
+
+
+def test_model_result_missing_instance_ids_raises():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        # instance_ids omitted
+        "feature_matrix": [{"col": 1}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    with pytest.raises(ValidationError) as exc_info:
+        ModelResult(**payload)
+    errors = exc_info.value.errors()
+    assert any(e["loc"] == ("instance_ids",) and e["type"] == "missing" for e in errors)
+
+
+def test_model_result_instance_ids_non_list_raises():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        "instance_ids": "gc-0000",  # string instead of list[str]
+        "feature_matrix": [{"col": 1}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    with pytest.raises(ValidationError):
+        ModelResult(**payload)
+
+
+def test_model_result_instance_ids_non_string_elements_raises():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        "instance_ids": [1, 2, 3],  # integers instead of strings
+        "feature_matrix": [{"col": 1}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    with pytest.raises(ValidationError):
+        ModelResult(**payload)
+
+
+def test_report_result_schema_valid():
+    res = ReportResult(
+        report_id="rep-001",
+        generated_at="2026-09-08T12:00:00Z",
+        model_version="0.1.0",
+        sections=[
+            ReportSection(
+                heading="Fairness Section",
+                technical_finding=TechnicalFinding(
+                    ref="fairness.disparate_impact_ratio",
+                    value=0.78,
+                    status="WARNING",
+                    source_module="app.fairness",
+                    provenance="synthetic_fixture",
+                ),
+                retrieved_evidence=RetrievedEvidence(
+                    evidence_status="RETRIEVED",
+                    citations=[
+                        Citation(
+                            source="ILLUSTRATIVE — not a real RBI source",
+                            locator="§2 (sample)",
+                            quote="[sample placeholder] Disparate impact below 0.80 requires review.",
+                            provenance="illustrative",
+                        )
+                    ],
+                ),
+                llm_interpretation=LLMInterpretation(
+                    text="Disparate impact ratio 0.78 requires mitigation plan.",
+                    grounded_in=["fairness.disparate_impact_ratio"],
+                    regulatory_basis="illustrative_rule_only",
+                    is_mock=True,
+                ),
+            )
+        ],
+        disclaimers=["Sample disclaimer."],
+        evidence_coverage=EvidenceCoverage(retrieved=1, not_found=0, total=1),
+        is_mock=True,
+    )
+    assert res.report_id == "rep-001"
+    assert len(res.sections) == 1
+    assert res.sections[0].retrieved_evidence.evidence_status == "RETRIEVED"
+    assert res.evidence_coverage.total == 1
+
+
+def test_report_result_invalid_evidence_status_raises():
+    with pytest.raises(ValidationError):
+        RetrievedEvidence(evidence_status="UNKNOWN_STATUS")
+
+
+def test_report_result_invalid_regulatory_basis_raises():
+    with pytest.raises(ValidationError):
+        LLMInterpretation(
+            text="Interpretation",
+            grounded_in=["fairness.status"],
+            regulatory_basis="hallucinated_basis",
+            is_mock=True,
+        )
+
+
+def test_report_result_invalid_citation_provenance_raises():
+    with pytest.raises(ValidationError):
+        Citation(
+            source="Source",
+            locator="Locator",
+            quote="Quote",
+            provenance="fabricated",
+        )
+
+
+def test_report_result_invalid_technical_finding_provenance_raises():
+    with pytest.raises(ValidationError):
+        TechnicalFinding(
+            ref="fairness.status",
+            value="PASS",
+            status="PASS",
+            source_module="app.fairness",
+            provenance="unrecognized_provenance",
+        )
+
+
+

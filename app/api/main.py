@@ -3,9 +3,14 @@
 Exposes schema-validated endpoints for credit model evaluation, explainability,
 fairness & drift, and RBI compliance assurance.
 """
+import logging
+import os
+
 from fastapi import FastAPI, HTTPException, Query
 
-from app.api.mock_data import MOCK_ASSURANCE_RESULT
+logger = logging.getLogger(__name__)
+
+from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.orchestration import (
     build_assurance_result,
     compute_real_compliance,
@@ -21,6 +26,7 @@ from app.api.schemas import (
     ExplainabilityResult,
     FairnessDriftResult,
     ModelResult,
+    ReportResult,
 )
 
 app = FastAPI(
@@ -94,3 +100,53 @@ def mock_assurance_result() -> dict:
     Phase 0 dashboard callers.
     """
     return MOCK_ASSURANCE_RESULT
+
+
+@app.get("/report", response_model=ReportResult)
+def get_report() -> dict:
+    """Retrieve Phase 3 LLM model assurance report.
+
+    Attempts live report generation using Groq (openai/gpt-oss-120b) and
+    interim RAG retrieval. If live generation is unavailable (e.g. missing
+    GROQ_API_KEY, API error, rate limit, timeout), falls back gracefully
+    to MOCK_REPORT_RESULT with a disclaimer. Never returns HTTP 500.
+    """
+    if not os.getenv("GROQ_API_KEY", "").strip():
+        logger.info("GROQ_API_KEY not configured; returning mock report fallback immediately.")
+        fallback = dict(MOCK_REPORT_RESULT)
+        fallback_disclaimers = list(fallback.get("disclaimers", []))
+        disclaimer = (
+            "FALLBACK MOCK REPORT: Live report generation unavailable (ReportGenerationUnavailable). "
+            "Displaying static mock fixture."
+        )
+        if disclaimer not in fallback_disclaimers:
+            fallback_disclaimers.insert(0, disclaimer)
+        fallback["disclaimers"] = fallback_disclaimers
+        return fallback
+
+    try:
+        raw_model = compute_real_model()
+        explain_res = compute_real_explainability(raw_model, method="shap")
+        fairness_res = compute_real_fairness(raw_model)
+        drift_res = compute_real_drift(raw_model)
+        compliance_res = compute_real_compliance(raw_model, explain_res, fairness_res, drift_res)
+        from app.report import generate_report
+        return generate_report(
+            model=raw_model,
+            explainability=explain_res,
+            fairness=fairness_res,
+            drift=drift_res,
+            compliance=compliance_res,
+        )
+    except Exception as exc:
+        logger.warning("Live report generation failed, falling back to mock: %s", exc)
+        fallback = dict(MOCK_REPORT_RESULT)
+        fallback_disclaimers = list(fallback.get("disclaimers", []))
+        disclaimer = (
+            f"FALLBACK MOCK REPORT: Live report generation unavailable ({exc.__class__.__name__}). "
+            "Displaying static mock fixture."
+        )
+        if disclaimer not in fallback_disclaimers:
+            fallback_disclaimers.insert(0, disclaimer)
+        fallback["disclaimers"] = fallback_disclaimers
+        return fallback

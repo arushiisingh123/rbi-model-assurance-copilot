@@ -1243,10 +1243,8 @@ report wiring now.
   changes expected.
 
 **Open, not yet decided (flagging, not resolving here):**
-- Module home for `generate_report()` — options: (a) new `app/report/`
-  package, jointly owned; (b) `app/rag/report_generation.py`, authored
-  by Khushi, reviewed by Nidhi. Needs explicit team pick before the
-  file is created.
+- Module home for `generate_report()` — decided: `app/report/`, a new
+  package separate from Nidhi's `app/rag/` (see entry below).
 - Ownership of the new `tests/integration/` deliverable mentioned in
   docs/phase3-allocation.md — needs explicit confirmation before anyone
   claims it.
@@ -1258,3 +1256,53 @@ report wiring now.
 **Rationale:** Avoids blocking Khushi's Phase 3 wiring work on Nidhi's
 unstarted, more specialized RAG pipeline; confirmed as no-conflict by
 Nidhi since she hadn't begun this file.
+
+### 2026-09-08 — LLM provider selection for Phase 3 report generation
+
+**Status:** Finalized (Khushi)
+
+**Decision:** Groq's `openai/gpt-oss-120b` model, accessed via the Groq
+Python SDK's `chat.completions.create()`.
+
+**Rationale:** Free, no credit card required. Verified limits from
+account: 1,000 requests/day, 30 requests/minute, 8,000 tokens/minute,
+200,000 tokens/day — fixed, published, resets daily. Compared against
+Gemini (inconsistent free-tier limits across sources, failed on first
+real attempt, tight 5-10 RPM) and HuggingFace (the initially considered
+model has zero deployed providers; other free models use an
+unpublished small monthly dollar-credit quota rather than clean daily
+requests).
+
+**Capacity check:** one report generation call is ~3,000-6,000 tokens.
+Realistic total project usage is ~40-60 calls across dev testing, demo,
+and teammate review — well within Groq's daily limit.
+
+**Design constraint:** `generate_report()` makes exactly ONE LLM call
+per report, not one call per section, to stay well within limits.
+
+**API key handling:** environment variable, never committed to the
+repository.
+
+### 2026-09-08 — generate_report() ownership split, clarified
+
+**Status:** Approved (Nidhi + Khushi)
+
+**Decision:** Phase 3D ("LLM Reporting") was originally allocated
+jointly to Khushi + Nidhi (docs/phase3-allocation.md). This entry
+records the actual split both have agreed on:
+
+- **Khushi writes `generate_report()`** — the function that assembles
+  findings + evidence and calls the LLM (Groq, per the entry above) to
+  produce the report text. Lives in a new `app/report/` package.
+- **Nidhi retains full ownership of the real regulatory corpus and
+  retrieval pipeline** — RBI document ingestion, chunking, embeddings,
+  vector search across the full corpus (`app/rag/`). This is unchanged
+  and remains entirely hers.
+- **Connection point:** `generate_report()` initially uses the existing
+  Phase 0 single-document `app/rag/smoke_test.py` as a temporary
+  evidence source. Once Nidhi's real multi-document retrieval pipeline
+  is ready, the retrieval call inside `generate_report()` is swapped to
+  use it — no other change to the function expected.
+- **ReportResult schema** — the shape proposed by Khushi (three-layer
+  structure: technical_finding / retrieved_evidence /
+  llm_interpretation) is confirmed by Nidhi.

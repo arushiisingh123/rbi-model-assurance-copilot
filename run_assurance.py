@@ -36,13 +36,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         result = build_assurance_result()
         summary = summarize(result)
 
+        report_status = "UNAVAILABLE (fallback to mock)"
+        try:
+            from app.report import generate_report
+
+            _ = generate_report(
+                model=result["model"],
+                explainability=result["explainability"],
+                fairness=result["fairness_drift"]["fairness"],
+                drift=result["fairness_drift"]["drift"],
+                compliance=result["compliance"],
+            )
+            report_status = "GENERATED"
+        except Exception:
+            report_status = "UNAVAILABLE (fallback to mock)"
+
         print("\nPer-Domain Status:")
         print(f"  Model:          {summary['model']}")
         print(f"  Explainability: {summary['explainability']}")
         print(f"  Fairness:       {summary['fairness']}")
         print(f"  Drift:          {summary['drift']}")
         print(f"  Compliance:     {summary['compliance']}")
-        print("  Report:         NOT CONFIGURED (Phase 3 - pending RAG/LLM)")
+        print(f"  Report:         {report_status}")
 
         print("\n" + "-" * 60)
         print("Disclaimers & Scenario Notes:")

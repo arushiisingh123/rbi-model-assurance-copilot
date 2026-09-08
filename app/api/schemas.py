@@ -122,7 +122,7 @@ class Citation(BaseModel):
     source: str
     locator: str
     quote: str
-    provenance: Literal["verified", "illustrative"]
+    provenance: Literal["verified", "illustrative", "interim_single_document"]
 
 
 class RetrievedEvidence(BaseModel):

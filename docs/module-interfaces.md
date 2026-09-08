@@ -615,10 +615,18 @@ preserves and serializes it without dropping.
 
 The `/report` endpoint returns an evidence-grounded model assurance report synthesizing analytical findings from all pipeline modules with retrieved RBI regulatory text and natural-language explanations.
 
+**Implementation (Phase 3, Khushi):**
+The endpoint is backed by `app.report.generate.generate_report()`, which:
+- Gathers real Layer 1 findings verbatim from `model`, `explainability`, `fairness`, `drift`, `compliance`.
+- Evaluates Layer 2 regulatory evidence via `app.rag.smoke_test.run_smoke_test()` with an explicit Python relevance gate. Citations carry provenance `"interim_single_document"` referencing the Phase 0 interim circular excerpt.
+- Calls Groq (`openai/gpt-oss-120b`) via Groq Python SDK in a single LLM call for the entire report.
+- Enforces strict safety in Python: `regulatory_basis` is computed in code (`"illustrative_rule_only"` for interim retrieval, `"none"` for `NOT_FOUND`). Any `NOT_FOUND` section where the LLM generated regulatory claim language is stripped and replaced with: `"The generated response for this section was withheld because no supporting evidence was retrieved."`
+- If live generation fails or `GROQ_API_KEY` is not set, the endpoint falls back gracefully to `MOCK_REPORT_RESULT` with a fallback disclaimer, returning HTTP 200 (never 500).
+
 **Key Architectural Principle:** The three evaluation layers must remain strictly decoupled and visible field-for-field — never collapsed into an unverified block of AI prose:
 
-1. **`technical_finding` (Layer 1):** Deterministic analytical output produced by Python evaluation modules (`app.models`, `app.explainability`, `app.fairness`, `app.drift`, `app.compliance`).
-2. **`retrieved_evidence` (Layer 2):** Grounded regulatory text retrieved via vector search over the authoritative RBI corpus. If no governing rule was found, `evidence_status` is explicitly `"NOT_FOUND"`.
+1. **`technical_finding` (Layer 1):** Deterministic analytical output produced by Python evaluation modules (`app.models`, `app.explainability`, `app.fairness`, `app.drift`, `app.compliance`). Provenance: `"observed"` | `"mock"` | `"synthetic_fixture"`.
+2. **`retrieved_evidence` (Layer 2):** Grounded regulatory text retrieved via vector search over the RBI corpus. If no governing rule was found, `evidence_status` is explicitly `"NOT_FOUND"`. Citation provenance: `"verified"` | `"illustrative"` | `"interim_single_document"`.
 3. **`llm_interpretation` (Layer 3):** Natural language synthesis strictly constrained to cited evidence and analytical findings. Must never invent regulatory requirements (`regulatory_basis`: `"cited_evidence" | "illustrative_rule_only" | "none"`).
 
 ```json

@@ -1259,7 +1259,9 @@ Nidhi since she hadn't begun this file.
 
 ### 2026-09-08 — LLM provider selection for Phase 3 report generation
 
-**Status:** Finalized (Khushi)
+**Status:** Proposed (Khushi) — pending team confirmation. This is
+Khushi's own decision, not yet separately confirmed by Nidhi or the
+wider team as a "major technology" approval per CLAUDE.md §3.
 
 **Decision:** Groq's `openai/gpt-oss-120b` model, accessed via the Groq
 Python SDK's `chat.completions.create()`.
@@ -1285,7 +1287,13 @@ repository.
 
 ### 2026-09-08 — generate_report() ownership split, clarified
 
-**Status:** Approved (Nidhi + Khushi)
+**Status:** Partially confirmed. Nidhi's original delegation of
+generate_report() to Khushi (recorded in the earlier 2026-09-08
+"ownership handoff" entry) is real and confirmed via team chat. The
+SPECIFIC details in THIS entry — the app/report/ module location,
+the ReportResult schema shape, and the Groq LLM choice — are
+Khushi's proposal only and have NOT been separately confirmed by
+Nidhi or the team.
 
 **Decision:** Phase 3D ("LLM Reporting") was originally allocated
 jointly to Khushi + Nidhi (docs/phase3-allocation.md). This entry
@@ -1305,4 +1313,5 @@ records the actual split both have agreed on:
   use it — no other change to the function expected.
 - **ReportResult schema** — the shape proposed by Khushi (three-layer
   structure: technical_finding / retrieved_evidence /
-  llm_interpretation) is confirmed by Nidhi.
+  llm_interpretation) is Khushi's proposed shape, pending Nidhi's
+  confirmation.

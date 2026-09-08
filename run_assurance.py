@@ -42,10 +42,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"  Fairness:       {summary['fairness']}")
         print(f"  Drift:          {summary['drift']}")
         print(f"  Compliance:     {summary['compliance']}")
+        print("  Report:         NOT CONFIGURED (Phase 3 - pending RAG/LLM)")
 
         print("\n" + "-" * 60)
         print("Disclaimers & Scenario Notes:")
-        print("  Drift Scenario:")
+        print("  Drift Detection:")
+        print(
+            "    Drift compares the development training split (reference) with the "
+            "held-out test split (current); this is not production monitoring data."
+        )
         print("\n  Compliance Evaluation:")
         print(
             "    Compliance findings are evaluated against illustrative sample RBI "

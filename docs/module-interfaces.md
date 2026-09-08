@@ -611,6 +611,66 @@ so the value reaches the response payload. `app/api/schemas.py` `ModelResult`
 now declares `instance_ids: list[str]` as a required field, so pydantic
 preserves and serializes it without dropping.
 
+### `GET /report` and `ReportResult` (Phase 3 PROVISIONAL — pending Nidhi + team sign-off)
+
+The `/report` endpoint returns an evidence-grounded model assurance report synthesizing analytical findings from all pipeline modules with retrieved RBI regulatory text and natural-language explanations.
+
+**Key Architectural Principle:** The three evaluation layers must remain strictly decoupled and visible field-for-field — never collapsed into an unverified block of AI prose:
+
+1. **`technical_finding` (Layer 1):** Deterministic analytical output produced by Python evaluation modules (`app.models`, `app.explainability`, `app.fairness`, `app.drift`, `app.compliance`).
+2. **`retrieved_evidence` (Layer 2):** Grounded regulatory text retrieved via vector search over the authoritative RBI corpus. If no governing rule was found, `evidence_status` is explicitly `"NOT_FOUND"`.
+3. **`llm_interpretation` (Layer 3):** Natural language synthesis strictly constrained to cited evidence and analytical findings. Must never invent regulatory requirements (`regulatory_basis`: `"cited_evidence" | "illustrative_rule_only" | "none"`).
+
+```json
+{
+  "report_id": "rep-mock-001",
+  "generated_at": "2026-09-08T12:00:00Z",
+  "model_version": "0.1.0",
+  "sections": [
+    {
+      "heading": "Fairness Evaluation",
+      "technical_finding": {
+        "ref": "fairness.disparate_impact_ratio",
+        "value": {
+          "protected_attribute": "personal_status_and_sex",
+          "disparate_impact_ratio": 0.78,
+          "demographic_parity_diff": 0.14
+        },
+        "status": "WARNING",
+        "source_module": "app.fairness",
+        "provenance": "synthetic_fixture"
+      },
+      "retrieved_evidence": {
+        "evidence_status": "RETRIEVED",
+        "citations": [
+          {
+            "source": "ILLUSTRATIVE — not a real RBI source",
+            "locator": "§2 (sample)",
+            "quote": "[sample placeholder] Disparate impact ratio below 0.80 warrants executive risk committee review.",
+            "provenance": "illustrative"
+          }
+        ]
+      },
+      "llm_interpretation": {
+        "text": "Disparate impact ratio of 0.78 for personal_status_and_sex is below the 0.80 benchmark, triggering a WARNING requiring committee review.",
+        "grounded_in": ["fairness.disparate_impact_ratio", "fairness.status"],
+        "regulatory_basis": "illustrative_rule_only",
+        "is_mock": true
+      }
+    }
+  ],
+  "disclaimers": [
+    "PROVISIONAL MOCK REPORT: Synthetic fixture for API and Dashboard Phase 3 integration testing."
+  ],
+  "evidence_coverage": {
+    "retrieved": 4,
+    "not_found": 1,
+    "total": 5
+  },
+  "is_mock": true
+}
+```
+
 ## Changing an interface
 
 Small additive changes (a new optional key) are low-friction. Renaming or
@@ -618,3 +678,4 @@ removing a key another module reads is a **breaking change** and requires
 the CLAUDE.md §7 approval flow: inspect the current interface, identify
 affected modules, explain the proposed change, update tests/docs, get
 approval before merging.
+

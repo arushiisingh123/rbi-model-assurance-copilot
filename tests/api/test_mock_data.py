@@ -8,6 +8,7 @@ from app.api.mock_data import (
     MOCK_EXPLAINABILITY_RESULT_SHAP,
     MOCK_FAIRNESS_RESULT,
     MOCK_MODEL_RESULT,
+    MOCK_REPORT_RESULT,
 )
 from app.api.schemas import (
     AssuranceResult,
@@ -16,6 +17,7 @@ from app.api.schemas import (
     ExplainabilityResult,
     FairnessResult,
     ModelResult,
+    ReportResult,
 )
 
 
@@ -101,3 +103,47 @@ def test_mock_assurance_result_validity():
     assert parsed.fairness_drift.drift.is_mock is True
     assert parsed.compliance.is_mock is True
     assert "SYNTHETIC" in parsed.note or "MOCK" in parsed.note
+
+
+def test_mock_report_result_validity_and_contract():
+    parsed = ReportResult(**MOCK_REPORT_RESULT)
+    assert parsed.is_mock is True
+    assert len(parsed.sections) == 5
+    assert parsed.evidence_coverage.total == 5
+    assert parsed.evidence_coverage.retrieved == 4
+    assert parsed.evidence_coverage.not_found == 1
+
+    # Check section headings encompass Model, Explainability, Fairness, Drift, Compliance
+    combined_headings = " ".join(s.heading.lower() for s in parsed.sections)
+    for domain in ["model", "explain", "fairness", "drift", "compliance"]:
+        assert domain in combined_headings
+
+    not_found_sections = [
+        s for s in parsed.sections if s.retrieved_evidence.evidence_status == "NOT_FOUND"
+    ]
+    assert len(not_found_sections) == 1
+    not_found_sec = not_found_sections[0]
+    assert not_found_sec.llm_interpretation.regulatory_basis == "none"
+    assert not_found_sec.retrieved_evidence.citations == []
+
+    # Mandatory invariant: NOT_FOUND section must never claim cited_evidence
+    for s in parsed.sections:
+        if s.retrieved_evidence.evidence_status == "NOT_FOUND":
+            assert s.llm_interpretation.regulatory_basis != "cited_evidence"
+
+    # Verify citations use sample / illustrative indicators
+    for s in parsed.sections:
+        for cit in s.retrieved_evidence.citations:
+            assert "ILLUSTRATIVE" in cit.source or "sample" in cit.locator.lower()
+            assert cit.provenance == "illustrative"
+
+    # Verify all grounded_in items follow real dotted-path vocabulary (no colons)
+    for s in parsed.sections:
+        for item in s.llm_interpretation.grounded_in:
+            assert ":" not in item, f"Malformed grounded_in item contains colon: {item}"
+            assert "." in item, f"Expected dotted path in grounded_in item: {item}"
+
+    # Verify fairness text mentions internal convention rather than RBI mandate
+    fairness_sec = next(s for s in parsed.sections if "fairness" in s.heading.lower())
+    assert "internal convention" in fairness_sec.llm_interpretation.text.lower()
+

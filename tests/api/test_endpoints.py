@@ -9,6 +9,7 @@ from app.api.schemas import (
     ExplainabilityResult,
     FairnessDriftResult,
     ModelResult,
+    ReportResult,
 )
 from app.models.preprocessing import FEATURE_COLUMNS
 
@@ -129,4 +130,18 @@ def test_mock_assurance_result_deprecated_endpoint():
     assert parsed.model.is_mock is True
     assert parsed.model.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
     assert parsed.compliance.is_mock is True
+
+
+def test_report_endpoint():
+    response = client.get("/report")
+    assert response.status_code == 200
+    body = response.json()
+    parsed = ReportResult(**body)
+    assert parsed.is_mock is True
+    assert len(parsed.sections) == 5
+    assert parsed.evidence_coverage.total == 5
+    assert parsed.evidence_coverage.retrieved == 4
+    assert parsed.evidence_coverage.not_found == 1
+    assert parsed.model_version == "0.1.0"
+    assert len(parsed.disclaimers) > 0
 

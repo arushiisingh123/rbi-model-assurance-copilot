@@ -5,7 +5,7 @@ fairness & drift, and RBI compliance assurance.
 """
 from fastapi import FastAPI, HTTPException, Query
 
-from app.api.mock_data import MOCK_ASSURANCE_RESULT
+from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.orchestration import (
     build_assurance_result,
     compute_real_compliance,
@@ -21,6 +21,7 @@ from app.api.schemas import (
     ExplainabilityResult,
     FairnessDriftResult,
     ModelResult,
+    ReportResult,
 )
 
 app = FastAPI(
@@ -94,3 +95,9 @@ def mock_assurance_result() -> dict:
     Phase 0 dashboard callers.
     """
     return MOCK_ASSURANCE_RESULT
+
+
+@app.get("/report", response_model=ReportResult)
+def get_report() -> dict:
+    """Mock-backed; generate_report() pending team decision on module home for the real report generator."""
+    return MOCK_REPORT_RESULT

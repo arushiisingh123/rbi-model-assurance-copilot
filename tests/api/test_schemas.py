@@ -4,16 +4,23 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     AssuranceResult,
+    Citation,
     ComplianceFinding,
     ComplianceResult,
     DriftResult,
+    EvidenceCoverage,
     ExplainabilityResult,
     FairnessDriftResult,
     FairnessResult,
     LabelSemantics,
+    LLMInterpretation,
     ModelMetadata,
     ModelResult,
     PerInstanceContribution,
+    ReportResult,
+    ReportSection,
+    RetrievedEvidence,
+    TechnicalFinding,
 )
 
 
@@ -378,4 +385,86 @@ def test_model_result_instance_ids_non_string_elements_raises():
     }
     with pytest.raises(ValidationError):
         ModelResult(**payload)
+
+
+def test_report_result_schema_valid():
+    res = ReportResult(
+        report_id="rep-001",
+        generated_at="2026-09-08T12:00:00Z",
+        model_version="0.1.0",
+        sections=[
+            ReportSection(
+                heading="Fairness Section",
+                technical_finding=TechnicalFinding(
+                    ref="fairness.disparate_impact_ratio",
+                    value=0.78,
+                    status="WARNING",
+                    source_module="app.fairness",
+                    provenance="synthetic_fixture",
+                ),
+                retrieved_evidence=RetrievedEvidence(
+                    evidence_status="RETRIEVED",
+                    citations=[
+                        Citation(
+                            source="ILLUSTRATIVE — not a real RBI source",
+                            locator="§2 (sample)",
+                            quote="[sample placeholder] Disparate impact below 0.80 requires review.",
+                            provenance="illustrative",
+                        )
+                    ],
+                ),
+                llm_interpretation=LLMInterpretation(
+                    text="Disparate impact ratio 0.78 requires mitigation plan.",
+                    grounded_in=["fairness.disparate_impact_ratio"],
+                    regulatory_basis="illustrative_rule_only",
+                    is_mock=True,
+                ),
+            )
+        ],
+        disclaimers=["Sample disclaimer."],
+        evidence_coverage=EvidenceCoverage(retrieved=1, not_found=0, total=1),
+        is_mock=True,
+    )
+    assert res.report_id == "rep-001"
+    assert len(res.sections) == 1
+    assert res.sections[0].retrieved_evidence.evidence_status == "RETRIEVED"
+    assert res.evidence_coverage.total == 1
+
+
+def test_report_result_invalid_evidence_status_raises():
+    with pytest.raises(ValidationError):
+        RetrievedEvidence(evidence_status="UNKNOWN_STATUS")
+
+
+def test_report_result_invalid_regulatory_basis_raises():
+    with pytest.raises(ValidationError):
+        LLMInterpretation(
+            text="Interpretation",
+            grounded_in=["fairness.status"],
+            regulatory_basis="hallucinated_basis",
+            is_mock=True,
+        )
+
+
+def test_report_result_invalid_citation_provenance_raises():
+    with pytest.raises(ValidationError):
+        Citation(
+            source="Source",
+            locator="Locator",
+            quote="Quote",
+            provenance="fabricated",
+        )
+
+
+def test_report_result_invalid_technical_finding_provenance_raises():
+    with pytest.raises(ValidationError):
+        TechnicalFinding(
+            ref="fairness.status",
+            value="PASS",
+            status="PASS",
+            source_module="app.fairness",
+            provenance="unrecognized_provenance",
+        )
+
+
 

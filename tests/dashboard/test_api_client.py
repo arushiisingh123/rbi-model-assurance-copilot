@@ -9,6 +9,7 @@ from app.api.mock_data import (
     MOCK_EXPLAINABILITY_RESULT_SHAP,
     MOCK_FAIRNESS_RESULT,
     MOCK_MODEL_RESULT,
+    MOCK_REPORT_RESULT,
 )
 from dashboard.api_client import (
     get_assurance_result,
@@ -16,6 +17,7 @@ from dashboard.api_client import (
     get_explainability,
     get_fairness_drift,
     get_model,
+    get_report,
     render_status,
 )
 
@@ -159,6 +161,25 @@ def test_get_assurance_result_fallback(monkeypatch):
     data, source = get_assurance_result()
     assert source == "fallback"
     assert data == MOCK_ASSURANCE_RESULT
+    assert bool(data)
+
+
+def test_get_report_success(monkeypatch):
+    test_data = {"test": "report_data"}
+    monkeypatch.setattr(requests, "get", lambda url, timeout=2: DummyResponse(test_data))
+    data, source = get_report()
+    assert source == "api"
+    assert data == test_data
+
+
+def test_get_report_fallback(monkeypatch):
+    def mock_get(url, timeout=2):
+        raise requests.exceptions.ConnectionError("Failed")
+
+    monkeypatch.setattr(requests, "get", mock_get)
+    data, source = get_report()
+    assert source == "fallback"
+    assert data == MOCK_REPORT_RESULT
     assert bool(data)
 
 

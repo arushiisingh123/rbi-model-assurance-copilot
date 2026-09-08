@@ -41,6 +41,7 @@ def test_model_result_valid():
     res = ModelResult(
         predictions=[0, 1, 0],
         probabilities=[0.12, 0.81, 0.33],
+        instance_ids=["gc-0000", "gc-0001", "gc-0002"],
         feature_matrix=[
             {"income": 45000, "age": 34, "credit_history_len": 5},
             {"income": 120000, "age": 45, "credit_history_len": 12},
@@ -57,15 +58,19 @@ def test_model_result_valid():
     assert res.is_mock is True
     assert len(res.predictions) == 3
     assert len(res.feature_matrix) == 3
+    assert len(res.instance_ids) == 3
+    assert res.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
 
 
 def test_model_result_missing_field():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         ModelResult(
             predictions=[0, 1],
             probabilities=[0.12, 0.81],
-            # missing feature_matrix, model_metadata, is_mock
+            # missing instance_ids, feature_matrix, model_metadata, is_mock
         )
+    missing_fields = {e["loc"][0] for e in exc_info.value.errors()}
+    assert "instance_ids" in missing_fields
 
 
 def test_per_instance_contribution_valid():
@@ -211,6 +216,7 @@ def test_assurance_result_valid():
         model=ModelResult(
             predictions=[0, 1, 0],
             probabilities=[0.12, 0.81, 0.33],
+            instance_ids=["gc-0000", "gc-0001", "gc-0002"],
             feature_matrix=[{"income": 45000}],
             model_metadata=ModelMetadata(
                 model_type="xgboost",
@@ -298,3 +304,78 @@ def test_drift_result_with_note():
     )
     assert res.note == "SYNTHETIC DRIFT SCENARIO: Controlled shift."
     assert res.is_mock is False
+
+
+def test_model_result_instance_ids_valid_dict():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        "instance_ids": ["gc-0000", "gc-0001", "gc-0002"],
+        "feature_matrix": [{"col": 1}, {"col": 2}, {"col": 3}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    result = ModelResult(**payload)
+    assert result.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
+
+
+def test_model_result_missing_instance_ids_raises():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        # instance_ids omitted
+        "feature_matrix": [{"col": 1}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    with pytest.raises(ValidationError) as exc_info:
+        ModelResult(**payload)
+    errors = exc_info.value.errors()
+    assert any(e["loc"] == ("instance_ids",) and e["type"] == "missing" for e in errors)
+
+
+def test_model_result_instance_ids_non_list_raises():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        "instance_ids": "gc-0000",  # string instead of list[str]
+        "feature_matrix": [{"col": 1}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    with pytest.raises(ValidationError):
+        ModelResult(**payload)
+
+
+def test_model_result_instance_ids_non_string_elements_raises():
+    payload = {
+        "predictions": [0, 1, 0],
+        "probabilities": [0.12, 0.81, 0.33],
+        "instance_ids": [1, 2, 3],  # integers instead of strings
+        "feature_matrix": [{"col": 1}],
+        "model_metadata": {
+            "model_type": "logistic_regression",
+            "version": "0.1.0",
+            "trained_on": "data/german_credit/german_credit.csv",
+            "feature_names": ["col"],
+        },
+        "is_mock": False,
+    }
+    with pytest.raises(ValidationError):
+        ModelResult(**payload)
+

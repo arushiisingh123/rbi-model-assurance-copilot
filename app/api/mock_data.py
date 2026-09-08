@@ -34,6 +34,7 @@ MOCK_FEATURE_NAMES = [
 MOCK_MODEL_RESULT = {
     "predictions": [0, 1, 0],
     "probabilities": [0.12, 0.81, 0.33],
+    "instance_ids": ["gc-0000", "gc-0001", "gc-0002"],
     "feature_matrix": [
         {
             "status_checking_account": "A11",

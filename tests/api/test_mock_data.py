@@ -24,6 +24,10 @@ def test_mock_model_result_validity_and_shape():
     assert parsed.is_mock is True
     assert len(parsed.predictions) == 3
     assert len(parsed.probabilities) == 3
+    assert len(MOCK_MODEL_RESULT["instance_ids"]) == len(MOCK_MODEL_RESULT["predictions"])
+    assert len(parsed.instance_ids) == len(parsed.predictions)
+    assert all(isinstance(iid, str) for iid in parsed.instance_ids)
+    assert parsed.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
     assert len(parsed.feature_matrix) == 3
     assert len(parsed.model_metadata.feature_names) == 20
     assert "personal_status_and_sex" in parsed.model_metadata.feature_names
@@ -91,6 +95,7 @@ def test_mock_compliance_result_validity():
 def test_mock_assurance_result_validity():
     parsed = AssuranceResult(**MOCK_ASSURANCE_RESULT)
     assert parsed.model.is_mock is True
+    assert parsed.model.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
     assert parsed.explainability.is_mock is True
     assert parsed.fairness_drift.fairness.is_mock is True
     assert parsed.fairness_drift.drift.is_mock is True

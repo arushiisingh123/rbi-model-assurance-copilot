@@ -34,6 +34,7 @@ class ModelResult(BaseModel):
     """Output payload from the Model/Data module."""
     predictions: list[int]
     probabilities: list[float]
+    instance_ids: list[str]
     feature_matrix: list[dict[str, Any]]
     model_metadata: ModelMetadata
     is_mock: bool

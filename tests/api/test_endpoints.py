@@ -25,10 +25,14 @@ def test_model_endpoint():
     response = client.get("/model")
     assert response.status_code == 200
     body = response.json()
+    assert "instance_ids" in body
     parsed = ModelResult(**body)
     assert parsed.is_mock is False
     assert len(parsed.predictions) == 200
     assert len(parsed.probabilities) == 200
+    assert len(parsed.instance_ids) == 200
+    assert len(parsed.instance_ids) == len(parsed.predictions) == len(parsed.probabilities)
+    assert all(isinstance(iid, str) and len(iid) > 0 for iid in parsed.instance_ids)
     assert parsed.model_metadata.feature_names == FEATURE_COLUMNS
     assert parsed.model_metadata.label_semantics is not None
     assert parsed.model_metadata.label_semantics.favorable_outcome_label == 0
@@ -97,9 +101,13 @@ def test_assurance_result_endpoint():
     response = client.get("/assurance-result")
     assert response.status_code == 200
     body = response.json()
+    assert "instance_ids" in body["model"]
     parsed = AssuranceResult(**body)
     # Each section independently reports is_mock
     assert parsed.model.is_mock is False
+    assert len(parsed.model.instance_ids) == 200
+    assert len(parsed.model.instance_ids) == len(parsed.model.predictions) == len(parsed.model.probabilities)
+    assert all(isinstance(iid, str) and len(iid) > 0 for iid in parsed.model.instance_ids)
     assert parsed.explainability.is_mock is False
     assert parsed.fairness_drift.fairness.is_mock is False
     assert parsed.fairness_drift.drift.is_mock is False
@@ -119,5 +127,6 @@ def test_mock_assurance_result_deprecated_endpoint():
     assert mock_resp.status_code == 200
     parsed = AssuranceResult(**mock_resp.json())
     assert parsed.model.is_mock is True
+    assert parsed.model.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
     assert parsed.compliance.is_mock is True
 

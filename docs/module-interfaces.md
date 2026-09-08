@@ -604,14 +604,12 @@ round-trips it. Additive and non-breaking; flagged to Namitha 2026-09-03.
 
 ### `instance_ids` over HTTP (Phase 3 handoff to Khushi, 2026-09-07)
 
-`predict_batch()` now returns a top-level `instance_ids` (`list[str]`, see
-Namitha's section above). It is already JSON-native, and
+`predict_batch()` returns a top-level `instance_ids` (`list[str]`, see
+Namitha's section above). It is JSON-native, and
 `app/api/orchestration.py::format_model_for_api()` spreads the model dict,
-so the value reaches the response payload — but `app/api/schemas.py`
-`ModelResult` does not declare the field, so pydantic currently drops it on
-serialization. Carrying it through (add `instance_ids: list[str]` to
-`ModelResult`) is Khushi's call, tracked as a Phase 3 API follow-up. No
-model-side change is needed for it.
+so the value reaches the response payload. `app/api/schemas.py` `ModelResult`
+now declares `instance_ids: list[str]` as a required field, so pydantic
+preserves and serializes it without dropping.
 
 ## Changing an interface
 

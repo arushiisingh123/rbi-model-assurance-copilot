@@ -1315,3 +1315,65 @@ records the actual split both have agreed on:
   structure: technical_finding / retrieved_evidence /
   llm_interpretation) is Khushi's proposed shape, pending Nidhi's
   confirmation.
+
+---
+
+## 2026-09-10 — Phase 3A (Nidhi), Task 1: RBI source metadata + corpus registry
+
+**Status:** Implemented by Nidhi (module owner), on
+`feature/nidhi-phase3-rag`. Not committed — pending team review of the diff.
+Metadata/corpus foundation only; no ingestion, chunking, embeddings,
+retrieval, or LLM work in this task.
+
+**Decision / implementation:** `app/rag/corpus.py` is added as the
+representation of *which* RBI source documents the project has approved for
+regulatory retrieval and *what is known about each one*.
+
+- **`RBISourceMetadata`** — a frozen `@dataclass` holding bibliographic
+  facts (title, issuing authority, document type, publication date,
+  reference number, source URL, retrieved date, applicability) plus
+  provenance/scope flags (`is_excerpt`, `is_current`, `coverage_note`,
+  `scope_note`). It records facts *about* a document — never regulatory
+  text, clauses, requirements, or interpretation.
+  - Chosen over plain dicts (the `app/rbi/` style) because
+    `docs/phase3-allocation.md` / the task brief explicitly prefer
+    dataclasses, it is stdlib (no new dependency), and attribute access is
+    safer for a record that later ingestion code will pass around. The
+    registry/validator/lookup idiom is kept parallel to `app/rbi/rules`.
+  - `__post_init__` raises `ValueError` with a clear message on
+    invalid/incomplete input; `validate_source_metadata()` is the
+    non-raising advisory equivalent (mirrors `app/rbi/schema.validate_rule`).
+- **`RBICorpus`** — a small ordered registry: holds many
+  `RBISourceMetadata` records, rejects duplicate `doc_id`s, offers
+  `get()` / `all()` / `doc_ids()` / `len` / `in` / iteration. Adding an
+  approved document later does not change the interface.
+- **`APPROVED_CORPUS`** currently holds exactly **one** record,
+  `RBI_IRAC_ADVANCES_2014`, seeded entirely from the header of
+  `data/rbi_sources/RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt` and
+  the 2026-08-25 "Phase 0 RAG smoke-test source selected" decision. It is
+  marked `is_excerpt=True`, `is_current=False` — the code now carries the
+  same "limited historical excerpt, not current/binding regulatory text"
+  caveat the source file states in prose. `effective_date` is `None`: the
+  source prints an issue date only, and nothing was invented.
+
+**Nothing invented:** no RBI documents, clauses, requirements, effective
+dates, or interpretations were created. `doc_id` is a registry key (like
+`rule_id`), not a regulatory citation.
+
+**Relationship to the Phase 0 smoke test:** `app/rag/smoke_test.py` and
+`tests/rag/test_rag_smoke.py` are unchanged. `corpus.py` does not import
+the smoke test and the smoke test does not import `corpus.py`. The seeded
+record's `local_path` equals `smoke_test.DOCUMENT_PATH`, so a later task
+can point retrieval at a corpus-registered document without contradiction.
+
+**Tests:** `tests/rag/test_corpus.py` — 18 tests (representation of the
+2014 source, value preservation, historical/non-binding marking, multi-record
+registry, invalid-metadata handling, Phase 0 smoke-test path cross-check).
+RAG suite: 20 passed (18 new + 2 unchanged smoke). Full regression:
+484 passed, 1 skipped.
+
+**Not in this task (later Phase 3A/3B):** document ingestion, chunking,
+metadata-preserving chunk records, embeddings, Chroma vector search,
+evidence retrieval, source attribution/citation output, the
+`retrieval_fn(query=...)` handoff to Khushi's `generate_report()`, and any
+replacement of illustrative compliance claims with retrieved evidence.

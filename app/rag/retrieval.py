@@ -15,12 +15,21 @@ WHAT THIS MODULE PROVIDES
       modify ``generate.py``.)
 
 DETERMINISM
-    ChromaDB's approximate-nearest-neighbour index is built with
-    per-process randomness, so its reported distances/ordering can vary
-    between runs. This module uses the vector store only to *enumerate*
-    every indexed chunk, then re-scores each one with an exact cosine
-    distance (using the store's own embedding function). Ranking is
-    therefore identical for identical inputs, run to run.
+    ChromaDB's approximate-nearest-neighbour (HNSW) query is built with
+    per-process randomness and does not guarantee full recall, so its
+    ordering -- and even which chunks it returns -- can vary between runs
+    and under index load. This module therefore does not use the ANN query
+    path at all: it enumerates the COMPLETE collection with an exact scan
+    (``ChunkVectorStore.all_records`` -> ChromaDB ``get()`` of text +
+    metadata), re-embeds each chunk's text with the store's own
+    deterministic embedding (which reproduces exactly the vector stored for
+    it), scores every chunk with an exact cosine distance, and breaks ties
+    by ``chunk_id``. Ranking is identical for identical inputs, run to run,
+    regardless of load. (The chunk vectors are re-derived rather than read
+    back via ``all_records(include_embeddings=True)`` because that
+    ``get(include=["embeddings"])`` path is not reliable under heavy
+    concurrent ChromaDB use; for a deterministic embedding the two are
+    numerically identical anyway.)
 
 RELEVANCE GATE -- a vector match is NOT automatically evidence
     A candidate chunk is only returned as evidence if it clears BOTH:
@@ -157,17 +166,21 @@ class RBIRetriever:
         if not query.strip():
             return self._no_evidence(query, "query is empty")
 
-        total = self._store.count()
-        if total == 0:
+        if self._store.count() == 0:
             return self._no_evidence(query, "the vector index is empty")
 
-        # Enumerate every indexed chunk (n_results == the whole collection),
-        # then re-score with an exact cosine distance so ranking does not
-        # depend on the vector index's randomly built internal graph.
-        raw = self._store.query(query, n_results=total)
-        texts = list(raw["documents"][0])
-        metadatas = list(raw["metadatas"][0])
+        # Enumerate the COMPLETE indexed collection with an exact scan
+        # (``all_records``, backed by ChromaDB ``get()``), then score every
+        # chunk with an exact cosine distance. This deliberately does not use
+        # the approximate-nearest-neighbour ``query()`` path: its recall can
+        # dip below 100% under index load, which would make a borderline
+        # query non-deterministic.
+        records = self._store.all_records()
 
+        # The embedding is deterministic, so re-embedding a chunk's text
+        # reproduces exactly the vector stored for it. Embedding the query
+        # and every chunk in one call keeps this to a single pass.
+        texts = [record["text"] for record in records]
         vectors = self._store.embedding([query] + texts)
         query_vector = [float(x) for x in vectors[0]]
         chunk_vectors = [[float(x) for x in v] for v in vectors[1:]]
@@ -175,13 +188,15 @@ class RBIRetriever:
         query_terms = self._content_words(query)
 
         passed: list[tuple[float, str, str, dict]] = []
-        for text, meta, chunk_vector in zip(texts, metadatas, chunk_vectors):
+        for record, chunk_vector in zip(records, chunk_vectors):
             distance = _cosine_distance(query_vector, chunk_vector)
             if distance > self.max_distance:
                 continue
-            if len(query_terms & self._content_words(text)) < self.min_lexical_overlap:
+            if len(query_terms & self._content_words(record["text"])) < self.min_lexical_overlap:
                 continue
-            passed.append((distance, str(meta.get("chunk_id", "")), text, dict(meta)))
+            passed.append(
+                (distance, record["chunk_id"], record["text"], dict(record["metadata"]))
+            )
 
         if not passed:
             return self._no_evidence(

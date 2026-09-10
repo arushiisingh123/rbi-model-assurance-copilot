@@ -247,6 +247,40 @@ class ChunkVectorStore:
             "metadata": got["metadatas"][0],
         }
 
+    def all_records(self, *, include_embeddings: bool = False) -> list[dict]:
+        """Every stored chunk, as ``{"chunk_id", "text", "metadata"[, "embedding"]}``.
+
+        A complete, deterministic enumeration via ChromaDB's ``get()`` -- a
+        plain scan of the collection, **not** an approximate-nearest-neighbour
+        query, so it always returns the whole collection regardless of index
+        load. Ordered by ``chunk_id`` for a stable, reproducible sequence.
+
+        ``embedding`` (a ``list[float]``, the vector actually stored in the
+        index) is included only when ``include_embeddings=True``. Note that
+        the ``get(include=["embeddings"])`` path has been observed to be
+        unreliable under heavy concurrent ChromaDB use; callers that only
+        need reproducible scores against a deterministic embedding should
+        prefer re-embedding ``record["text"]`` instead.
+        """
+        include = ["documents", "metadatas"]
+        if include_embeddings:
+            include.append("embeddings")
+        got = self._collection.get(include=include)
+
+        records: list[dict] = []
+        for i, chunk_id in enumerate(got["ids"]):
+            record = {
+                "chunk_id": chunk_id,
+                "text": got["documents"][i],
+                "metadata": dict(got["metadatas"][i]),
+            }
+            if include_embeddings:
+                record["embedding"] = [float(x) for x in got["embeddings"][i]]
+            records.append(record)
+
+        records.sort(key=lambda record: record["chunk_id"])
+        return records
+
     # ------------------------------------------------------------------ #
     # Low-level read -- NOT the retrieval API (that is the next task)
     # ------------------------------------------------------------------ #

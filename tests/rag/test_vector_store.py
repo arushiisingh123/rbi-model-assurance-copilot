@@ -404,3 +404,73 @@ def test_vector_store_does_not_import_the_phase0_smoke_test():
     assert not any("smoke_test" in name for name in imported), (
         f"vector_store must not import the Phase 0 smoke test; imports: {sorted(imported)}"
     )
+
+
+# ======================================================================
+# all_records() -- complete, deterministic enumeration (not ANN)
+# ======================================================================
+
+
+def test_all_records_enumerates_the_complete_collection(real_2014_chunks):
+    store = ChunkVectorStore.in_memory()
+    store.add_chunks(real_2014_chunks)
+
+    records = store.all_records()
+    assert len(records) == len(real_2014_chunks) == store.count()
+    assert {r["chunk_id"] for r in records} == {c.chunk_id for c in real_2014_chunks}
+    for r in records:
+        assert set(r) == {"chunk_id", "text", "metadata"}
+        assert isinstance(r["metadata"], dict)
+
+
+def test_all_records_is_deterministically_ordered(real_2014_chunks):
+    store = ChunkVectorStore.in_memory()
+    store.add_chunks(real_2014_chunks)
+
+    first = [r["chunk_id"] for r in store.all_records()]
+    second = [r["chunk_id"] for r in store.all_records()]
+    assert first == second
+    assert first == sorted(first)  # ordered by chunk_id
+
+
+def test_all_records_excludes_embeddings_by_default(real_2014_chunks):
+    store = ChunkVectorStore.in_memory()
+    store.add_chunks(real_2014_chunks)
+    assert all("embedding" not in r for r in store.all_records())
+
+
+def test_all_records_includes_embeddings_only_when_asked(real_2014_chunks):
+    store = ChunkVectorStore.in_memory()
+    store.add_chunks(real_2014_chunks)
+
+    dim = store.embedding.dim
+    for r in store.all_records(include_embeddings=True):
+        assert isinstance(r["embedding"], list)
+        assert len(r["embedding"]) == dim
+        assert all(isinstance(x, float) for x in r["embedding"])
+
+
+def test_all_records_matches_get_chunk_for_each_id(real_2014_chunks):
+    store = ChunkVectorStore.in_memory()
+    store.add_chunks(real_2014_chunks)
+    for r in store.all_records():
+        one = store.get_chunk(r["chunk_id"])
+        assert one["text"] == r["text"]
+        assert one["metadata"] == r["metadata"]
+
+
+def test_all_records_spans_multiple_documents():
+    store = ChunkVectorStore.in_memory()
+    a = _doc(" ".join(["aaa"] * 50), doc_id="doc-a")
+    b = _doc(" ".join(["bbb"] * 30), doc_id="doc-b")
+    store.add_chunks(chunk_documents([a, b], chunk_size_words=20))
+
+    records = store.all_records()
+    by_doc = collections.Counter(r["metadata"]["doc_id"] for r in records)
+    assert by_doc == {"doc-a": 3, "doc-b": 2}
+    assert len(records) == store.count() == 5
+
+
+def test_all_records_on_empty_store_is_empty():
+    assert ChunkVectorStore.in_memory().all_records() == []
+    assert ChunkVectorStore.in_memory().all_records(include_embeddings=True) == []

@@ -1377,3 +1377,151 @@ metadata-preserving chunk records, embeddings, Chroma vector search,
 evidence retrieval, source attribution/citation output, the
 `retrieval_fn(query=...)` handoff to Khushi's `generate_report()`, and any
 replacement of illustrative compliance claims with retrieved evidence.
+
+---
+
+## 2026-09-10 — Phase 3A/3B (Nidhi): RAG → evidence handoff contract (finalised)
+
+**Status:** Implemented by Nidhi (module owner) on
+`feature/nidhi-phase3-rag`. The handoff itself needed no new production
+code — it is the direct composition `build_evidence(retriever(query=...))`
+of two existing public functions. This closes Nidhi's Phase 3 RAG scope
+at the evidence-handoff boundary.
+
+**Determinism fix (authorised follow-up).** Writing the integration tests
+surfaced a real fragility: `app/rag/retrieval.py` enumerated candidate
+chunks via ChromaDB's approximate-nearest-neighbour `query()`, whose
+recall can dip below 100% under index load — so a borderline query could
+flip between `EVIDENCE_RETRIEVED` and `NO_VERIFIED_EVIDENCE` between full
+test-suite runs. Fixed with a minimal, additive change:
+`ChunkVectorStore.all_records(*, include_embeddings=False)` (a complete
+deterministic scan via ChromaDB `get()`, ordered by `chunk_id`), and
+`retrieval.py` now enumerates the whole collection with it and re-embeds
+each chunk's text with the store's deterministic embedding (numerically
+identical to the stored vector) rather than using the ANN path. Public
+retrieval API, result shape, status constants, and relevance gates are
+unchanged. Verified: 0 failures across 33 runs of the previously-flaky
+`tests/report + tests/integration + tests/rag` combination.
+
+**What this entry finalises.** The Nidhi-owned RAG layer
+
+    corpus → ingestion → chunking → vector store → retrieval → evidence
+
+now has a stable, traceable, offline, deterministic handoff that Khushi's
+`generate_report()` can consume through its existing injectable
+`retrieval_fn(query=...)` — with `app/report/generate.py` unchanged.
+
+### The contract
+
+| Stage | Module | Public entry point |
+|---|---|---|
+| approved source metadata | `app/rag/corpus.py` | `APPROVED_CORPUS`, `get_source(doc_id)` |
+| ingest stored text | `app/rag/ingestion.py` | `load_source` / `load_corpus` / `provenance` |
+| deterministic chunks | `app/rag/chunking.py` | `chunk_document` / `chunk_documents` |
+| embeddings + index | `app/rag/vector_store.py` | `ChunkVectorStore`, `rebuild_from_corpus` |
+| relevance-gated retrieval | `app/rag/retrieval.py` | `RBIRetriever`, `build_default_retriever()` |
+| evidence records | `app/rag/evidence.py` | `build_evidence(result)`, `RBIEvidence` |
+
+**The handoff is a two-line composition of existing public functions:**
+
+```python
+retriever = build_default_retriever()      # Task 5 — this IS the retrieval_fn
+result    = retriever(query="...")          # Task 5 result dict
+evidence  = build_evidence(result)          # Task 6 → list[RBIEvidence] (or [])
+```
+
+No `app/rag/handoff.py` was created — a wrapper would only re-export what
+Task 5 and Task 6 already expose, and would risk a second competing
+result format.
+
+### Task 5 retrieval result (unchanged)
+
+`retriever(query=...)` → a dict with `query`, `evidence_status`,
+`reason`, `retrieved_text`, `source`, `chunk_index`, `doc_id`, `chunk_id`,
+`source_url`, `title`, `publication_date`, `document_type`, `is_excerpt`,
+`is_current`, `distance`, `provenance`, `results`. `evidence_status` is
+`EVIDENCE_RETRIEVED` or `NO_VERIFIED_EVIDENCE` (constants — do not rename).
+Ranking is deterministic (exact cosine re-scoring, then `chunk_id`
+tie-break).
+
+### Task 6 evidence (unchanged)
+
+`build_evidence(result)` → `list[RBIEvidence]`, one immutable record per
+`result["results"]` entry **in the same ranked order**. Each record
+carries `text` (the exact retrieved chunk text, never paraphrased),
+`doc_id`, `chunk_id`, `chunk_index`, `source`/`title`, `source_url`,
+`publication_date`, `document_type`, `is_excerpt`, `is_current`, and the
+full `provenance` dict. `__post_init__` fails clearly
+(`EvidenceConsistencyError`) if a field disagrees with its provenance.
+`to_dict()` is JSON-serialisable for downstream citation/attribution.
+
+### `NO_VERIFIED_EVIDENCE` behaviour
+
+A query that does not clear the Task 5 relevance gate (or is empty, or
+hits an empty index) → `evidence_status == NO_VERIFIED_EVIDENCE`,
+`retrieved_text == ""`, every attribution field `None`, `results == []`.
+`build_evidence` then returns `[]` — never a fabricated record or
+placeholder citation. `no_evidence_reason(result)` preserves the Task 5
+reason verbatim (e.g. `"no indexed chunk met the relevance threshold"`).
+The meaning is *"No verified RBI evidence was retrieved from the indexed
+corpus"* — never *"no RBI rule exists"*.
+
+### Provenance / source attribution
+
+Every field that the approved source actually stated flows through
+corpus → ingestion → chunk metadata → Chroma → retrieval → evidence
+unchanged. A field the source never stated (e.g. `effective_date`) is
+absent from `provenance` and `None` on the record — never a guessed
+value. Nothing invents an RBI title, URL, date, reference, clause,
+section, threshold, or requirement.
+
+### Historical / excerpt status
+
+The one approved source (`RBI_IRAC_ADVANCES_2014`) is a limited 2014
+excerpt: `is_excerpt = True`, `is_current = False`,
+`is_verified_current_regulation = False`. Every evidence record derived
+from it keeps those values (top level, in `provenance`, and in
+`to_dict()`). Retrieval never upgrades an excerpt to "current" or
+"binding" regulation.
+
+### Downstream `retrieval_fn(query=...)` compatibility (validated)
+
+`build_default_retriever()` is a drop-in for the `retrieval_fn` slot in
+`app/report/generate.py`: an integration test passes it to
+`generate._retrieve_section_evidence(...)` (imported read-only) and
+confirms a relevant query yields a `RETRIEVED` citation built from the
+real document title + chunk index + exact text, and an irrelevant query
+yields `NOT_FOUND`. When Khushi swaps the interim single-document
+retriever in `generate_report()` for `build_default_retriever()`, no
+other change to that function is expected (see the 2026-09-08
+"generate_report() ownership split" entry).
+
+### Tests
+
+`tests/rag/test_rag_evidence_handoff.py` — 22 integration tests: full
+pipeline corpus→evidence; exact-text survival (word-multiset ⊆ ingested
+source); every attribution/provenance field matched against
+`corpus.get_source(...)`; multi-result ranking + independent provenance;
+`NO_VERIFIED_EVIDENCE` with zero fabricated evidence; reason preserved;
+determinism (three fresh pipelines identical); offline (`socket.connect`
+blocked); `retrieval_fn` signature + real `generate.py` drop-in; RAG
+layer imports nothing from `groq`/`openai`/`app.report`/`app.api`;
+handoff never triggers `generate_report`/`_call_groq_llm`; only the one
+approved local source is used; Phase 0 smoke test module unchanged.
+
+`tests/rag/test_vector_store.py` gains 7 tests for `all_records`
+(complete enumeration, deterministic ordering, embeddings included/excluded
+per flag, multi-document, empty store).
+
+RAG suite: 171 passed (169 across the six RAG modules + 2 unchanged
+Phase 0 smoke). Full regression: 635 passed, 1 skipped (three consecutive
+runs identical).
+
+### Out of scope (unchanged — later work / other owners)
+
+LLM calls, Groq/OpenAI, report generation, prompt construction,
+compliance interpretation/verdicts, recommendations, API/dashboard,
+orchestration, new RBI sources, external retrieval. `generate_report()`
+and everything under `app/report/`, `app/compliance/`, `app/api/`,
+`app/rbi/`, `dashboard/`, `run_assurance.py`, and `requirements.txt` are
+untouched.

@@ -162,8 +162,14 @@ def test_summary_agrees_with_report_across_cases(preds, sens, favorable_label):
         assert summary[key] == report[key], f"{key} disagreed"
 
 
-def test_fairness_report_contract_is_unchanged_by_the_evidence_layer():
-    """The Phase 2 five-key contract must not have grown evidence fields."""
+def test_fairness_report_keeps_the_aggregates_and_leaks_no_evidence_fields():
+    """The Phase 2 aggregates are untouched, and no evidence field leaks in.
+
+    ``groups`` was added deliberately in Phase 4 (team-approved API contract)
+    and is asserted separately in ``tests/fairness/test_fairness.py``. The
+    evidence layer's own vocabulary -- ``evidence_type``, ``group_count`` --
+    must still never appear on the report.
+    """
     report = fairness_report([1, 0, 1, 0], ["A", "A", "B", "B"], favorable_label=1)
 
     assert set(report.keys()) == {
@@ -172,9 +178,9 @@ def test_fairness_report_contract_is_unchanged_by_the_evidence_layer():
         "disparate_impact_ratio",
         "status",
         "is_mock",
+        "groups",
     }
     assert "evidence_type" not in report
-    assert "groups" not in report
     assert "group_count" not in report
 
 

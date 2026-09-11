@@ -335,6 +335,7 @@ def test_schema_full_key_set_and_attribute_9_name():
         "disparate_impact_ratio",
         "status",
         "is_mock",
+        "groups",
     }
     assert res["protected_attribute"] == "personal_status_and_sex"
     assert res["status"] in VALID_STATUSES
@@ -437,3 +438,212 @@ def test_selection_rate_definition_is_shared_by_both_entry_points():
 
     report = fairness_report(preds, sens, favorable_label=1)
     assert report["disparate_impact_ratio"] == round((1 / 3) / (2 / 3), 4)
+
+
+# --------------------------------------------------------------------------
+# Per-group detail (Phase 4, additive `groups` field)
+# --------------------------------------------------------------------------
+
+GROUPS_FIELD_KEYS = {"group", "count", "favorable_count", "selection_rate"}
+
+
+def test_groups_field_exists_and_is_a_list():
+    res = fairness_report([0, 1, 0, 1], ["A", "A", "B", "B"], favorable_label=0)
+
+    assert "groups" in res
+    assert isinstance(res["groups"], list)
+    assert len(res["groups"]) == 2
+
+
+def test_groups_contain_exactly_the_four_agreed_fields():
+    """The contract agreed with Khushi: group, count, favorable_count, selection_rate."""
+    res = fairness_report([0, 1, 0, 1], ["A", "A", "B", "B"], favorable_label=0)
+
+    for entry in res["groups"]:
+        assert set(entry.keys()) == GROUPS_FIELD_KEYS
+        assert isinstance(entry["count"], int)
+        assert isinstance(entry["favorable_count"], int)
+        assert isinstance(entry["selection_rate"], float)
+
+
+def test_group_counts_and_favorable_counts_are_correct():
+    # A: preds 0, 0, 1  -> 3 members, 2 favourable (label 0), rate 2/3
+    # B: preds 1, 1     -> 2 members, 0 favourable,           rate 0.0
+    preds = [0, 0, 1, 1, 1]
+    sens = ["A", "A", "A", "B", "B"]
+
+    groups = fairness_report(preds, sens, favorable_label=0)["groups"]
+    by_name = {entry["group"]: entry for entry in groups}
+
+    assert by_name["A"]["count"] == 3
+    assert by_name["A"]["favorable_count"] == 2
+    assert by_name["A"]["selection_rate"] == round(2 / 3, 4)
+    assert by_name["B"]["count"] == 2
+    assert by_name["B"]["favorable_count"] == 0
+    assert by_name["B"]["selection_rate"] == 0.0
+
+
+def test_selection_rate_equals_favorable_count_over_count():
+    rng = np.random.default_rng(4)
+    preds = rng.integers(0, 2, 200).tolist()
+    sens = rng.choice(["A91", "A92", "A93", "A94"], 200).tolist()
+
+    for entry in fairness_report(preds, sens, favorable_label=0)["groups"]:
+        assert entry["selection_rate"] == round(
+            entry["favorable_count"] / entry["count"], 4
+        )
+
+
+def test_groups_reproduce_the_reported_aggregates():
+    """The aggregates are derivable from the very groups reported.
+
+    Recomputed from the exact integer counts rather than from the rounded
+    ``selection_rate`` values, because dividing two 4dp-rounded rates can
+    disagree with the reported ratio in the last digit: 0.3854 / 0.4545 rounds
+    to 0.848, while the ratio of the unrounded rates is 0.8479. The producer is
+    right to divide at full precision -- the consequence is that a consumer must
+    DISPLAY ``disparate_impact_ratio`` rather than recompute it from the
+    breakdown, which is what the dashboard's display-never-compute rule already
+    requires.
+    """
+    rng = np.random.default_rng(9)
+    preds = rng.integers(0, 2, 300).tolist()
+    sens = rng.choice(["A91", "A92", "A93"], 300).tolist()
+
+    res = fairness_report(preds, sens, favorable_label=0)
+    exact_rates = [
+        entry["favorable_count"] / entry["count"] for entry in res["groups"]
+    ]
+
+    assert (
+        round(max(exact_rates) - min(exact_rates), 4)
+        == res["demographic_parity_diff"]
+    )
+    assert (
+        round(min(exact_rates) / max(exact_rates), 4)
+        == res["disparate_impact_ratio"]
+    )
+
+    # The rounded rates agree only to within rounding -- documented, not exact.
+    rounded = [entry["selection_rate"] for entry in res["groups"]]
+    assert round(min(rounded) / max(rounded), 4) == pytest.approx(
+        res["disparate_impact_ratio"], abs=1e-3
+    )
+
+
+def test_group_ordering_is_first_observed():
+    sens = ["A93", "A91", "A93", "A92", "A91", "A92"]
+    res = fairness_report([0, 1, 0, 1, 0, 1], sens, favorable_label=0)
+
+    assert [entry["group"] for entry in res["groups"]] == ["A93", "A91", "A92"]
+
+
+def test_original_category_values_are_preserved_in_groups():
+    """Raw Attribute 9 codes, never remapped to a derived sex label."""
+    sens = pd.Series(
+        ["A91", "A92", "A93", "A94"] * 3, name="personal_status_and_sex"
+    )
+    res = fairness_report([0, 1, 0, 1] * 3, sens, favorable_label=0)
+
+    assert {entry["group"] for entry in res["groups"]} == {"A91", "A92", "A93", "A94"}
+    assert res["protected_attribute"] == "personal_status_and_sex"
+
+
+def test_groups_carry_no_status_and_no_threshold():
+    res = fairness_report([0, 1, 0, 1], ["A", "A", "B", "B"], favorable_label=0)
+
+    for entry in res["groups"]:
+        assert "status" not in entry
+        assert "threshold" not in entry
+        assert "is_mock" not in entry
+
+
+def test_single_group_is_pending_but_still_reports_that_group():
+    """PENDING with one group: the comparison is undefined, the count is not.
+
+    The aggregates are already covered by ``test_single_group_is_pending``;
+    this pins that the observed group survives into ``groups``.
+    """
+    res = fairness_report([0, 1, 0], ["A91", "A91", "A91"], favorable_label=0)
+
+    assert res["status"] == STATUS_PENDING
+    assert res["groups"] == [
+        {
+            "group": "A91",
+            "count": 3,
+            "favorable_count": 2,
+            "selection_rate": round(2 / 3, 4),
+        }
+    ]
+
+
+def test_zero_maximum_selection_rate_is_pending_with_zero_rate_groups():
+    """PENDING because no group is selected -- the zero rates are observed.
+
+    A selection rate of 0.0 here is a measurement, not a placeholder: nobody in
+    either group received the favourable outcome.
+    """
+    res = fairness_report([1, 1, 1, 1], ["A", "A", "B", "B"], favorable_label=0)
+
+    assert res["status"] == STATUS_PENDING
+    assert res["groups"] == [
+        {"group": "A", "count": 2, "favorable_count": 0, "selection_rate": 0.0},
+        {"group": "B", "count": 2, "favorable_count": 0, "selection_rate": 0.0},
+    ]
+
+
+def test_groups_agree_with_fairness_evidence_group_records():
+    """The report breakdown and the evidence layer describe the same groups.
+
+    Field names differ by contract (``count`` here, ``group_count`` there) but
+    every value, and the ordering, must match -- both come from the one shared
+    ``_analyse_fairness`` call, so a disagreement would mean one of them is
+    recomputing.
+    """
+    from app.fairness.evidence import fairness_evidence
+
+    preds = [0, 1, 0, 1, 0, 0]
+    sens = ["A93", "A91", "A93", "A92", "A91", "A92"]
+
+    groups = fairness_report(preds, sens, favorable_label=0)["groups"]
+    evidence_groups = [
+        record
+        for record in fairness_evidence(preds, sens, favorable_label=0)
+        if record["evidence_type"] == "fairness_group"
+    ]
+
+    assert len(groups) == len(evidence_groups)
+    for reported, evidenced in zip(groups, evidence_groups):
+        assert reported["group"] == evidenced["group"]
+        assert reported["count"] == evidenced["group_count"]
+        assert reported["favorable_count"] == evidenced["favorable_count"]
+        assert reported["selection_rate"] == evidenced["selection_rate"]
+
+
+def test_groups_agree_with_evidence_on_pending_inputs_too():
+    """The report and the evidence layer must not diverge on PENDING.
+
+    Both read the same ``_analyse_fairness`` result, so the observed groups are
+    reported identically whether or not the aggregate comparison was possible.
+    A divergence here would mean one of the two had started deciding for itself
+    which observations to publish.
+    """
+    from app.fairness.evidence import fairness_evidence
+
+    preds = [1, 1, 1, 1]
+    sens = ["A", "A", "B", "B"]
+
+    report = fairness_report(preds, sens, favorable_label=0)
+    evidence_groups = [
+        record
+        for record in fairness_evidence(preds, sens, favorable_label=0)
+        if record["evidence_type"] == "fairness_group"
+    ]
+
+    assert report["status"] == STATUS_PENDING
+    assert len(report["groups"]) == len(evidence_groups) == 2
+    for reported, evidenced in zip(report["groups"], evidence_groups):
+        assert reported["group"] == evidenced["group"]
+        assert reported["count"] == evidenced["group_count"]
+        assert reported["favorable_count"] == evidenced["favorable_count"]
+        assert reported["selection_rate"] == evidenced["selection_rate"]

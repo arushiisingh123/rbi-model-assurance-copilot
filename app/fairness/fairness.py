@@ -151,6 +151,34 @@ def _analyse_fairness(
     }
 
 
+def _report_groups(analysis: dict) -> list:
+    """Project the shared analysis groups onto the approved Phase 4 field names.
+
+    A pure projection over ``_analyse_fairness``'s ``groups`` -- no arithmetic
+    and no re-derivation, so the reported rates are literally the ones the
+    aggregates were computed from. ``group_count`` is renamed to ``count`` for
+    the API contract agreed with Khushi; ``app.fairness.evidence`` keeps its own
+    ``group_count`` name and its contract is unchanged.
+
+    Groups are reported whenever the inputs validate, including both PENDING
+    cases -- fewer than two groups, or no group receiving the favourable
+    outcome. Those counts and rates are real observations, so withholding them
+    would discard readable data and would put this field at odds with
+    ``fairness_evidence()``, which reports the same groups. Only the aggregate
+    comparison is undefined on PENDING, and that is already expressed by the
+    neutral aggregate values and the PENDING status.
+    """
+    return [
+        {
+            "group": group["group"],
+            "count": group["group_count"],
+            "favorable_count": group["favorable_count"],
+            "selection_rate": group["selection_rate"],
+        }
+        for group in analysis["groups"]
+    ]
+
+
 def fairness_report(
     predictions: Any = None,
     sensitive_feature: Any = None,
@@ -181,6 +209,13 @@ def fairness_report(
                 the reported disparate impact ratio via
                 app.config.thresholds.classify_disparate_impact.
             is_mock (bool): False -- the calculation is real.
+            groups (list of dict): Phase 4, additive. One entry per observed
+                group in first-observed order, each with ``group``, ``count``,
+                ``favorable_count``, and ``selection_rate`` -- the same values
+                the aggregates above were computed from, not a recalculation.
+                No per-group status or threshold is attached. Reported in the
+                PENDING cases too, since the observed counts are real even when
+                the comparison between them is not (see _report_groups).
 
     Raises:
         ValueError: if favorable_label is None, if either input is None, if
@@ -196,13 +231,13 @@ def fairness_report(
     """
     analysis = _analyse_fairness(predictions, sensitive_feature, favorable_label)
 
-    # Exactly the five approved keys -- the Phase 3 evidence layer
-    # (app.fairness.evidence) exposes the per-group detail instead, so this
-    # contract stays unchanged.
+    # The five Phase 2 aggregate keys, unchanged, plus the additive Phase 4
+    # ``groups`` field (see _report_groups for the projection).
     return {
         "protected_attribute": analysis["protected_attribute"],
         "demographic_parity_diff": analysis["demographic_parity_diff"],
         "disparate_impact_ratio": analysis["disparate_impact_ratio"],
         "status": analysis["status"],
         "is_mock": False,
+        "groups": _report_groups(analysis),
     }

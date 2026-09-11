@@ -32,7 +32,14 @@ from app.config.thresholds import STATUS_PASS, VALID_STATUSES, classify_psi
 from app.drift import drift_report
 from app.drift.scenario import build_drift_scenario
 
-DRIFT_KEYS = {"features_evaluated", "psi", "ks_statistic", "status", "is_mock"}
+DRIFT_KEYS = {
+    "features_evaluated",
+    "psi",
+    "ks_statistic",
+    "status",
+    "is_mock",
+    "per_feature",
+}
 
 # The 7 continuous features of the German Credit schema. The other 13 columns
 # are categorical and are deliberately excluded from PSI/KS.
@@ -235,3 +242,79 @@ def test_synthetic_drift_is_larger_than_train_test_drift(
     )
 
     assert synthetic["psi"] > train_test_drift["psi"]
+
+
+# --------------------------------------------------------------------------
+# Per-feature detail on real data (Phase 4, additive)
+# --------------------------------------------------------------------------
+
+# Pinned from the real train/test split. These are development splits, not
+# production monitoring data.
+REAL_AGGREGATE_PSI = 0.0725
+REAL_AGGREGATE_KS = 0.0737
+REAL_PSI_ARGMAX_FEATURE = "age"
+REAL_KS_ARGMAX_FEATURE = "installment_rate"
+
+
+def test_real_train_test_aggregates_are_unchanged(train_test_drift: dict):
+    """Regression pin: the additive per-feature output moved no aggregate."""
+    assert train_test_drift["psi"] == REAL_AGGREGATE_PSI
+    assert train_test_drift["ks_statistic"] == REAL_AGGREGATE_KS
+    assert train_test_drift["status"] == STATUS_PASS
+    assert train_test_drift["status"] == classify_psi(train_test_drift["psi"])
+
+
+def test_real_per_feature_is_aligned_with_features_evaluated(train_test_drift: dict):
+    per_feature = train_test_drift["per_feature"]
+
+    assert len(per_feature) == len(train_test_drift["features_evaluated"])
+    assert [entry["feature"] for entry in per_feature] == EXPECTED_NUMERIC_FEATURES
+    for entry in per_feature:
+        assert set(entry.keys()) == {"feature", "psi", "ks_statistic"}
+
+
+def test_real_maxima_agree_with_the_per_feature_detail(train_test_drift: dict):
+    per_feature = train_test_drift["per_feature"]
+
+    assert max(e["psi"] for e in per_feature) == train_test_drift["psi"]
+    assert max(e["ks_statistic"] for e in per_feature) == train_test_drift[
+        "ks_statistic"
+    ]
+
+
+def test_real_case_documents_the_metric_independence_property(train_test_drift: dict):
+    """On real data the two maxima genuinely come from different features.
+
+    Maximum PSI is ``age``; maximum KS is ``installment_rate``. The aggregate
+    output alone cannot show this, which is why the per-feature detail exists.
+    Pinned so a future change cannot quietly collapse the two metrics into one.
+    """
+    per_feature = train_test_drift["per_feature"]
+
+    psi_argmax = max(per_feature, key=lambda e: e["psi"])["feature"]
+    ks_argmax = max(per_feature, key=lambda e: e["ks_statistic"])["feature"]
+
+    assert psi_argmax == REAL_PSI_ARGMAX_FEATURE
+    assert ks_argmax == REAL_KS_ARGMAX_FEATURE
+    assert psi_argmax != ks_argmax
+
+
+def test_synthetic_shift_surfaces_the_shifted_feature_in_per_feature(
+    german_credit_splits,
+):
+    """SYNTHETIC demonstration -- not observed drift, not production evidence.
+
+    The deliberately shifted feature must be the one carrying the maximum PSI,
+    which is exactly what the per-feature detail is for.
+    """
+    X_train, _ = german_credit_splits
+    reference, current = build_drift_scenario(
+        X_train, shift_features="credit_amount", shift_amount=1.5
+    )
+
+    result = drift_report(reference, current)
+    psi_argmax = max(result["per_feature"], key=lambda e: e["psi"])["feature"]
+
+    assert psi_argmax == "credit_amount"
+    assert result["psi"] == max(e["psi"] for e in result["per_feature"])
+    assert result["is_mock"] is False

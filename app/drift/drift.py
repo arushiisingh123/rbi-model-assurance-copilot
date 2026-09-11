@@ -25,7 +25,16 @@ AGGREGATION
     psi          = MAX across evaluated features
     ks_statistic = MAX across evaluated features
     The two maxima are evaluated INDEPENDENTLY and may originate from different
-    features. Per-feature detail is not part of the Phase 1 output contract.
+    features -- on the real German Credit train/test split the maximum PSI comes
+    from ``age`` while the maximum KS comes from ``installment_rate``.
+
+    ``per_feature`` (Phase 4, additive) exposes the per-feature PSI and KS
+    values behind those maxima, aligned index-for-index with
+    ``features_evaluated`` and rounded to the same precision. It is
+    informational only: there is no per-feature status and no per-feature
+    threshold, and ``status`` continues to come from the aggregate PSI alone.
+    Because rounding is monotonic, the maximum per-feature value always equals
+    the reported aggregate.
 
 STATUS
     Status is driven strictly by classify_psi(psi). The KS statistic is an
@@ -154,6 +163,9 @@ def _pending_result() -> dict:
         "ks_statistic": 0.0,
         "status": STATUS_PENDING,
         "is_mock": False,
+        # Nothing was evaluated, so there is no per-feature detail to report.
+        # An empty list says that; a zero-valued entry would invent a measurement.
+        "per_feature": [],
     }
 
 
@@ -176,6 +188,12 @@ def drift_report(
             status (str): PASS, WARNING, FAIL, or PENDING, derived solely from
                 the reported PSI via app.config.thresholds.classify_psi.
             is_mock (bool): False -- the calculation is real.
+            per_feature (list of dict): one entry per evaluated feature, in the
+                same order as features_evaluated, each with ``feature``,
+                ``psi``, and ``ks_statistic`` at the same rounding precision as
+                the aggregates. Informational detail only -- it carries no
+                status and no threshold of its own. Empty when nothing could be
+                evaluated.
 
     Raises:
         ValueError: If either input is None or is not a pandas DataFrame.
@@ -235,10 +253,26 @@ def drift_report(
     # Classify the reported value so the PSI shown and the status agree.
     status = classify_psi(max_psi)
 
+    # Per-feature detail (Phase 4, additive): the same values the maxima were
+    # taken from, at the same precision, in the same order as
+    # features_evaluated. Rounding is monotonic, so max(per-feature psi) equals
+    # the reported psi and max(per-feature ks_statistic) equals the reported
+    # ks_statistic -- the detail can never disagree with the aggregate it
+    # explains. No status and no threshold is attached to a per-feature value.
+    per_feature = [
+        {
+            "feature": col,
+            "psi": round(float(psi_val), _ROUNDING_DP),
+            "ks_statistic": round(float(ks_val), _ROUNDING_DP),
+        }
+        for col, psi_val, ks_val in zip(evaluated_cols, feature_psis, feature_kss)
+    ]
+
     return {
         "features_evaluated": evaluated_cols,
         "psi": max_psi,
         "ks_statistic": max_ks,
         "status": status,
         "is_mock": False,
+        "per_feature": per_feature,
     }

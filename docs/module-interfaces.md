@@ -611,14 +611,14 @@ so the value reaches the response payload. `app/api/schemas.py` `ModelResult`
 now declares `instance_ids: list[str]` as a required field, so pydantic
 preserves and serializes it without dropping.
 
-### `GET /report` and `ReportResult` (Phase 3 PROVISIONAL — pending Nidhi + team sign-off)
+### `GET /report` and `ReportResult` (Phase 3 — signed off 2026-09-11)
 
 The `/report` endpoint returns an evidence-grounded model assurance report synthesizing analytical findings from all pipeline modules with retrieved RBI regulatory text and natural-language explanations.
 
 **Implementation (Phase 3, Khushi):**
 The endpoint is backed by `app.report.generate.generate_report()`, which:
 - Gathers real Layer 1 findings verbatim from `model`, `explainability`, `fairness`, `drift`, `compliance`.
-- Evaluates Layer 2 regulatory evidence via `app.rag.smoke_test.run_smoke_test()` with an explicit Python relevance gate. Citations carry provenance `"interim_single_document"` referencing the Phase 0 interim circular excerpt.
+- Evaluates Layer 2 regulatory evidence via the canonical RAG pipeline — `app.rag.retrieval.build_default_retriever()` and `app.rag.evidence.build_evidence()` — with an explicit Python relevance gate. Citations carry provenance `"interim_single_document"` referencing the one approved RBI source, a 2014 excerpt (`is_excerpt: True`, `is_current: False`). `app/rag/smoke_test.py` is **not** the production retrieval path; it is retained only for the test-only `IsolatedRAGRetriever` (see `docs/decisions.md`, 2026-09-11, "Phase 3 integration (C1/C2/C3)").
 - Calls Groq (`openai/gpt-oss-120b`) via Groq Python SDK in a single LLM call for the entire report.
 - Enforces strict safety in Python: `regulatory_basis` is computed in code (`"illustrative_rule_only"` for interim retrieval, `"none"` for `NOT_FOUND`). Any `NOT_FOUND` section where the LLM generated regulatory claim language is stripped and replaced with: `"The generated response for this section was withheld because no supporting evidence was retrieved."`
 - If live generation fails or `GROQ_API_KEY` is not set, the endpoint falls back gracefully to `MOCK_REPORT_RESULT` with a fallback disclaimer, returning HTTP 200 (never 500).
@@ -628,6 +628,14 @@ The endpoint is backed by `app.report.generate.generate_report()`, which:
 1. **`technical_finding` (Layer 1):** Deterministic analytical output produced by Python evaluation modules (`app.models`, `app.explainability`, `app.fairness`, `app.drift`, `app.compliance`). Provenance: `"observed"` | `"mock"` | `"synthetic_fixture"`.
 2. **`retrieved_evidence` (Layer 2):** Grounded regulatory text retrieved via vector search over the RBI corpus. If no governing rule was found, `evidence_status` is explicitly `"NOT_FOUND"`. Citation provenance: `"verified"` | `"illustrative"` | `"interim_single_document"`.
 3. **`llm_interpretation` (Layer 3):** Natural language synthesis strictly constrained to cited evidence and analytical findings. Must never invent regulatory requirements (`regulatory_basis`: `"cited_evidence" | "illustrative_rule_only" | "none"`).
+
+Abridged below — one section is shown to illustrate the three-layer shape.
+The section shown uses `RETRIEVED` for illustration; in the actual
+`MOCK_REPORT_RESULT` fixture the single `RETRIEVED` section is "RBI Compliance
+Rules Mapping", and the model, explainability, fairness, and drift sections
+are `NOT_FOUND` with zero citations and `regulatory_basis: "none"`. That
+mirrors real retrieval coverage against the current one-source corpus. See
+`app/api/mock_data.py`.
 
 ```json
 {
@@ -671,13 +679,107 @@ The endpoint is backed by `app.report.generate.generate_report()`, which:
     "PROVISIONAL MOCK REPORT: Synthetic fixture for API and Dashboard Phase 3 integration testing."
   ],
   "evidence_coverage": {
-    "retrieved": 4,
-    "not_found": 1,
+    "retrieved": 1,
+    "not_found": 4,
     "total": 5
   },
   "is_mock": true
 }
 ```
+
+### Phase 3 additive report fields (implemented, C3 — 2026-09-11)
+
+Two additive extensions shipped with the Phase 3 evidence wiring. Both
+default so that every pre-existing caller and fixture stays valid.
+
+**`Citation` — five optional attribution fields.** `source_url`,
+`publication_date`, `document_type`, `is_excerpt`, `is_current`; all
+`Optional`, default `None`. They carry the canonical attribution that
+`app.rag.evidence.RBIEvidence` already holds, so a citation is not reduced to
+quote plus filename. `is_excerpt` and `is_current` matter most: the one
+approved source is a 2014 excerpt (`is_excerpt: True`, `is_current: False`),
+and retrieving it must never present it as current or binding regulation.
+
+**`ReportSection.supporting_evidence`** — `list[dict[str, Any]]`, default
+empty. The structured records the Phase 3 evidence builders produced for that
+section, carried through verbatim. It is a fourth, clearly separate channel:
+it never merges into `technical_finding` and never becomes
+`llm_interpretation` text. Records are routed by their own `evidence_type`
+through `EVIDENCE_SECTION_BY_TYPE` in `app/report/generate.py`; an unknown
+`evidence_type` raises `ValueError` rather than being silently dropped.
+
+Currently routed: `instance_contribution` and `global_importance` →
+explainability; `fairness_group` and `fairness_summary` → fairness. Model,
+drift, and compliance sections receive no evidence records today — drift
+because no drift evidence producer exists (deliberately deferred, see
+`docs/decisions.md`, "Phase 4 allocation", D5).
+
+`instance_contribution` records are preserved in `supporting_evidence` but
+excluded from the LLM prompt (`_PROMPT_EXCLUDED_EVIDENCE_TYPES`) pending an
+approved sampling policy.
+
+### Approved Phase 4 interface additions (D1 — approved 2026-09-11, NOT yet implemented)
+
+The team approved four additive interface changes to unblock Phase 4
+visualization work. **None is implemented yet.** This section records what was
+approved so the change is visible before code lands.
+
+**D1 approves the scope — that each data category is exposed — not the
+shape.** Concrete field names and shapes, and for D1(c) the route itself, are
+settled in each owner's implementing pull request, which updates this section
+in place. Nothing named in this section should be treated as an approved field
+name or route until that pull request lands.
+
+Rules that apply to all four:
+
+- **Additive only.** No existing key, field, or endpoint may be removed,
+  renamed, or have its meaning changed. Every current Phase 2 and Phase 3
+  contract stays valid.
+- **No new analytical threshold**, and no new status value. The status
+  vocabulary stays `PASS` / `WARNING` / `FAIL` / `PENDING`.
+- Detail fields are supplementary. They do not become headline metrics and
+  they do not carry their own status.
+
+**D1(a) — model evaluation metrics (Namitha).** `app/models/model.py::evaluate()`
+already returns accuracy, precision, recall, f1, and roc_auc, but nothing in
+`app/api/` calls it and `ModelResult` has no metrics field. Phase 4 exposes
+those already-computed metrics so Namitha's "model performance information"
+deliverable has a data source.
+
+**D1(b) — per-feature PSI / KS (Arushi).** `drift_report()` computes a PSI and
+a KS value per evaluated feature, then returns only the MAX-aggregated `psi`
+and `ks_statistic`. Phase 4 additionally exposes the per-feature values so
+drift charts have a data source. **MAX aggregation remains the reported
+headline metric and the basis of `status`** — unchanged from the Phase 1
+decision recorded in `docs/decisions.md`.
+
+**D1(c) — per-group fairness rates (Arushi).** `fairness_evidence()` already
+produces `group_count`, `favorable_count`, and `selection_rate` per observed
+group, but they reach consumers only through `GET /report` →
+`supporting_evidence`.
+
+D1 approves **that** these per-group values reach the dashboard. **The route
+is NOT yet decided**, and D1 does not choose between the two candidates:
+
+1. Extend the fairness output, or add an endpoint, so the dashboard reads
+   group rates without going through `GET /report`.
+2. Have the dashboard consume the existing `GET /report` →
+   `supporting_evidence` `fairness_group` records, which needs no schema
+   change at all.
+
+Arushi and Khushi settle the route, and the resulting field names and shapes,
+in the implementation pull request, which updates this section in place.
+Until then neither the route nor any field name here is approved.
+
+**The `fairness_report()` five-key contract (`protected_attribute`,
+`demographic_parity_diff`, `disparate_impact_ratio`, `status`, `is_mock`) is
+unchanged** under either route. Group labels remain the raw Attribute 9
+categories; `personal_status_and_sex` is never renamed to `gender` or `sex`.
+
+**D1(d) — `supporting_evidence` consumption (Khushi, Nidhi).** The field is
+already populated on every `ReportSection` but has no reader in `dashboard/`.
+Phase 4 consumes it for the compliance and report panels. No schema change is
+required for this item.
 
 ## Changing an interface
 

@@ -1686,3 +1686,169 @@ subject to the scope and approval requirements in
 **Status:** Approved by the team, 2026-09-11.
 
 **Reference:** Phase 3 evidence-wiring commit `41758e2`.
+
+---
+
+## 2026-09-11 — Phase 4 allocation: interface additions, panel ownership, Definition of Done, and Phase 3 deferral assignments
+
+**Decision:** The team reviewed the Phase 4 preparation audit and approved
+decisions D1-D9 below. `docs/phase4-allocation.md` records the full Phase 4
+allocation, Definition of Done, and checkpoint criteria. **Phase 4
+implementation has not begun**; this entry and its accompanying documentation
+changes are governance only.
+
+**Context:** Phase 3 was signed off on 2026-09-11. A Phase 4 preparation
+audit found that Phase 4 — despite being worded as visualization work — could
+not begin as written: three of the five owners' deliverables had no data
+source in the current API, four owners would have to write code inside
+Khushi's `dashboard/` folder with no governance precedent, and no Phase 4
+Definition of Done or checkpoint criteria existed anywhere in the repository.
+
+### D1 — Four additive interface changes approved
+
+Approved in principle and documented; **not implemented by this change**. All
+four are additive: no existing key, field, or endpoint may be removed,
+renamed, or redefined, and every current Phase 2 and Phase 3 contract stays
+valid.
+
+- **(a) Expose model evaluation metrics** — Namitha.
+  `app/models/model.py::evaluate()` already computes accuracy, precision,
+  recall, f1, and roc_auc, but nothing in `app/api/` calls it and
+  `ModelResult` has no metrics field.
+- **(b) Expose per-feature PSI / KS** — Arushi. `drift_report()` computes
+  per-feature values internally and returns only the MAX-aggregated `psi`
+  and `ks_statistic`. MAX aggregation remains the reported headline metric;
+  per-feature values are supplementary detail carrying no new status or
+  threshold.
+- **(c) Establish a route for per-group fairness rates** — Arushi.
+  `fairness_evidence()` already produces `group_count`, `favorable_count`,
+  and `selection_rate` per group, reachable only through `GET /report` →
+  `supporting_evidence`. The existing `fairness_report()` five-key contract
+  is unchanged.
+- **(d) Expose and consume `supporting_evidence`** — Khushi and Nidhi. The
+  field is populated on every `ReportSection`; `dashboard/` has no reference
+  to it.
+
+No new analytical threshold may be introduced by any of the four. See
+`docs/module-interfaces.md`, "Approved Phase 4 interface additions (D1)".
+
+### D2 — Domain-owned dashboard panels in `dashboard/panels/`
+
+Phase 4 is the first phase requiring all five owners to contribute to one
+folder. `docs/architecture.md` §4 assigns `dashboard/` to Khushi, and
+`CLAUDE.md` §2 requires approval before crossing folders. Approved model:
+
+- `dashboard/panels/model_panel.py` — **Namitha**
+- `dashboard/panels/explainability_panel.py` — **Manas**
+- `dashboard/panels/fairness_drift_panel.py` — **Arushi**
+- `dashboard/panels/compliance_panel.py` and
+  `dashboard/panels/report_panel.py` — **Nidhi**
+- `dashboard/dashboard_app.py`, `dashboard/api_client.py`,
+  `dashboard/panels/__init__.py`, and the dashboard shell, tabs, navigation,
+  and UX flow — **Khushi**
+
+Streamlit stays out of the analytical packages, which must remain importable
+and testable without a UI dependency. `docs/architecture.md` §4 is updated
+accordingly.
+
+### D3 — Visualization primitives
+
+Prefer Streamlit built-in visualization primitives. Add a plotting dependency
+only if a concrete visualization requires it, and document that dependency
+decision here under the existing `requirements.txt` process
+(`docs/decisions.md`, "requirements.txt ownership process", 2026-08-25).
+
+### D4 — Phase 4 Definition of Done and checkpoint criteria adopted
+
+Adopted as written in `docs/phase4-allocation.md` §10 and §11, and summarised
+in `docs/development-phases.md`. Phase 3 was signed off with all seventeen
+boxes of its own Definition of Done left blank; **for Phase 4 the checklist
+must be filled in as a precondition of the sign-off entry, not after it.**
+
+### D5 — Phase 3 deferral assignments
+
+**Absorbed into Phase 4:** N1 (fabricated `.get()` defaults in report
+extraction, Khushi); N2 (hardcoded `status="PASS"` for the model and
+explainability sections, Khushi); V6 (`GET /report` duplicates orchestration
+inline, Khushi); `supporting_evidence` dashboard rendering (Nidhi and
+Khushi); stale `docs/module-interfaces.md` (Khushi); stale
+`docs/architecture.md` current-state documentation (shared). The last two are
+closed by this governance change.
+
+**Deferred to Phase 5:** N4 (CLI discards the report body, Khushi); live Groq
+verification (Khushi); N6 (stale explainability docstring, Manas).
+
+**Kept outside the current Phase 4 / Phase 5 roadmap:** broader approved RBI
+corpus; instance-level LLM prompt sampling policy; drift evidence producer;
+deployment and production hardening.
+
+Consequence recorded deliberately: with no drift evidence producer, Phase 4
+will show an empty evidence panel for drift while explainability and fairness
+show populated ones. That asymmetry must be labelled on screen, never hidden
+or filled in.
+
+### D6 — Content versus container ownership
+
+Nidhi owns the regulatory and compliance content and evidence semantics —
+what is displayed and how it is characterised, including citation rendering,
+source attribution, `is_excerpt` / `is_current` treatment, `NOT_FOUND`
+wording, and the separation of the three report layers. Khushi owns dashboard
+placement, layout, navigation, and UX integration. This resolves the overlap
+between Nidhi's "report information" deliverable and Khushi's "overall
+dashboard" deliverable on a Report tab Khushi built during Phase 3E.
+
+### D7 — Testing approach
+
+Data-contract tests, no-fabrication / source-inspection tests, and Streamlit
+render smoke tests. **No pixel or image assertions.** See
+`docs/phase4-allocation.md` §9.
+
+### D8 — Review and sign-off
+
+Team approval is required for Phase 4 sign-off; no single member signs off a
+phase. **Khushi is the Phase 4 integration owner.** Each pull request needs a
+teammate review per `CLAUDE.md` §8.
+
+### D9 — RBI corpus expansion stays outside the roadmap
+
+Broader RBI corpus expansion remains outside the current roadmap unless
+separately approved. It is recorded as the largest limit on evidence coverage
+(currently 1 of 5 report sections, from a single 2014 excerpt) and belongs to
+no phase.
+
+### Phase declaration convention (recorded to prevent a known recurrence)
+
+`CLAUDE.md` §20 and `docs/development-phases.md` are **deliberately left at
+Phase 3** by this change. During Phase 3 the `CLAUDE.md` declaration lagged
+the real phase for the entire phase and was corrected only at sign-off —
+identified by the Phase 3 post-merge audit. Both declarations
+flip to Phase 4 in the **first Phase 4 implementation pull request**: not at
+allocation approval, and not at sign-off.
+
+### Not resolved by this decision
+
+No Phase 5 Definition of Done or checkpoint criteria exists. "Project
+complete" is undefined in this repository, and Phase 5 is the
+highest-numbered phase but is **not** formally declared final.
+`tests/integration/` still has no assigned owner in
+`docs/architecture.md` §4.
+
+### Recommended but NOT approved
+
+These came from the Phase 4 preparation audit and were **not** part of D1-D9.
+They are recorded as suggestions, and each needs a separate team decision
+before it is treated as binding:
+
+- **A second reviewer on each panel pull request** whose only question is
+  whether the panel displays or computes, rotated using the Phase 5
+  cross-test cycle in `CLAUDE.md` §5.
+- **The two-stage 4A (enablement) / 4B (visuals) sequencing** described in
+  `docs/phase4-allocation.md` §5.
+- **A Phase 4 test-file convention** placing each panel's tests in
+  `tests/dashboard/` under the corresponding panel owner's name
+  (`docs/phase4-allocation.md` §9). D2 approved panel ownership under
+  `dashboard/panels/` only; it said nothing about test files, and
+  `tests/dashboard/` has no owner recorded in `docs/architecture.md` §4.
+
+**Status:** Approved by the team, 2026-09-11. Governance only — no
+application, API, dashboard, or test code changed.

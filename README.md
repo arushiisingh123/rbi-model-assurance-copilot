@@ -28,8 +28,8 @@ coverage.
 
 ## Team
 
-- Namita — Model / Data
+- Namitha — Model / Data
 - Manas — Explainability
 - Arushi — Fairness / Drift
 - Nidhi — RBI Compliance / Rule Engine / RAG
-- Kushi — API / Dashboard / Integration
+- Khushi — API / Dashboard / Integration

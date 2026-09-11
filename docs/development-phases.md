@@ -45,6 +45,15 @@ grounds 1 of the 5 report sections and the other 4 return `NOT_FOUND`.
 — never that no RBI rule exists. Phase 3 sign-off is an engineering and
 integration milestone, not complete regulatory coverage.
 
+**Phase 4 is allocated but not started.** The Phase 4 allocation, Definition
+of Done, and checkpoint criteria were approved on 2026-09-11 (decisions
+D1-D9, see `docs/decisions.md`, "Phase 4 allocation") and are recorded in
+`docs/phase4-allocation.md`. This declaration and the one in `CLAUDE.md` §20
+deliberately still read Phase 3; both flip to Phase 4 in the **first Phase 4
+implementation pull request**. During Phase 3 the `CLAUDE.md` declaration
+lagged the real phase for the whole phase and was corrected only at sign-off,
+as identified by the Phase 3 post-merge audit.
+
 ## Phase 0 checkpoint criteria (from docs/TASK.md §7)
 
 Phase 0 is complete only when all of the following hold:
@@ -71,6 +80,48 @@ The team reviewed and signed off on 2026-08-27. The per-item status
 against this checklist — including the two items accepted as known
 limitations (items 4 and 9) — is recorded in `docs/decisions.md`,
 "Phase 0 checkpoint sign-off and Phase 1 start".
+
+## Phase 4 checkpoint criteria (approved 2026-09-11)
+
+Phase 4 — Dashboard + UX is the first phase after Phase 0 and Phase 1 to have
+documented checkpoint criteria. Full detail, per-owner allocation, panel
+ownership, and the deferral assignments are in `docs/phase4-allocation.md`;
+the approving decisions are D1-D9 in `docs/decisions.md`.
+
+**Definition of Done.** Phase 4 is complete only when every analytical result
+the system already calculates is visually presented in the dashboard, each
+visual is sourced from the module that owns the calculation, no visual
+modifies or fabricates a value, and mock, synthetic, observed, and
+unverified-evidence states remain distinguishable on screen.
+
+The 22-item Definition of Done checklist is in `docs/phase4-allocation.md`
+§10. It must be filled in as a precondition of the Phase 4 sign-off entry,
+not after it — Phase 3 was signed off with all seventeen boxes of its own
+Definition of Done left blank.
+
+**Exit criteria.** Phase 4 may be signed off only when:
+
+1. Every Definition of Done item is checked, or explicitly listed as a
+   deferral with a named owner in the sign-off entry.
+2. A live demonstration has been given (`uvicorn app.api.main:app` plus
+   `streamlit run dashboard/dashboard_app.py`), walking every tab on real
+   data.
+3. A second walkthrough has been given with the API stopped, showing the
+   fallback is clearly labelled as mock.
+4. The full regression suite passes and the figure is recorded.
+5. A dated Phase 4 checkpoint sign-off entry exists in `docs/decisions.md`,
+   naming what is deferred and what is not claimed.
+6. `docs/architecture.md` §2 and `docs/module-interfaces.md` reflect the
+   delivered state.
+
+Gate to enter Phase 5 remains "Phase 4 checkpoint passed" (phase table
+above).
+
+**Note on Phase 5.** Phase 5 — Testing + Demo is the highest-numbered phase
+in this roadmap, but the repository does **not** formally define it as the
+final project-completion phase, and "project complete" is undefined here. No
+Phase 5 Definition of Done or checkpoint criteria exists yet; it should be
+defined before Phase 4 exit.
 
 ## What each phase adds, per module
 

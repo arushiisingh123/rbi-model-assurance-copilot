@@ -140,8 +140,8 @@ def test_report_endpoint():
     assert parsed.is_mock is True
     assert len(parsed.sections) == 5
     assert parsed.evidence_coverage.total == 5
-    assert parsed.evidence_coverage.retrieved == 4
-    assert parsed.evidence_coverage.not_found == 1
+    assert parsed.evidence_coverage.retrieved == 1
+    assert parsed.evidence_coverage.not_found == 4
     assert parsed.model_version == "0.1.0"
     assert len(parsed.disclaimers) > 0
 

@@ -110,8 +110,8 @@ def test_mock_report_result_validity_and_contract():
     assert parsed.is_mock is True
     assert len(parsed.sections) == 5
     assert parsed.evidence_coverage.total == 5
-    assert parsed.evidence_coverage.retrieved == 4
-    assert parsed.evidence_coverage.not_found == 1
+    assert parsed.evidence_coverage.retrieved == 1
+    assert parsed.evidence_coverage.not_found == 4
 
     # Check section headings encompass Model, Explainability, Fairness, Drift, Compliance
     combined_headings = " ".join(s.heading.lower() for s in parsed.sections)
@@ -121,10 +121,19 @@ def test_mock_report_result_validity_and_contract():
     not_found_sections = [
         s for s in parsed.sections if s.retrieved_evidence.evidence_status == "NOT_FOUND"
     ]
-    assert len(not_found_sections) == 1
-    not_found_sec = not_found_sections[0]
-    assert not_found_sec.llm_interpretation.regulatory_basis == "none"
-    assert not_found_sec.retrieved_evidence.citations == []
+    assert len(not_found_sections) == 4
+    for not_found_sec in not_found_sections:
+        assert not_found_sec.llm_interpretation.regulatory_basis == "none"
+        assert not_found_sec.retrieved_evidence.citations == []
+
+    # The advertised coverage must match the fixture's own sections, so the mock
+    # can never again claim more retrieved evidence than it actually carries.
+    retrieved_sections = [
+        s for s in parsed.sections if s.retrieved_evidence.evidence_status == "RETRIEVED"
+    ]
+    assert parsed.evidence_coverage.retrieved == len(retrieved_sections)
+    assert parsed.evidence_coverage.not_found == len(not_found_sections)
+    assert parsed.evidence_coverage.total == len(parsed.sections)
 
     # Mandatory invariant: NOT_FOUND section must never claim cited_evidence
     for s in parsed.sections:

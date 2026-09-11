@@ -446,20 +446,18 @@ MOCK_REPORT_RESULT = {
                 "provenance": "synthetic_fixture",
             },
             "retrieved_evidence": {
-                "evidence_status": "RETRIEVED",
-                "citations": [
-                    {
-                        "source": "ILLUSTRATIVE — not a real RBI source",
-                        "locator": "§1 (sample)",
-                        "quote": "[sample placeholder] Regulated entities shall maintain model risk management records including model type and performance metrics.",
-                        "provenance": "illustrative",
-                    }
-                ],
+                "evidence_status": "NOT_FOUND",
+                "citations": [],
             },
             "llm_interpretation": {
-                "text": "Model metadata and baseline probability distributions are documented according to sample model governance guidelines.",
+                "text": (
+                    "Model metadata and baseline probability distributions are recorded by "
+                    "the assurance run. No governing RBI regulatory text was retrieved from "
+                    "the indexed corpus for model documentation, so no regulatory conclusion "
+                    "is drawn for this section."
+                ),
                 "grounded_in": ["model.model_metadata", "model.version"],
-                "regulatory_basis": "illustrative_rule_only",
+                "regulatory_basis": "none",
                 "is_mock": True,
             },
         },
@@ -477,20 +475,18 @@ MOCK_REPORT_RESULT = {
                 "provenance": "synthetic_fixture",
             },
             "retrieved_evidence": {
-                "evidence_status": "RETRIEVED",
-                "citations": [
-                    {
-                        "source": "ILLUSTRATIVE — not a real RBI source",
-                        "locator": "§3 (sample)",
-                        "quote": "[sample placeholder] Explanations of principal feature drivers must be documented for automated risk scoring.",
-                        "provenance": "illustrative",
-                    }
-                ],
+                "evidence_status": "NOT_FOUND",
+                "citations": [],
             },
             "llm_interpretation": {
-                "text": "SHAP global feature importance identifies duration_months as the primary decision driver, meeting transparency requirements.",
+                "text": (
+                    "SHAP global feature importance identifies duration_months as the primary "
+                    "decision driver. No governing RBI regulatory text was retrieved from the "
+                    "indexed corpus for model explainability, so no regulatory conclusion is "
+                    "drawn for this section."
+                ),
                 "grounded_in": ["explainability.global_importance"],
-                "regulatory_basis": "illustrative_rule_only",
+                "regulatory_basis": "none",
                 "is_mock": True,
             },
         },
@@ -508,20 +504,20 @@ MOCK_REPORT_RESULT = {
                 "provenance": "synthetic_fixture",
             },
             "retrieved_evidence": {
-                "evidence_status": "RETRIEVED",
-                "citations": [
-                    {
-                        "source": "ILLUSTRATIVE — not a real RBI source",
-                        "locator": "§2 (sample)",
-                        "quote": "[sample placeholder] Disparate impact ratio below 0.80 warrants executive risk committee review.",
-                        "provenance": "illustrative",
-                    }
-                ],
+                "evidence_status": "NOT_FOUND",
+                "citations": [],
             },
             "llm_interpretation": {
-                "text": "Disparate impact ratio of 0.78 for personal_status_and_sex evaluates against the project's internal fairness threshold of 0.80 (an internal convention, not an RBI-mandated figure), resulting in a WARNING status that warrants internal review.",
+                "text": (
+                    "Disparate impact ratio of 0.78 for personal_status_and_sex evaluates "
+                    "against the project's internal fairness threshold of 0.80 (an internal "
+                    "convention, not an RBI-mandated figure), resulting in a WARNING status "
+                    "that warrants internal review. No governing RBI regulatory text was "
+                    "retrieved from the indexed corpus for fairness, so no regulatory "
+                    "conclusion is drawn for this section."
+                ),
                 "grounded_in": ["fairness.disparate_impact_ratio", "fairness.status"],
-                "regulatory_basis": "illustrative_rule_only",
+                "regulatory_basis": "none",
                 "is_mock": True,
             },
         },
@@ -585,10 +581,15 @@ MOCK_REPORT_RESULT = {
         "No real LLM generation or live vector database retrieval was executed (is_mock: True).",
         "Citations reference illustrative sample text, not verified RBI regulatory requirements.",
         "Drift detection in production compares dev train/test splits; synthetic scenarios are testing infrastructure.",
+        (
+            "Evidence coverage (1 of 5 sections) mirrors the real Phase 3 retrieval path, "
+            "which indexes a single approved RBI excerpt. NOT_FOUND means no verified "
+            "evidence was retrieved from the indexed corpus - not that no RBI rule exists."
+        ),
     ],
     "evidence_coverage": {
-        "retrieved": 4,
-        "not_found": 1,
+        "retrieved": 1,
+        "not_found": 4,
         "total": 5,
     },
     "is_mock": True,

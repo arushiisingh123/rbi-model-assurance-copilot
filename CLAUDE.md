@@ -949,35 +949,63 @@ A phase is complete only when its checkpoint criteria have been satisfied and th
 
 Current phase:
 
-PHASE 2 — CROSS-MODULE INTEGRATION
+PHASE 3 — RAG + LLM
 
 Phase 0 (Foundation) was completed and signed off on 2026-08-27, with two
 accepted limitations that must be closed early in Phase 1. See
 docs/decisions.md, "Phase 0 checkpoint sign-off and Phase 1 start".
 
-Phase 1 (Independent Module Development) was completed and signed off before the
-project entered Phase 2. The Phase 1 module contracts remain authoritative
-unless explicitly superseded by a later approved decision in docs/decisions.md.
+Phase 1 (Independent Module Development) was completed and signed off on
+2026-09-05. See docs/decisions.md, "Phase 1 checkpoint sign-off and Phase 2
+start".
 
-The current objective is cross-module integration: connect the independently
-completed model, explainability, fairness, drift, RBI-rule, compliance, API,
-and dashboard components through their approved interfaces without changing
-their established contracts.
+Phase 2 (Cross-Module Integration) was completed and signed off on
+2026-09-07. See docs/decisions.md, "Phase 2 checkpoint sign-off and Phase 3
+start".
 
-Now in scope — Phase 2 integration:
+The Phase 1 and Phase 2 module contracts remain authoritative unless
+explicitly superseded by a later approved decision in docs/decisions.md.
 
-- Connect real model outputs to downstream explainability, fairness, and drift modules.
-- Connect technical findings to the RBI rule engine and compliance layer.
-- Connect the integrated assurance flow to the API and CLI.
-- Verify the end-to-end data flow, contracts, serialization boundaries, and error handling.
-- Add and maintain integration tests and documentation required for Phase 2 sign-off.
+The current objective is Phase 3: retrieve RBI source material through the
+RAG pipeline, carry structured evidence records into the assurance report,
+keep LLM output grounded in retrieved evidence, and preserve a stable
+per-record instance_id from the data/model boundary through to the report.
+
+The Phase 3 integration work has been implemented and merged into main. The
+formal Phase 3 checkpoint sign-off is being recorded now; see
+docs/decisions.md, "Phase 3 checkpoint sign-off".
+
+Now in scope — Phase 3:
+
+- RBI document processing, chunking, embeddings, and vector storage.
+- Retrieval of RBI source material and construction of evidence records.
+- Routing evidence records into report sections so evidence is consumed, not merely produced.
+- Evidence-grounded LLM report generation, with every technical metric still calculated in Python.
+- Stable instance_id preserved from dataset through model, explainability evidence, and report.
+- Connecting report generation to the API, CLI, and dashboard.
+- Integration tests and documentation required for Phase 3 sign-off.
+
+Evidence coverage limitation — do not overstate it:
+
+The approved RBI corpus currently contains a single 2014 excerpt
+(is_excerpt: True, is_current: False). Real retrieval therefore grounds
+1 of the 5 report sections; the other 4 return NOT_FOUND. NOT_FOUND means
+no verified evidence was retrieved from the indexed corpus — it does NOT
+mean that no RBI rule exists. Phase 3 completion must never be described as
+complete regulatory coverage.
+
+Deferred inside Phase 3 and NOT yet implemented — see docs/decisions.md,
+"Phase 3 checkpoint sign-off":
+
+Instance-level evidence in the LLM prompt (no approved sampling policy yet)
+A drift evidence producer
+Live Groq verification in CI
+A broader approved RBI corpus
 
 Still out of scope until the team explicitly begins the relevant phase:
 
-Full multi-document RAG pipeline (Phase 3) — the existing one-document
-smoke test continues as-is
-LLM compliance report generation (Phase 3)
-Full dashboard analytics (Phase 4)
+Full dashboard analytics and UX (Phase 4)
+Team-wide cross-testing, debugging, and demo preparation (Phase 5)
 
 Analytical thresholds (fairness, drift) have a single authoritative
 location and must not be independently defined per module. See
@@ -985,9 +1013,9 @@ docs/thresholds.md. Those thresholds are project/industry conventions,
 NOT RBI requirements, and must never be presented as RBI requirements
 without a cited RBI source.
 
-The immediate goal is to complete and verify the Phase 2 end-to-end assurance
-chain while preserving the approved module interfaces and keeping Phase 3 and
-Phase 4 functionality out of scope until explicitly authorized.
+The immediate goal is to record the Phase 3 checkpoint, close the documented
+Phase 3 follow-ups, and keep Phase 4 functionality out of scope until
+explicitly authorized.
 
 21. Default Behavior for Claude Code
 

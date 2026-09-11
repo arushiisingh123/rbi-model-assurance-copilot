@@ -1525,3 +1525,164 @@ orchestration, new RBI sources, external retrieval. `generate_report()`
 and everything under `app/report/`, `app/compliance/`, `app/api/`,
 `app/rbi/`, `dashboard/`, `run_assurance.py`, and `requirements.txt` are
 untouched.
+
+---
+
+## 2026-09-11 — Phase 3 integration (C1/C2/C3): retrieval protocol, canonical RAG pipeline, and evidence wiring
+
+**Decision:** The three integration defects found by the Phase 3 post-merge
+audit — C1, C2, and C3 — are resolved as described below. This entry records
+the decisions that were actually implemented; it introduces no new
+requirements and changes no Phase 1 or Phase 2 contract.
+
+**Context:** the Phase 3 module work (Namitha's `instance_id`, Manas's
+explainability evidence, Arushi's fairness evidence, Nidhi's RAG pipeline) was
+merged before a report-side seam existed to consume it. A read-only audit
+found the retrieval protocol mismatched, the canonical RAG pipeline
+unreachable from production, and every evidence producer orphaned.
+
+### C1 — Retrieval protocol
+
+- The production retrieval protocol is `retrieval_fn(query=...)`. Nidhi's
+  `RBIRetriever.__call__` already declared a keyword-only `query`, and the
+  three test doubles matched it, so the single outlier parameter name in
+  `app/report/generate.py` was renamed to match rather than changing four
+  implementations to match the outlier.
+- `IsolatedRAGRetriever` is retained **only** for preservation/regression
+  tests. It is no longer constructed anywhere on the production path.
+- Production report generation obtains its retriever from
+  `app.rag.retrieval.build_default_retriever()`.
+- A retrieval failure must never be silently converted into valid-looking
+  evidence. The mismatch previously raised a `TypeError` that was swallowed
+  into a `NOT_FOUND` section, which is indistinguishable from a genuine
+  "nothing relevant was indexed" result. A regression test now asserts that
+  the real retriever is reachable through `_retrieve_section_evidence()` and
+  that no swallow-warning is logged.
+
+### C2 — Canonical RAG pipeline
+
+- The production path is:
+  corpus → ingestion → chunking → vector store → retrieval → RAG evidence → report.
+- `app.rag.evidence.build_evidence()` is part of that production path.
+- Canonical RAG provenance is preserved into report citations: `source_url`,
+  `publication_date`, `document_type`, `is_excerpt`, `is_current`, `locator`,
+  `quote`, and `provenance` all survive the `RBIEvidence` → `Citation`
+  mapping.
+- `app/rag/smoke_test.py` is **not** the production RAG implementation. It
+  remains the Phase 0 one-document smoke test and is now referenced only from
+  the retained, test-only `IsolatedRAGRetriever`.
+
+### C3 — Evidence integration
+
+- Explainability evidence is produced through `build_instance_evidence()` and
+  `build_global_evidence()`.
+- Fairness evidence is produced through `fairness_evidence()`. It is
+  population/group-level and carries no `instance_id` by design.
+- RBI evidence is produced through `build_evidence()`.
+- `evidence_records` are routed into `ReportSection.supporting_evidence` — an
+  additive fourth channel that never merges into `technical_finding` and
+  never becomes `llm_interpretation` text.
+- Routing is explicit, through `EVIDENCE_SECTION_BY_TYPE` in
+  `app/report/generate.py`.
+- An unknown `evidence_type` raises `ValueError` naming the offending type,
+  the known types, and the mapping to update. It is never silently dropped.
+- The stable `instance_id` is preserved into instance-level explainability
+  evidence and through to the report.
+
+### Deliberate deferrals (recorded as open, not as resolved)
+
+1. **Instance-level evidence is excluded from the LLM prompt.** It is
+   preserved in `supporting_evidence`, so traceability is intact, but the
+   instance records cannot be placed in a prompt without an approved sampling
+   policy. No such policy has been defined, so `instance_contribution` is
+   listed in `_PROMPT_EXCLUDED_EVIDENCE_TYPES`.
+2. **Drift evidence is deferred.** Existing drift technical findings are
+   unchanged and still reach the report as `technical_finding`. No drift
+   evidence producer is introduced by this change. Owner: Arushi.
+
+### Current RAG limitation (must not be overstated)
+
+- The approved corpus currently contains **one** source, and that source is a
+  2014 excerpt (`is_excerpt: True`, `is_current: False`).
+- Real report retrieval coverage is therefore **1 of 5 sections** —
+  compliance retrieved; model, explainability, fairness, and drift
+  `NOT_FOUND`.
+- `NOT_FOUND` means no verified evidence was retrieved from the indexed
+  corpus. It does **not** mean that no RBI rule exists, and it must never be
+  presented as an absence of regulation.
+- Phase 3 sign-off must not be interpreted as complete regulatory coverage.
+
+**Affected files:** `app/report/generate.py`, `app/api/orchestration.py`,
+`app/api/main.py`, and additive-only fields in `app/api/schemas.py`. No change
+to `app/rag/`, `app/fairness/`, `app/drift/`, `app/explainability/`,
+`app/models/`, `app/compliance/`, or to any analytical threshold.
+
+**Status:** Implemented and merged (`41758e2`).
+
+---
+
+## 2026-09-11 — Phase 3 checkpoint sign-off
+
+**Decision:** Phase 3 — RAG + LLM — is complete as an **engineering and
+integration** milestone, and the team records the checkpoint.
+
+**What this checkpoint records:**
+
+- Phase 3 integration work is complete and merged into `main`.
+- The three post-merge audit blockers C1, C2, and C3 are resolved — see the
+  2026-09-11 Phase 3 integration entry above.
+- Full regression suite: **658 passed, 1 skipped**. The one skip is the
+  `GROQ_API_KEY`-gated live Groq test, which is marked manual-verification
+  only.
+- A stable `instance_id` survives dataset → model → explainability evidence →
+  report. It is generated at the data/model boundary, never regenerated
+  downstream, and never inferred from row position.
+- Fairness evidence is population/group-level by design and carries no
+  `instance_id`.
+- RAG evidence preserves source attribution and provenance end-to-end into
+  report citations.
+- Unknown evidence types fail loudly with a `ValueError` instead of being
+  silently dropped.
+- `NOT_FOUND` sections fabricate no regulatory evidence: zero citations and
+  `regulatory_basis: "none"`.
+- The canonical RAG pipeline is production-connected; `app/rag/smoke_test.py`
+  is not the production implementation.
+- Evidence records reach report sections through
+  `ReportSection.supporting_evidence`.
+
+**Evidence coverage — explicitly limited.** The approved RBI corpus contains
+one 2014 excerpt, so current real retrieval coverage is **1 of 5 report
+sections**. This sign-off records Phase 3 engineering and integration
+completion. It is **not** a claim of complete regulatory grounding and must
+never be presented as one. Broader coverage depends on an expanded approved
+corpus, which is future work and is not part of this sign-off.
+
+**Deferred — NOT completed by this sign-off:**
+
+| Item | Owner | Note |
+|---|---|---|
+| Instance-level LLM prompt sampling policy | Khushi + team | Evidence is preserved in `supporting_evidence` but excluded from the prompt |
+| Drift evidence producer | Arushi | Drift technical findings unchanged; no drift evidence layer exists |
+| Live Groq verification | Khushi | The only test is `skipif`-gated on `GROQ_API_KEY` and has never run in CI |
+| Broader approved RBI corpus | Nidhi + team | The single constraint on evidence coverage |
+| N1 — fabricated `.get()` defaults in report extraction | Khushi | `app/report/generate.py` |
+| N2 — hardcoded `status="PASS"` for the model and explainability sections | Khushi | `app/report/generate.py` |
+| N4 — CLI discards the report body | Khushi | `run_assurance.py` prints only GENERATED / UNAVAILABLE |
+| N6 — stale explainability docstring | Manas | Claims the model layer emits no `instance_id`; it does |
+| V6 — `/report` duplicates orchestration inline | Khushi | Does not route through `build_assurance_result()` |
+
+These are recorded as **open**, not as approved resolutions. Each still needs
+a decision by its owner.
+
+**What this checkpoint does NOT claim:** it does not state that any deferred
+item above is done, that the RBI corpus is complete or current, that any
+retrieved text is verified current binding regulation, or that Phase 4
+dashboard work has begun.
+
+**Phase transition:** the project may now enter Phase 4 — Dashboard + UX,
+subject to the scope and approval requirements in
+`docs/development-phases.md`.
+
+**Status:** Approved by the team, 2026-09-11.
+
+**Reference:** Phase 3 evidence-wiring commit `41758e2`.

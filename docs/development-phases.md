@@ -19,7 +19,7 @@ CLAUDE.md §17.
 
 ## Current phase
 
-**PHASE 2 — CROSS-MODULE INTEGRATION.**
+**PHASE 3 — RAG + LLM.**
 
 Phase 0 was signed off on 2026-08-27, with two accepted limitations that
 must be closed early in Phase 1 — see `docs/decisions.md`, "Phase 0
@@ -27,6 +27,23 @@ checkpoint sign-off and Phase 1 start".
 
 Phase 1 was signed off on 2026-09-05 — see `docs/decisions.md`, "Phase 1
 checkpoint sign-off and Phase 2 start".
+
+Phase 2 was signed off on 2026-09-07 — see `docs/decisions.md`, "Phase 2
+checkpoint sign-off and Phase 3 start".
+
+Phase 3 covers the RAG pipeline (document processing, chunking, embeddings,
+vector store, retrieval), evidence integration into report sections,
+evidence-grounded LLM reporting, and a stable per-record `instance_id`
+carried from the data/model boundary through to the report. The Phase 3
+integration work is implemented and merged into `main`; the formal checkpoint
+sign-off is recorded in `docs/decisions.md`, "Phase 3 checkpoint sign-off".
+
+**Evidence coverage limitation.** The approved RBI corpus currently contains
+one 2014 excerpt (`is_excerpt: True`, `is_current: False`), so real retrieval
+grounds 1 of the 5 report sections and the other 4 return `NOT_FOUND`.
+`NOT_FOUND` means no verified evidence was retrieved from the indexed corpus
+— never that no RBI rule exists. Phase 3 sign-off is an engineering and
+integration milestone, not complete regulatory coverage.
 
 ## Phase 0 checkpoint criteria (from docs/TASK.md §7)
 

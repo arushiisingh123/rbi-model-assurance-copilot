@@ -1,4 +1,12 @@
-"""Exercises the NOT_FOUND safe-failure path through the real pipeline + real IsolatedRAGRetriever, not hand-crafted fixtures."""
+"""Exercises the NOT_FOUND safe-failure path through the real pipeline + real IsolatedRAGRetriever, not hand-crafted fixtures.
+
+Scope note: this file covers only the NOT_FOUND branch -- that an unsupported
+regulatory claim is stripped when no evidence backs it. That the real retriever
+can reach RETRIEVED at all is asserted in ``tests/report/test_generate_report.py``
+(the C1 regression tests). Both halves are needed: before the C1 fix, real
+retrieval raised TypeError into the broad fallback, so all five sections became
+NOT_FOUND and this file passed for the wrong reason.
+"""
 from app.api.schemas import ReportResult
 from app.report.generate import (
     SAFE_FALLBACK_TEXT,
@@ -34,8 +42,18 @@ def test_not_found_safe_failure_end_to_end(real_pipeline, monkeypatch):
         s for s in out["sections"]
         if s["retrieved_evidence"]["evidence_status"] == "NOT_FOUND"
     ]
-    # In the real IRAC document, ML governance keywords (model, explainability, fairness, drift) do not exist
-    assert len(not_found_sections) >= 1
+    # In the real IRAC document, ML governance keywords (model, explainability,
+    # fairness, drift) do not exist, so exactly those four are NOT_FOUND while
+    # the compliance/NPA section does retrieve. Asserted as a set rather than
+    # ">= 1": all five being NOT_FOUND was the C1 symptom (retrieval raising
+    # TypeError into the broad fallback), and a loose count could not tell the
+    # two situations apart.
+    assert {s["heading"] for s in not_found_sections} == {
+        "Credit Scoring Model Evaluation",
+        "Feature Explainability (SHAP)",
+        "Fairness Evaluation",
+        "Data & Prediction Drift Detection",
+    }
 
     for s in not_found_sections:
         ev = s["retrieved_evidence"]

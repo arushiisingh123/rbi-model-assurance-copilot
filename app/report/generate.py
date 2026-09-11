@@ -72,7 +72,13 @@ class ReportGenerationUnavailable(ReportGenerationError):
 
 
 class IsolatedRAGRetriever:
-    """Isolated, thread-safe RAG retriever for a single report generation run.
+    """Isolated, thread-safe RAG retriever over the Phase 0 single-document excerpt.
+
+    NO LONGER THE PRODUCTION RETRIEVER. ``generate_report()`` now builds its
+    retriever with ``app.rag.retrieval.build_default_retriever()`` (the Phase 3
+    corpus-backed pipeline). This class is retained because the Phase 0
+    preservation tests and the C1 protocol regression tests exercise it
+    directly; it is not referenced by the production path.
 
     Builds an isolated collection with a unique UUID name in ChromaDB's EphemeralClient,
     runs section queries against it, and cleans up strictly its own collection on completion.
@@ -108,10 +114,19 @@ class IsolatedRAGRetriever:
             metadatas=[{"source": self.document_path.name, "chunk_index": i} for i in range(len(chunks))],
         )
 
-    def query(self, query_text: str) -> Dict[str, Any]:
-        result = self.collection.query(query_texts=[query_text], n_results=1)
+    def query(self, query: str) -> Dict[str, Any]:
+        """Retrieve the single closest chunk for ``query``.
+
+        The parameter is named ``query`` to match the ``retrieval_fn(query=...)``
+        protocol that ``_retrieve_section_evidence`` invokes and that every other
+        implementation of the slot already follows (the ``fake_retrieval_*``
+        doubles and ``app.rag.retrieval.RBIRetriever.__call__``, whose ``query``
+        is keyword-only). Naming it anything else makes every real retrieval
+        raise TypeError into the broad fallback, silently reporting NOT_FOUND.
+        """
+        result = self.collection.query(query_texts=[query], n_results=1)
         return {
-            "query": query_text,
+            "query": query,
             "retrieved_text": result["documents"][0][0],
             "source": result["metadatas"][0][0]["source"],
             "chunk_index": result["metadatas"][0][0]["chunk_index"],
@@ -303,18 +318,117 @@ def _retrieve_section_evidence(
     source_doc = outcome.get("source", "RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt")
     chunk_idx = outcome.get("chunk_index", 0)
 
-    citation = Citation(
-        source=f"INTERIM SINGLE-DOC: {source_doc}",
-        locator=f"chunk #{chunk_idx}",
-        quote=retrieved_text.strip(),
-        provenance="interim_single_document",
-    )
+    # Prefer the canonical RAG evidence record when the retriever produced a
+    # Task 5 result (it carries `evidence_status`). build_evidence() is the
+    # sanctioned terminal step of the RAG pipeline -- using it keeps the source
+    # attribution (URL, publication date, document type, excerpt/current flags)
+    # instead of discarding it. A retrieval double that returns only the flat
+    # {retrieved_text, source, chunk_index} shape is still supported below.
+    #
+    # EvidenceConsistencyError is deliberately NOT caught: an attribution that
+    # disagrees with its own provenance must surface, not degrade into a
+    # silent NOT_FOUND.
+    top_evidence = None
+    if isinstance(outcome, dict) and "evidence_status" in outcome:
+        from app.rag.evidence import build_evidence
+
+        rbi_evidence = build_evidence(outcome)
+        if rbi_evidence:
+            top_evidence = rbi_evidence[0]
+
+    if top_evidence is not None:
+        citation = Citation(
+            source=f"INTERIM SINGLE-DOC: {top_evidence.title or source_doc}",
+            locator=f"chunk #{top_evidence.chunk_index}",
+            quote=top_evidence.text.strip(),
+            provenance="interim_single_document",
+            source_url=top_evidence.source_url,
+            publication_date=top_evidence.publication_date,
+            document_type=top_evidence.document_type,
+            is_excerpt=top_evidence.is_excerpt,
+            is_current=top_evidence.is_current,
+        )
+    else:
+        citation = Citation(
+            source=f"INTERIM SINGLE-DOC: {source_doc}",
+            locator=f"chunk #{chunk_idx}",
+            quote=retrieved_text.strip(),
+            provenance="interim_single_document",
+        )
     return RetrievedEvidence(evidence_status="RETRIEVED", citations=[citation])
+
+
+# Which report section each Phase 3 evidence_type belongs to. Routing by the
+# record's own declared type is what keeps population-level fairness evidence
+# from being attached to an instance-level section, and vice versa.
+EVIDENCE_SECTION_BY_TYPE = {
+    "instance_contribution": "explainability",   # app/explainability/evidence.py
+    "global_importance": "explainability",       # app/explainability/evidence.py
+    "fairness_group": "fairness",                # app/fairness/evidence.py
+    "fairness_summary": "fairness",              # app/fairness/evidence.py
+}
+
+# Evidence types that are unbounded in size (one record per instance per
+# feature). They are carried in the report for traceability but kept OUT of the
+# LLM prompt: including them would need a sampling policy, and inventing one is
+# out of C3 scope. Population- and dataset-level records are bounded by the
+# number of groups/features and are included.
+_PROMPT_EXCLUDED_EVIDENCE_TYPES = frozenset({"instance_contribution"})
+
+
+def _route_evidence_records(
+    evidence_records: Optional[List[Dict[str, Any]]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Group evidence records by the section each belongs to.
+
+    Records are copied through verbatim -- no field is added, renamed, rounded,
+    or reinterpreted.
+
+    An ``evidence_type`` with no entry in ``EVIDENCE_SECTION_BY_TYPE`` raises
+    rather than being dropped. Silently discarding it would leave the section
+    reporting ``supporting_evidence: []`` -- indistinguishable from "no such
+    evidence exists" -- which is how evidence goes missing from a compliance
+    report unnoticed. Refusing instead matches how every other evidence layer
+    here treats an unrecognised value (``app/rag/evidence.py`` raises
+    ``EvidenceError`` on an unknown ``evidence_status``;
+    ``app/explainability/evidence.py`` refuses an unknown method rather than
+    guessing its scale).
+
+    The practical effect: adding a new producer -- drift evidence is deferred,
+    not cancelled -- must extend the map deliberately, and cannot be forgotten
+    quietly.
+
+    Raises:
+        ValueError: if a record carries an ``evidence_type`` the routing map
+            does not cover.
+    """
+    routed: Dict[str, List[Dict[str, Any]]] = {}
+    if not evidence_records:
+        return routed
+
+    for record in evidence_records:
+        if not isinstance(record, dict):
+            logger.debug("Skipping non-dict evidence record: %r", type(record))
+            continue
+        evidence_type = record.get("evidence_type")
+        section = EVIDENCE_SECTION_BY_TYPE.get(evidence_type)
+        if section is None:
+            raise ValueError(
+                f"Unroutable evidence record: evidence_type {evidence_type!r} "
+                "has no entry in EVIDENCE_SECTION_BY_TYPE, so it cannot be "
+                "attached to a report section. Known types: "
+                f"{sorted(EVIDENCE_SECTION_BY_TYPE)}. Add the type to "
+                "EVIDENCE_SECTION_BY_TYPE rather than letting the evidence be "
+                "dropped from the report."
+            )
+        routed.setdefault(section, []).append(record)
+    return routed
 
 
 def _build_llm_prompt(
     findings: Dict[str, TechnicalFinding],
     evidence: Dict[str, RetrievedEvidence],
+    supporting_evidence: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
     """Construct prompt for the single Groq LLM call."""
     sections_prompt_parts = []
@@ -333,6 +447,19 @@ def _build_llm_prompt(
             f"Value: {json.dumps(tf.value)}\n"
             f"Retrieved Evidence: {ev_desc}\n"
         )
+
+        # Bounded supporting evidence only: population-level (one record per
+        # protected group) and dataset-level (one per feature). Instance-level
+        # records are excluded -- see _PROMPT_EXCLUDED_EVIDENCE_TYPES.
+        section_records = (supporting_evidence or {}).get(key, [])
+        includable = [
+            record
+            for record in section_records
+            if record.get("evidence_type") not in _PROMPT_EXCLUDED_EVIDENCE_TYPES
+        ]
+        if includable:
+            part += f"Supporting Evidence: {json.dumps(includable)}\n"
+
         sections_prompt_parts.append(part)
 
     all_sections = "\n---\n".join(sections_prompt_parts)
@@ -485,31 +612,45 @@ def generate_report(
         "compliance": _extract_compliance_finding(compliance),
     }
 
-    # 2. RETRIEVE: RAG retrieval per section (Layer 2) with isolated collection & genuine relevance gate
-    retriever = None
+    # 2. RETRIEVE: RAG retrieval per section (Layer 2) through the Phase 3 RAG
+    # pipeline (corpus -> ingestion -> chunking -> vector store -> retrieval).
+    #
+    # build_default_retriever() is the sanctioned drop-in for this slot: it is
+    # callable as retriever(query=...), matching the protocol
+    # _retrieve_section_evidence already invokes. See docs/decisions.md,
+    # "Phase 3A/3B (Nidhi): RAG → evidence handoff contract (finalised)" and
+    # "generate_report() ownership split, clarified", which record the Phase 0
+    # single-document smoke test as a temporary source to be swapped for this
+    # once the real pipeline existed.
+    #
+    # Its index is in-memory (ChunkVectorStore.in_memory()), so unlike the
+    # previous IsolatedRAGRetriever there is no collection to tear down and no
+    # cleanup step is required.
     active_retrieval_fn = retrieval_fn
     if active_retrieval_fn is None:
         try:
-            retriever = IsolatedRAGRetriever()
-            active_retrieval_fn = retriever.query
+            from app.rag.retrieval import build_default_retriever
+
+            active_retrieval_fn = build_default_retriever()
         except Exception as exc:
-            logger.warning("Failed to initialize IsolatedRAGRetriever: %s", exc)
+            logger.warning("Failed to build the default RBI retriever: %s", exc)
             active_retrieval_fn = None
 
     evidence: Dict[str, RetrievedEvidence] = {}
-    try:
-        for key in ["model", "explainability", "fairness", "drift", "compliance"]:
-            evidence[key] = _retrieve_section_evidence(
-                section_key=key,
-                query=SECTION_QUERIES[key],
-                retrieval_fn=active_retrieval_fn,
-            )
-    finally:
-        if retriever is not None:
-            retriever.close()
+    for key in ["model", "explainability", "fairness", "drift", "compliance"]:
+        evidence[key] = _retrieve_section_evidence(
+            section_key=key,
+            query=SECTION_QUERIES[key],
+            retrieval_fn=active_retrieval_fn,
+        )
+
+    # 2b. ROUTE the Phase 3 evidence records to the sections they describe.
+    # Carried verbatim; routed by each record's own evidence_type so
+    # population-level and instance-level evidence stay separate.
+    routed_evidence = _route_evidence_records(evidence_records)
 
     # 3. CALL THE LLM ONCE: single Groq call
-    prompt = _build_llm_prompt(findings, evidence)
+    prompt = _build_llm_prompt(findings, evidence, supporting_evidence=routed_evidence)
     llm_texts = _call_groq_llm(prompt, llm_client=llm_client)
 
     # 4. ENFORCE SAFETY IN PYTHON (Critical, non-negotiable)
@@ -587,6 +728,7 @@ def generate_report(
                 technical_finding=tf,
                 retrieved_evidence=ev,
                 llm_interpretation=interpretation,
+                supporting_evidence=routed_evidence.get(key, []),
             )
         )
 

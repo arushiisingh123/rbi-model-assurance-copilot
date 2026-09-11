@@ -118,11 +118,27 @@ class TechnicalFinding(BaseModel):
 
 
 class Citation(BaseModel):
-    """Source reference for retrieved regulatory evidence."""
+    """Source reference for retrieved regulatory evidence.
+
+    The five optional fields below are additive (Phase 3 C3) and carry the
+    canonical source attribution that ``app.rag.evidence.RBIEvidence`` already
+    holds, so a citation is not reduced to quote + filename. They default to
+    ``None`` so every existing caller stays valid.
+
+    ``is_excerpt`` / ``is_current`` matter most: the one approved source is a
+    limited 2014 excerpt (``is_excerpt=True``, ``is_current=False``). Retrieving
+    it must never present it as current or binding regulation
+    (docs/decisions.md, "Historical / excerpt status").
+    """
     source: str
     locator: str
     quote: str
     provenance: Literal["verified", "illustrative", "interim_single_document"]
+    source_url: Optional[str] = None
+    publication_date: Optional[str] = None
+    document_type: Optional[str] = None
+    is_excerpt: Optional[bool] = None
+    is_current: Optional[bool] = None
 
 
 class RetrievedEvidence(BaseModel):
@@ -140,11 +156,23 @@ class LLMInterpretation(BaseModel):
 
 
 class ReportSection(BaseModel):
-    """Three-layer report section preserving distinct evidence boundaries (never collapsed)."""
+    """Three-layer report section preserving distinct evidence boundaries (never collapsed).
+
+    ``supporting_evidence`` is additive (Phase 3 C3): the structured records the
+    Phase 3 evidence builders produced for THIS section, carried through
+    verbatim. It is a fourth, clearly-separate channel -- it never merges into
+    ``technical_finding`` and never becomes ``llm_interpretation`` text.
+
+    Records are routed by their own ``evidence_type``, so population-level
+    fairness evidence and instance-level explanation evidence cannot end up
+    attached to the same section by accident. Defaults to empty, so existing
+    callers and fixtures stay valid.
+    """
     heading: str
     technical_finding: TechnicalFinding
     retrieved_evidence: RetrievedEvidence
     llm_interpretation: LLMInterpretation
+    supporting_evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class EvidenceCoverage(BaseModel):

@@ -359,3 +359,134 @@ def test_generate_report_skip_live_raises_immediately(sample_inputs):
             skip_live=True,
         )
     assert "skip_live" in str(exc_info.value)
+
+
+# ======================================================================
+# C1 regression: the real retriever must be reachable through the
+# production call path using the shared retrieval_fn(query=...) protocol.
+#
+# Original failure mode: IsolatedRAGRetriever.query was declared
+# `query(self, query_text)` while _retrieve_section_evidence invokes
+# `retrieval_fn(query=...)`. Every real retrieval therefore raised
+# TypeError, which the broad `except Exception` swallowed into
+# NOT_FOUND -- indistinguishable from a legitimate "no relevant evidence"
+# result. Real coverage was 0/5 while the whole suite stayed green,
+# because every other test injects a retrieval_fn double.
+#
+# These tests fail if the parameter is renamed again, and they fail on the
+# real symptom (a swallowed error / NOT_FOUND) rather than on a signature
+# detail alone.
+# ======================================================================
+
+
+def test_isolated_retriever_query_parameter_follows_the_shared_protocol():
+    """The parameter must be named `query`, matching every other retrieval_fn.
+
+    `app.rag.retrieval.RBIRetriever.__call__` declares `query` keyword-only,
+    and the fake_retrieval_* doubles all take `query`. IsolatedRAGRetriever was
+    the sole outlier. Pinned by name because a mismatch here is silent.
+    """
+    import inspect
+
+    from app.report.generate import IsolatedRAGRetriever as _Retriever
+
+    params = list(inspect.signature(_Retriever.query).parameters)
+    assert params == ["self", "query"], (
+        f"IsolatedRAGRetriever.query params are {params}; "
+        "_retrieve_section_evidence calls retrieval_fn(query=...), so the "
+        "parameter must be named 'query' or every real retrieval silently "
+        "becomes NOT_FOUND."
+    )
+
+
+def test_isolated_retriever_accepts_the_query_keyword():
+    """Calling with the protocol keyword must not raise TypeError."""
+    from app.report.generate import SECTION_QUERIES
+
+    retriever = IsolatedRAGRetriever()
+    try:
+        outcome = retriever.query(query=SECTION_QUERIES["compliance"])
+    finally:
+        retriever.close()
+
+    assert isinstance(outcome, dict)
+    # The keys _retrieve_section_evidence reads off a retrieval result.
+    for field in ("retrieved_text", "source", "chunk_index"):
+        assert field in outcome
+    assert outcome["retrieved_text"].strip()
+
+
+def test_real_retriever_reaches_retrieved_through_retrieve_section_evidence(caplog):
+    """C1 regression: real retriever + production call path -> RETRIEVED.
+
+    Uses the compliance/NPA query, which the interim IRAC corpus genuinely
+    contains, so RETRIEVED is the correct expectation. Pre-fix this returned
+    NOT_FOUND with a swallowed TypeError.
+    """
+    import logging
+
+    from app.report.generate import SECTION_QUERIES, _retrieve_section_evidence
+
+    retriever = IsolatedRAGRetriever()
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.report.generate"):
+            evidence = _retrieve_section_evidence(
+                section_key="compliance",
+                query=SECTION_QUERIES["compliance"],
+                retrieval_fn=retriever.query,
+            )
+    finally:
+        retriever.close()
+
+    # 1. Nothing was swallowed by the broad retrieval fallback.
+    assert "Retrieval failed" not in caplog.text
+    assert "unexpected keyword argument" not in caplog.text
+    assert "TypeError" not in caplog.text
+
+    # 2. The real symptom: NOT_FOUND instead of RETRIEVED.
+    assert evidence.evidence_status == "RETRIEVED", (
+        "Real retrieval returned NOT_FOUND for a query the interim corpus "
+        "contains -- the retrieval_fn call is broken again."
+    )
+
+    # 3. Retrieval actually carried usable, attributed content.
+    assert evidence.citations
+    citation = evidence.citations[0]
+    assert "RBI_MASTER_CIRCULAR_IRAC_ADVANCES" in citation.source
+    assert citation.locator.startswith("chunk #")
+    assert citation.provenance == "interim_single_document"
+    assert "non performing" in citation.quote.lower()
+
+
+def test_generate_report_with_real_retrieval_has_nonzero_coverage(sample_inputs):
+    """End-to-end: real retrieval must yield at least one RETRIEVED section.
+
+    `retrieval_fn=None` exercises the production path that builds an
+    IsolatedRAGRetriever internally. Pre-fix, coverage was retrieved=0 /
+    not_found=5. Asserted as >= 1 rather than == 1 so that broadening the
+    corpus later does not make this fail spuriously.
+    """
+    out = generate_report(
+        **sample_inputs,
+        llm_client=FakeGroqClient(),
+        retrieval_fn=None,
+    )
+
+    coverage = out["evidence_coverage"]
+    assert coverage["total"] == 5
+    assert coverage["retrieved"] + coverage["not_found"] == 5
+    assert coverage["retrieved"] >= 1, (
+        "No section retrieved evidence through the real retriever; "
+        "retrieved=0 was the exact C1 symptom."
+    )
+
+    retrieved = [
+        s for s in out["sections"]
+        if s["retrieved_evidence"]["evidence_status"] == "RETRIEVED"
+    ]
+    assert retrieved
+    for section in retrieved:
+        assert section["retrieved_evidence"]["citations"]
+        # A RETRIEVED section may claim an illustrative basis; never cited_evidence
+        # while the corpus is the interim single document.
+        assert section["llm_interpretation"]["regulatory_basis"] == "illustrative_rule_only"

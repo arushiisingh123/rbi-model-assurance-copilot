@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.orchestration import (
     build_assurance_result,
+    build_evidence_records,
     compute_real_compliance,
     compute_real_drift,
     compute_real_explainability,
@@ -130,6 +131,9 @@ def get_report() -> dict:
         fairness_res = compute_real_fairness(raw_model)
         drift_res = compute_real_drift(raw_model)
         compliance_res = compute_real_compliance(raw_model, explain_res, fairness_res, drift_res)
+        evidence_records = build_evidence_records(
+            raw_model, explain_res, method="shap"
+        )
         from app.report import generate_report
         return generate_report(
             model=raw_model,
@@ -137,6 +141,7 @@ def get_report() -> dict:
             fairness=fairness_res,
             drift=drift_res,
             compliance=compliance_res,
+            evidence_records=evidence_records,
         )
     except Exception as exc:
         logger.warning("Live report generation failed, falling back to mock: %s", exc)

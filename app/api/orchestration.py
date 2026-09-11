@@ -8,9 +8,19 @@ import pandas as pd
 
 from app.compliance.compliance import evaluate_compliance
 from app.drift.drift import drift_report
+from app.explainability.evidence import (
+    build_global_evidence,
+    build_instance_evidence,
+)
 from app.explainability.explain import explain
+from app.fairness.evidence import fairness_evidence
 from app.fairness.fairness import fairness_report
 from app.models.model import predict_batch
+
+# LIME is materially more expensive per row than SHAP, so the explained frame
+# is capped. Declared once and used by both the explainability call and the
+# prediction-record builder so they always describe the same rows.
+LIME_MAX_EXPLAINED_ROWS = 20
 
 ASSURANCE_NOTE = (
     "Production Model Assurance Evaluation. Model, Explainability, and Fairness "
@@ -39,6 +49,17 @@ def format_model_for_api(model_dict: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _explained_row_limit(method: str) -> Optional[int]:
+    """How many rows explain() will actually cover for ``method``.
+
+    LIME is bounded for cost; SHAP explains everything it is given. Kept as one
+    rule so ``compute_real_explainability`` and ``build_prediction_records``
+    cannot disagree about which rows were explained -- a disagreement there
+    would silently mis-pair identities with explanations.
+    """
+    return LIME_MAX_EXPLAINED_ROWS if method.lower() == "lime" else None
+
+
 def compute_real_explainability(
     model_dict: Dict[str, Any],
     method: str = "shap",
@@ -49,12 +70,13 @@ def compute_real_explainability(
         raise ValueError(
             f"Invalid explainability method '{method}'. Supported methods are 'shap' and 'lime'."
         )
-    if method_lower == "lime":
+    limit = _explained_row_limit(method_lower)
+    if limit is not None:
         feat_matrix = model_dict["feature_matrix"]
         capped_matrix = (
-            feat_matrix.head(20)
+            feat_matrix.head(limit)
             if isinstance(feat_matrix, pd.DataFrame)
-            else feat_matrix[:20]
+            else feat_matrix[:limit]
         )
         model_input = {**model_dict, "feature_matrix": capped_matrix}
     else:
@@ -62,21 +84,128 @@ def compute_real_explainability(
     return explain(model_output=model_input, method=method_lower)
 
 
-def compute_real_fairness(model_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Run real fairness evaluation on personal_status_and_sex."""
+def build_prediction_records(
+    model_dict: Dict[str, Any],
+    *,
+    method: str = "shap",
+) -> List[Dict[str, Any]]:
+    """Per-row identity records for the rows ``explain()`` covered.
+
+    This is the identity handoff the explainability evidence layer requires.
+    ``explain()`` reports ``row_index``, which is a POSITION inside the frame it
+    was handed -- not a record identity. ``app/explainability/evidence.py``
+    therefore refuses to infer identity and demands records carrying a stable
+    ``instance_id``; this builds them from the model output, where
+    ``instance_ids``, ``predictions`` and ``probabilities`` are already aligned
+    1:1 with ``feature_matrix`` rows.
+
+    ``row_index`` is included so the evidence builder can CROSS-CHECK the join
+    it is given. It is a verification value only -- identity remains
+    ``instance_id``, never the position.
+
+    The same ``_explained_row_limit`` rule used to cap the explained frame caps
+    these records, so the two stay in step (all three sequences are sliced
+    together, preserving their existing alignment rather than re-deriving it).
+    """
+    instance_ids = model_dict["instance_ids"]
     predictions = model_dict["predictions"]
-    feat_matrix = model_dict["feature_matrix"]
-    sens_feature = feat_matrix["personal_status_and_sex"]
+    probabilities = model_dict["probabilities"]
+
+    if not (len(instance_ids) == len(predictions) == len(probabilities)):
+        raise ValueError(
+            "model output is internally inconsistent: instance_ids "
+            f"({len(instance_ids)}), predictions ({len(predictions)}) and "
+            f"probabilities ({len(probabilities)}) must be the same length."
+        )
+
+    limit = _explained_row_limit(method)
+    if limit is not None:
+        instance_ids = instance_ids[:limit]
+        predictions = predictions[:limit]
+        probabilities = probabilities[:limit]
+
+    return [
+        {
+            "instance_id": instance_id,
+            "prediction": prediction,
+            "probability": probability,
+            "row_index": row_index,
+        }
+        for row_index, (instance_id, prediction, probability) in enumerate(
+            zip(instance_ids, predictions, probabilities)
+        )
+    ]
+
+
+def _fairness_inputs(model_dict: Dict[str, Any]) -> tuple:
+    """The exact inputs the fairness finding is computed from.
+
+    Shared by ``compute_real_fairness`` and the fairness evidence builder so the
+    two can never be given different predictions, a different sensitive feature,
+    or a different favourable label.
+    """
+    predictions = model_dict["predictions"]
+    sens_feature = model_dict["feature_matrix"]["personal_status_and_sex"]
     favorable_label = (
         model_dict.get("model_metadata", {})
         .get("label_semantics", {})
         .get("favorable_outcome_label", 0)
     )
+    return predictions, sens_feature, favorable_label
+
+
+def compute_real_fairness(model_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Run real fairness evaluation on personal_status_and_sex."""
+    predictions, sens_feature, favorable_label = _fairness_inputs(model_dict)
     return fairness_report(
         predictions=predictions,
         sensitive_feature=sens_feature,
         favorable_label=favorable_label,
     )
+
+
+def build_evidence_records(
+    model_dict: Dict[str, Any],
+    explain_dict: Dict[str, Any],
+    *,
+    method: str = "shap",
+) -> List[Dict[str, Any]]:
+    """Assemble the Phase 3 evidence records for one assurance run.
+
+    Pure assembly over the three existing evidence producers -- nothing is
+    calculated, reshaped, or re-derived here:
+
+      - ``build_instance_evidence``  instance-level (carries ``instance_id``)
+      - ``build_global_evidence``    dataset-level  (no ``instance_id``)
+      - ``fairness_evidence``        population/group-level (no ``instance_id``)
+
+    Each record keeps its own ``evidence_type``, which is what later routes it
+    to the right report section. Instance-level and population-level evidence
+    are produced by separate calls and are never merged into one record.
+
+    Drift evidence is deliberately absent: no drift evidence builder exists,
+    and inventing one is explicitly out of C3 scope.
+    """
+    model_version = model_dict.get("model_metadata", {}).get("version")
+    prediction_records = build_prediction_records(model_dict, method=method)
+
+    records: List[Dict[str, Any]] = []
+    records.extend(
+        build_instance_evidence(
+            explain_dict, prediction_records, model_version=model_version
+        )
+    )
+    records.extend(build_global_evidence(explain_dict, model_version=model_version))
+
+    predictions, sens_feature, favorable_label = _fairness_inputs(model_dict)
+    records.extend(
+        fairness_evidence(
+            predictions=predictions,
+            sensitive_feature=sens_feature,
+            favorable_label=favorable_label,
+        )
+    )
+    return records
 
 
 def compute_real_drift(model_dict: Dict[str, Any]) -> Dict[str, Any]:

@@ -263,6 +263,37 @@ def evaluate(
     }
 
 
+def evaluate_current_model() -> Dict[str, Any]:
+    """Held-out evaluation metrics for the current persisted default model.
+
+    Additive Phase 4 (D1(a)) helper. Exposes the same metrics ``evaluate()``
+    already computes -- accuracy, precision, recall, f1, roc_auc -- as a
+    property of the *current trained model artifact*, not of any particular
+    prediction batch. All metric calculation is delegated to ``evaluate()``;
+    nothing is recalculated or reimplemented here.
+
+    Deliberately separate from ``predict_batch()``: ``predict_batch()`` scores
+    whatever ``feature_matrix`` a caller supplies, which may carry no
+    ground-truth labels at all, so it has no ``y_test`` to evaluate against
+    and does not gain a metrics field. This function instead regenerates the
+    same deterministic held-out split ``predict_batch()``'s own default demo
+    path uses (``split_data(..., test_size=0.2, random_state=42)`` on the
+    approved dataset), so the numbers it returns describe the model's
+    held-out performance -- never a prediction batch's.
+
+    Returns
+    -------
+    Dict[str, Any]
+        Exactly ``evaluate()``'s return shape: accuracy, precision, recall,
+        f1, roc_auc, n_test_samples, is_mock.
+    """
+    model = _get_or_train_default_model()
+    df = load_dataset(DEFAULT_DATASET_PATH)
+    X, y, _, _ = preprocess(df)
+    _, X_test, _, y_test = split_data(X, y, test_size=0.2, random_state=42)
+    return evaluate(model, X_test, y_test)
+
+
 def save(
     model: Any,
     path: str = DEFAULT_MODEL_ARTIFACT_PATH,

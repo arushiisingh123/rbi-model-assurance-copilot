@@ -30,6 +30,17 @@ class ModelMetadata(BaseModel):
     label_semantics: Optional[LabelSemantics] = None
 
 
+class ModelMetrics(BaseModel):
+    """Held-out test set evaluation metrics for the trained credit model."""
+    accuracy: float
+    precision: float
+    recall: float
+    f1: float
+    roc_auc: float
+    n_test_samples: int
+    is_mock: bool
+
+
 class ModelResult(BaseModel):
     """Output payload from the Model/Data module."""
     predictions: list[int]
@@ -38,6 +49,7 @@ class ModelResult(BaseModel):
     feature_matrix: list[dict[str, Any]]
     model_metadata: ModelMetadata
     is_mock: bool
+    model_metrics: Optional[ModelMetrics] = None
 
 
 class PerInstanceContribution(BaseModel):

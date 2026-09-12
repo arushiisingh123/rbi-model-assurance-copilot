@@ -1911,3 +1911,68 @@ wiring the two panels into the existing tabs, which remains Khushi's D2/D8
 integration work.
 
 ---
+
+## 2026-09-12 — Phase 4 (Khushi): dashboard panel wiring, tab isolation, reachability banner, and model metrics API exposure
+
+**Status:** Implemented by Khushi (API / Integration owner), on
+`feature/khushi-phase4-dashboard-wiring`. Implements D2/D8 (dashboard panel
+wiring and integration), D1(a) (model metrics API exposure), and live API
+reachability detection.
+
+**Context & Scope:**
+Following the landing of the Phase 4 presentation panels in
+`dashboard/panels/` (explainability by Manas, fairness and drift by Arushi,
+compliance and report by Nidhi; the Model tab remains an inline rendering as
+Namitha's panel has not landed), Khushi integrated the panels into the main
+Streamlit application (`dashboard/dashboard_app.py`), added reachability
+awareness, and completed the D1(a) API exposure handoff.
+
+**Decisions & Implementation Details:**
+
+1. **Dashboard Panel Wiring & Safe Rendering (D2 / D8):**
+   - The presentation panels wired into `dashboard/dashboard_app.py` are:
+     `render_explainability_panel` (from `dashboard/panels/explainability_panel.py`),
+     `render_fairness_drift_panel` (from `dashboard/panels/fairness_drift_panel.py`,
+     a single combined panel for both fairness and drift),
+     `render_compliance_panel` (from `dashboard/panels/compliance_panel.py`), and
+     `render_report_panel` (from `dashboard/panels/report_panel.py`).
+     The Model tab remains an inline rendering — no dedicated Model panel exists yet.
+   - **Tab Isolation via `_safe_render`**: To prevent a runtime failure or
+     unexpected schema change in one panel from taking down the entire dashboard,
+     each tab wraps its rendering in `_safe_render(label: str, render_fn)`.
+     If a panel raises an unhandled exception, `_safe_render` catches it and
+     renders `st.error(f"{label} tab failed to render: {exc}")`, allowing the
+     remaining tabs on the page to continue rendering normally.
+     The function does not log traces.
+
+2. **API Reachability Banner & `get_health()`:**
+   - `dashboard/api_client.py` exposes `get_health() -> tuple[dict, str]`,
+     probing `GET {API_BASE_URL}/health` with a 2-second timeout and returning
+     `({"status": "unreachable"}, "fallback")` on any request exception.
+   - `dashboard/dashboard_app.py` calls `get_health()` at top-level before tabs
+     are rendered:
+     - When reachable (`health_source == "api"` and `health_data.get("status") == "ok"`):
+       renders `st.success("API Backend: Connected (http://127.0.0.1:8000)")`.
+     - When unreachable: renders `st.warning("API Backend: Unreachable — Operating in offline mock/fallback mode")`.
+
+3. **D1(a) Model Evaluation Metrics API Exposure:**
+   - Settled the D1(a) handoff from Namitha (`app/models/model.py::evaluate_current_model()`).
+   - Defined `ModelMetrics` sub-model in `app/api/schemas.py` (`accuracy`,
+     `precision`, `recall`, `f1`, `roc_auc`, `n_test_samples`, `is_mock`).
+   - Added optional `model_metrics: Optional[ModelMetrics] = None` to
+     `ModelResult`.
+   - In `app/api/orchestration.py`, implemented `compute_real_model_metrics()`
+     delegating cleanly to `evaluate_current_model()`, wired into `build_assurance_result()`,
+     and exposed on `GET /model` in `app/api/main.py`.
+   - Updated `app/api/mock_data.py` fixtures and updated all relevant test
+     suites (`test_orchestration.py`, `test_schemas.py`, `test_mock_data.py`,
+     `test_endpoints.py`).
+
+**Documentation / Team Awareness Note:**
+Manas's (feature/manas-phase4-explainability-dashboard), Namitha's (feature/namitha-phase4-model-visualization), and Arushi's (feature/arushi-phase4-drift) merged Phase 4 PRs each landed with no docs/decisions.md entry — flagged for team awareness, not resolved by this entry.
+
+**Verification:**
+Full test suite executed and validated against baseline. Panel wiring,
+schema validation, API endpoints, mock data, and Streamlit AppTest integration
+tests all pass without regression. Zero modifications made to `app/models/`.
+

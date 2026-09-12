@@ -16,6 +16,7 @@ from dashboard.api_client import (
     get_compliance,
     get_explainability,
     get_fairness_drift,
+    get_health,
     get_model,
     get_report,
     render_status,
@@ -35,6 +36,24 @@ class DummyResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
+
+
+def test_get_health_success(monkeypatch):
+    test_data = {"status": "ok"}
+    monkeypatch.setattr(requests, "get", lambda url, timeout=2: DummyResponse(test_data))
+    data, source = get_health()
+    assert source == "api"
+    assert data == test_data
+
+
+def test_get_health_fallback(monkeypatch):
+    def mock_get(url, timeout=2):
+        raise requests.exceptions.ConnectionError("Backend unreachable")
+
+    monkeypatch.setattr(requests, "get", mock_get)
+    data, source = get_health()
+    assert source == "fallback"
+    assert data == {"status": "unreachable"}
 
 
 def test_get_model_success(monkeypatch):

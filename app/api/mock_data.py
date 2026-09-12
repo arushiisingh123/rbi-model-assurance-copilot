@@ -117,6 +117,15 @@ MOCK_MODEL_RESULT = {
         },
     },
     "is_mock": True,
+    "model_metrics": {
+        "accuracy": 0.78,
+        "precision": 0.67,
+        "recall": 0.53,
+        "f1": 0.59,
+        "roc_auc": 0.80,
+        "n_test_samples": 200,
+        "is_mock": True,
+    },
 }
 
 MOCK_EXPLAINABILITY_RESULT_SHAP = {

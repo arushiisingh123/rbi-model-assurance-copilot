@@ -19,6 +19,7 @@ from app.api.orchestration import (
     compute_real_explainability,
     compute_real_fairness,
     compute_real_model,
+    compute_real_model_metrics,
     format_model_for_api,
 )
 from app.api.schemas import (
@@ -45,9 +46,11 @@ def health() -> dict:
 
 @app.get("/model", response_model=ModelResult)
 def get_model() -> dict:
-    """Retrieve real model predictions, feature matrix (list[dict]), and metadata."""
+    """Retrieve real model predictions, feature matrix (list[dict]), metadata, and metrics."""
     raw_model = compute_real_model()
-    return format_model_for_api(raw_model)
+    model_dict = format_model_for_api(raw_model)
+    model_dict["model_metrics"] = compute_real_model_metrics()
+    return model_dict
 
 
 @app.get("/explainability", response_model=ExplainabilityResult)

@@ -36,6 +36,14 @@ def test_mock_model_result_validity_and_shape():
     for row in parsed.feature_matrix:
         assert len(row) == 20
         assert "personal_status_and_sex" in row
+    assert parsed.model_metrics is not None
+    assert parsed.model_metrics.is_mock is True
+    assert parsed.model_metrics.n_test_samples == 200
+    assert 0.0 <= parsed.model_metrics.accuracy <= 1.0
+    assert 0.0 <= parsed.model_metrics.precision <= 1.0
+    assert 0.0 <= parsed.model_metrics.recall <= 1.0
+    assert 0.0 <= parsed.model_metrics.f1 <= 1.0
+    assert 0.0 <= parsed.model_metrics.roc_auc <= 1.0
 
 
 def test_mock_explainability_shap_validity_and_shape():
@@ -111,6 +119,7 @@ def test_mock_assurance_result_validity():
     parsed = AssuranceResult(**MOCK_ASSURANCE_RESULT)
     assert parsed.model.is_mock is True
     assert parsed.model.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
+    assert parsed.model.model_metrics is not None
     assert parsed.explainability.is_mock is True
     assert parsed.fairness_drift.fairness.is_mock is True
     assert parsed.fairness_drift.drift.is_mock is True

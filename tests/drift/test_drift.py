@@ -6,7 +6,9 @@ central thresholds, MAX aggregation across features, feature-eligibility rules
 cases that must return PENDING rather than an invented FAIL, and schema
 conformance.
 """
+import ast
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -21,7 +23,16 @@ from app.config.thresholds import (
     classify_psi,
 )
 from app.drift import drift_report
+from app.drift import drift as drift_module
+from app.drift.drift import (
+    _ROUNDING_DP,
+    _compute_feature_ks,
+    _compute_feature_psi,
+    _finite_values,
+)
 from app.drift.scenario import build_drift_scenario
+
+PER_FEATURE_KEYS = {"feature", "psi", "ks_statistic"}
 
 
 # --------------------------------------------------------------------------
@@ -361,6 +372,7 @@ def test_schema_full_key_set():
         "ks_statistic",
         "status",
         "is_mock",
+        "per_feature",
     }
     assert res["is_mock"] is False
     assert res["status"] in VALID_STATUSES
@@ -380,3 +392,263 @@ def test_synthetic_scenario_drift_is_detected_end_to_end():
     assert res["psi"] > 0.25
     assert res["status"] == STATUS_FAIL
     assert res["is_mock"] is False
+
+
+# --------------------------------------------------------------------------
+# Per-feature detail (Phase 4, additive)
+# --------------------------------------------------------------------------
+
+
+def _four_feature_frames():
+    """Four evaluable features with genuinely different drift shapes."""
+    rng = np.random.default_rng(11)
+    base = rng.normal(50, 10, 400)
+    ref = pd.DataFrame(
+        {
+            "steady": base,
+            "compressed": base,
+            "shifted": base,
+            "tail_heavy": base,
+        }
+    )
+    cur = pd.DataFrame(
+        {
+            "steady": base,
+            "compressed": (base - base.mean()) * 0.5 + base.mean(),
+            "shifted": base + 5.0,
+            "tail_heavy": np.concatenate([base[:-40] , base[-40:] + 200.0]),
+        }
+    )
+    return ref, cur
+
+
+def test_per_feature_length_matches_features_evaluated():
+    ref, cur = _four_feature_frames()
+    res = drift_report(ref, cur)
+
+    assert len(res["per_feature"]) == len(res["features_evaluated"])
+    assert len(res["per_feature"]) == 4
+
+
+def test_per_feature_names_and_order_match_features_evaluated():
+    """Alignment is index-for-index, so a consumer can zip the two lists."""
+    ref, cur = _four_feature_frames()
+    res = drift_report(ref, cur)
+
+    assert [entry["feature"] for entry in res["per_feature"]] == res[
+        "features_evaluated"
+    ]
+
+
+def test_per_feature_record_key_set():
+    ref, cur = _four_feature_frames()
+
+    for entry in drift_report(ref, cur)["per_feature"]:
+        assert set(entry.keys()) == PER_FEATURE_KEYS
+        assert isinstance(entry["feature"], str)
+        assert isinstance(entry["psi"], float)
+        assert isinstance(entry["ks_statistic"], float)
+
+
+def test_per_feature_values_are_rounded_to_the_existing_precision():
+    """Same 4dp precision as the aggregates -- no extra digits introduced."""
+    ref, cur = _four_feature_frames()
+
+    for entry in drift_report(ref, cur)["per_feature"]:
+        assert entry["psi"] == round(entry["psi"], _ROUNDING_DP)
+        assert entry["ks_statistic"] == round(entry["ks_statistic"], _ROUNDING_DP)
+
+
+def test_max_per_feature_psi_equals_the_reported_psi():
+    ref, cur = _four_feature_frames()
+    res = drift_report(ref, cur)
+
+    assert max(entry["psi"] for entry in res["per_feature"]) == res["psi"]
+
+
+def test_max_per_feature_ks_equals_the_reported_ks():
+    ref, cur = _four_feature_frames()
+    res = drift_report(ref, cur)
+
+    assert (
+        max(entry["ks_statistic"] for entry in res["per_feature"])
+        == res["ks_statistic"]
+    )
+
+
+def test_psi_and_ks_maxima_may_come_from_different_features():
+    """The two maxima are independent -- the detail must show that, not hide it.
+
+    ``compressed`` squeezes the distribution inward: extreme reference bins
+    empty out, so PSI is large while the ECDF gap stays modest. ``shifted``
+    moves the whole distribution: the ECDF gap is larger, but mass merely
+    slides between adjacent bins so PSI is smaller. Different winners.
+    """
+    rng = np.random.default_rng(7)
+    base = rng.normal(0, 1, 500)
+    ref = pd.DataFrame({"compressed": base, "shifted": base})
+    cur = pd.DataFrame({"compressed": base * 0.5, "shifted": base + 0.5})
+
+    res = drift_report(ref, cur)
+    by_name = {entry["feature"]: entry for entry in res["per_feature"]}
+
+    psi_argmax = max(res["per_feature"], key=lambda e: e["psi"])["feature"]
+    ks_argmax = max(res["per_feature"], key=lambda e: e["ks_statistic"])["feature"]
+
+    assert psi_argmax == "compressed"
+    assert ks_argmax == "shifted"
+    assert psi_argmax != ks_argmax
+
+    # The aggregates come from those two different features.
+    assert res["psi"] == by_name["compressed"]["psi"]
+    assert res["ks_statistic"] == by_name["shifted"]["ks_statistic"]
+
+
+def test_per_feature_values_match_the_internal_calculators():
+    """The detail is the same arithmetic the aggregate was taken from."""
+    ref, cur = _four_feature_frames()
+    res = drift_report(ref, cur)
+
+    for entry in res["per_feature"]:
+        col = entry["feature"]
+        ref_vals = _finite_values(ref[col])
+        cur_vals = _finite_values(cur[col])
+
+        assert entry["psi"] == round(
+            float(_compute_feature_psi(ref_vals, cur_vals)), _ROUNDING_DP
+        )
+        assert entry["ks_statistic"] == round(
+            float(_compute_feature_ks(ref_vals, cur_vals)), _ROUNDING_DP
+        )
+
+
+def test_excluded_features_are_absent_from_per_feature():
+    """Whatever is not evaluated appears in neither list.
+
+    Covers every exclusion rule at once: categorical, boolean, present in only
+    one frame, and left with no finite values.
+    """
+    ref = pd.DataFrame(
+        {
+            "numeric": [1.0, 2.0, 3.0, 4.0],
+            "categorical": ["a", "b", "a", "b"],
+            "boolean": [True, False, True, False],
+            "ref_only": [1.0, 2.0, 3.0, 4.0],
+            "all_nan": [np.nan, np.nan, np.nan, np.nan],
+        }
+    )
+    cur = pd.DataFrame(
+        {
+            "numeric": [1.5, 2.5, 3.5, 4.5],
+            "categorical": ["a", "a", "b", "b"],
+            "boolean": [False, False, True, True],
+            "cur_only": [1.0, 2.0, 3.0, 4.0],
+            "all_nan": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+
+    res = drift_report(ref, cur)
+    names = [entry["feature"] for entry in res["per_feature"]]
+
+    assert res["features_evaluated"] == ["numeric"]
+    assert names == ["numeric"]
+    for excluded in ("categorical", "boolean", "ref_only", "cur_only", "all_nan"):
+        assert excluded not in names
+
+
+@pytest.mark.parametrize(
+    "ref, cur",
+    [
+        (pd.DataFrame(), pd.DataFrame()),
+        (pd.DataFrame({"a": [1.0]}), pd.DataFrame()),
+        (pd.DataFrame({"a": ["x"]}), pd.DataFrame({"a": ["y"]})),
+        (pd.DataFrame({"v": [np.nan]}), pd.DataFrame({"v": [1.0]})),
+    ],
+)
+def test_pending_results_report_an_empty_per_feature_list(ref, cur):
+    """Nothing evaluated means no detail -- never a fabricated zero entry."""
+    res = drift_report(ref, cur)
+
+    assert res["status"] == STATUS_PENDING
+    assert res["features_evaluated"] == []
+    assert res["per_feature"] == []
+
+
+def test_per_feature_carries_no_status_and_no_threshold():
+    """Per-feature values are informational; classification stays aggregate-only."""
+    ref, cur = _four_feature_frames()
+    res = drift_report(ref, cur)
+
+    for entry in res["per_feature"]:
+        assert "status" not in entry
+        assert "threshold" not in entry
+        assert "is_mock" not in entry
+
+    # Status still comes from the aggregate PSI alone.
+    assert res["status"] == classify_psi(res["psi"])
+
+
+def test_per_feature_on_the_known_fixtures():
+    """Per-feature output on the two fixtures whose aggregates are pinned above.
+
+    The aggregates themselves are already covered by
+    ``test_known_fixture_hand_computed_ks`` and
+    ``test_identical_frames_report_no_drift``; only the per-feature detail is
+    asserted here.
+    """
+    # Hand-computed KS fixture (see test_known_fixture_hand_computed_ks).
+    ref = pd.DataFrame({"val": [1.0, 2.0, 3.0, 4.0]})
+    cur = pd.DataFrame({"val": [3.0, 4.0, 5.0, 6.0]})
+
+    assert drift_report(ref, cur)["per_feature"][0]["ks_statistic"] == 0.50
+
+    # No drift at all still produces a real entry, with zeros rather than a
+    # missing feature (see test_identical_frames_report_no_drift).
+    vals = np.linspace(10, 100, 100)
+    same = pd.DataFrame({"income": vals})
+
+    assert drift_report(same, same)["per_feature"] == [
+        {"feature": "income", "psi": 0.0, "ks_statistic": 0.0}
+    ]
+
+
+def test_drift_module_defines_no_thresholds_of_its_own():
+    """Thresholds stay in app/config/thresholds.py (docs/thresholds.md).
+
+    The additive per-feature output must not become a place where a local
+    severity rule quietly appears.
+    """
+    # No threshold constant is defined or imported into this namespace.
+    assert not [name for name in dir(drift_module) if "THRESHOLD" in name.upper()]
+
+    source = Path(drift_module.__file__).read_text(encoding="utf-8")
+    assert "from app.config.thresholds import" in source
+    assert "classify_psi(" in source
+
+    # Inspect the code rather than the text: prose may legitimately mention a
+    # boundary (the rounding comment explains why 0.10 matters), but no
+    # comparison in this module may test a value against a PSI band edge.
+    tree = ast.parse(source)
+
+    assert not [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name) and "THRESHOLD" in target.id.upper()
+    ], "app/drift must not define its own threshold constant"
+
+    band_edges = {0.10, 0.25}
+    offending = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Compare)
+        for operand in [node.left, *node.comparators]
+        if isinstance(operand, ast.Constant)
+        and isinstance(operand.value, float)
+        and operand.value in band_edges
+    ]
+    assert not offending, (
+        "app/drift must not compare against a PSI band edge; classification "
+        "belongs to app.config.thresholds.classify_psi"
+    )

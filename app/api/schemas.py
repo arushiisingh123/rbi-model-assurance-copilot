@@ -54,6 +54,14 @@ class ExplainabilityResult(BaseModel):
     is_mock: bool
 
 
+class FairnessGroup(BaseModel):
+    """Per-group selection rate and sample size breakdown for protected attributes."""
+    group: str
+    count: int
+    favorable_count: int
+    selection_rate: float
+
+
 class FairnessResult(BaseModel):
     """Output payload for fairness evaluation."""
     protected_attribute: str
@@ -61,6 +69,14 @@ class FairnessResult(BaseModel):
     disparate_impact_ratio: float
     status: Status
     is_mock: bool
+    groups: list[FairnessGroup] = Field(default_factory=list)
+
+
+class DriftPerFeature(BaseModel):
+    """Per-feature PSI and KS drift metric entry."""
+    feature: str
+    psi: float
+    ks_statistic: float
 
 
 class DriftResult(BaseModel):
@@ -71,6 +87,7 @@ class DriftResult(BaseModel):
     status: Status
     is_mock: bool
     note: Optional[str] = None
+    per_feature: list[DriftPerFeature] = Field(default_factory=list)
 
 
 class FairnessDriftResult(BaseModel):

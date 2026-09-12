@@ -336,6 +336,20 @@ MOCK_FAIRNESS_RESULT = {
     "disparate_impact_ratio": 0.78,
     "status": "WARNING",
     "is_mock": True,
+    "groups": [
+        {
+            "group": "A92",
+            "count": 310,
+            "favorable_count": 201,
+            "selection_rate": 0.65,
+        },
+        {
+            "group": "A93",
+            "count": 548,
+            "favorable_count": 432,
+            "selection_rate": 0.79,
+        },
+    ],
 }
 
 MOCK_DRIFT_RESULT = {
@@ -356,6 +370,15 @@ MOCK_DRIFT_RESULT = {
         "SYNTHETIC DRIFT SCENARIO: Fallback mock scenario for interface validation. "
         "Production assurance evaluates dev training split vs held-out test split."
     ),
+    "per_feature": [
+        {"feature": "duration_months", "psi": 0.08, "ks_statistic": 0.10},
+        {"feature": "credit_amount", "psi": 0.09, "ks_statistic": 0.11},
+        {"feature": "installment_rate", "psi": 0.02, "ks_statistic": 0.04},
+        {"feature": "present_residence", "psi": 0.01, "ks_statistic": 0.03},
+        {"feature": "age", "psi": 0.05, "ks_statistic": 0.07},
+        {"feature": "existing_credits", "psi": 0.03, "ks_statistic": 0.05},
+        {"feature": "num_dependents", "psi": 0.01, "ks_statistic": 0.02},
+    ],
 }
 
 MOCK_COMPLIANCE_RESULT = {

@@ -30,6 +30,7 @@ FAIRNESS_KEYS = {
     "disparate_impact_ratio",
     "status",
     "is_mock",
+    "groups",
 }
 
 
@@ -259,3 +260,55 @@ def test_integration_is_deterministic(
         favorable_label=0,
     )
     assert again == integration_report
+
+# --------------------------------------------------------------------------
+# Per-group detail on real data (Phase 4, additive `groups` field)
+# --------------------------------------------------------------------------
+
+# Pinned from the real held-out test split scored by predict_batch().
+REAL_GROUPS = [
+    {"group": "A94", "count": 12, "favorable_count": 10, "selection_rate": 0.8333},
+    {"group": "A93", "count": 118, "favorable_count": 98, "selection_rate": 0.8305},
+    {"group": "A92", "count": 61, "favorable_count": 41, "selection_rate": 0.6721},
+    {"group": "A91", "count": 9, "favorable_count": 3, "selection_rate": 0.3333},
+]
+
+
+def test_real_groups_exact_values(integration_report: dict):
+    """The exact breakdown the dashboard will chart, pinned."""
+    assert integration_report["groups"] == REAL_GROUPS
+
+
+def test_real_group_counts_sum_to_the_scored_population(integration_report: dict):
+    assert sum(entry["count"] for entry in integration_report["groups"]) == 200
+
+
+def test_real_groups_reproduce_the_real_aggregates(integration_report: dict):
+    """Recomputed from the exact counts, not the rounded rates.
+
+    See ``test_groups_reproduce_the_reported_aggregates`` in
+    ``tests/fairness/test_fairness.py``: dividing two rounded rates can differ
+    from the reported ratio in the last digit, so the ratio is checked against
+    full-precision rates.
+    """
+    rates = [
+        entry["favorable_count"] / entry["count"]
+        for entry in integration_report["groups"]
+    ]
+
+    assert round(max(rates) - min(rates), 4) == integration_report[
+        "demographic_parity_diff"
+    ]
+    assert round(min(rates) / max(rates), 4) == integration_report[
+        "disparate_impact_ratio"
+    ]
+
+
+def test_real_groups_are_raw_attribute_9_codes(integration_report: dict):
+    """Attribute 9 combines marital status and sex; codes are never relabelled."""
+    labels = {entry["group"] for entry in integration_report["groups"]}
+
+    assert labels <= {"A91", "A92", "A93", "A94"}
+    assert "A95" not in labels
+    for forbidden in ("male", "female", "gender", "sex"):
+        assert not any(forbidden in str(label).lower() for label in labels)

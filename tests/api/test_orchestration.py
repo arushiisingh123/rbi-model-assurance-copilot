@@ -58,13 +58,24 @@ def test_build_assurance_result_structure():
     assert res["fairness_drift"]["fairness"]["is_mock"] is False
     assert res["fairness_drift"]["drift"]["is_mock"] is False
     assert set(res["fairness_drift"].keys()) == {"fairness", "drift"}
+    assert set(res["fairness_drift"]["fairness"].keys()) == {
+        "protected_attribute",
+        "demographic_parity_diff",
+        "disparate_impact_ratio",
+        "status",
+        "is_mock",
+        "groups",
+    }
+    assert len(res["fairness_drift"]["fairness"]["groups"]) > 0
     assert set(res["fairness_drift"]["drift"].keys()) == {
         "features_evaluated",
         "psi",
         "ks_statistic",
         "status",
         "is_mock",
+        "per_feature",
     }
+    assert len(res["fairness_drift"]["drift"]["per_feature"]) > 0
 
     # Compliance domain
     assert res["compliance"]["is_mock"] is True

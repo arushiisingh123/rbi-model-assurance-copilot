@@ -67,6 +67,12 @@ def test_mock_fairness_result_validity():
     assert parsed.is_mock is True
     assert parsed.protected_attribute == "personal_status_and_sex"
     assert parsed.status in {"PASS", "WARNING", "FAIL", "PENDING"}
+    assert len(parsed.groups) == 2
+    assert [g.group for g in parsed.groups] == ["A92", "A93"]
+    for g in parsed.groups:
+        assert g.count > 0
+        assert g.favorable_count > 0
+        assert 0.0 <= g.selection_rate <= 1.0
 
 
 def test_mock_drift_result_validity():
@@ -83,6 +89,13 @@ def test_mock_drift_result_validity():
     ]
     assert parsed.status in {"PASS", "WARNING", "FAIL", "PENDING"}
     assert parsed.note is not None
+    assert len(parsed.per_feature) == len(parsed.features_evaluated)
+    assert [pf.feature for pf in parsed.per_feature] == parsed.features_evaluated
+    for pf in parsed.per_feature:
+        assert pf.psi >= 0.0
+        assert pf.ks_statistic >= 0.0
+    assert max(pf.psi for pf in parsed.per_feature) == parsed.psi
+    assert max(pf.ks_statistic for pf in parsed.per_feature) == parsed.ks_statistic
 
 
 def test_mock_compliance_result_validity():

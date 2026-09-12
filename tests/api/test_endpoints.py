@@ -80,10 +80,27 @@ def test_fairness_drift_endpoint():
     assert parsed.fairness.protected_attribute == "personal_status_and_sex"
     assert parsed.fairness.status in {"PASS", "WARNING", "FAIL", "PENDING"}
 
+    # Phase 4 per-group fairness detail
+    assert "groups" in body["fairness"]
+    assert len(parsed.fairness.groups) > 0
+    for g in parsed.fairness.groups:
+        assert isinstance(g.group, str)
+        assert g.count > 0
+        assert g.favorable_count >= 0
+        assert 0.0 <= g.selection_rate <= 1.0
+
     # Drift is real detection on the development train/test split
     assert parsed.drift.is_mock is False
     assert parsed.drift.status in {"PASS", "WARNING", "FAIL", "PENDING"}
     assert parsed.drift.note is None
+
+    # Phase 4 per-feature drift detail
+    assert "per_feature" in body["drift"]
+    assert len(parsed.drift.per_feature) == len(parsed.drift.features_evaluated)
+    assert [pf.feature for pf in parsed.drift.per_feature] == parsed.drift.features_evaluated
+    for pf in parsed.drift.per_feature:
+        assert pf.psi >= 0.0
+        assert pf.ks_statistic >= 0.0
 
 
 def test_compliance_endpoint():
@@ -113,6 +130,12 @@ def test_assurance_result_endpoint():
     assert parsed.fairness_drift.fairness.is_mock is False
     assert parsed.fairness_drift.drift.is_mock is False
     assert parsed.compliance.is_mock is True
+
+    # Phase 4 fairness groups and drift per-feature exposed through assurance result
+    assert "groups" in body["fairness_drift"]["fairness"]
+    assert len(parsed.fairness_drift.fairness.groups) > 0
+    assert "per_feature" in body["fairness_drift"]["drift"]
+    assert len(parsed.fairness_drift.drift.per_feature) == len(parsed.fairness_drift.drift.features_evaluated)
 
     # Drift uses the development train/test split and has no synthetic note
     assert parsed.fairness_drift.drift.note is None

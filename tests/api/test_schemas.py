@@ -17,6 +17,7 @@ from app.api.schemas import (
     LabelSemantics,
     LLMInterpretation,
     ModelMetadata,
+    ModelMetrics,
     ModelResult,
     PerInstanceContribution,
     ReportResult,
@@ -80,6 +81,97 @@ def test_model_result_missing_field():
         )
     missing_fields = {e["loc"][0] for e in exc_info.value.errors()}
     assert "instance_ids" in missing_fields
+
+
+def test_model_metrics_valid():
+    metrics = ModelMetrics(
+        accuracy=0.85,
+        precision=0.80,
+        recall=0.75,
+        f1=0.77,
+        roc_auc=0.91,
+        n_test_samples=200,
+        is_mock=False,
+    )
+    assert metrics.accuracy == 0.85
+    assert metrics.precision == 0.80
+    assert metrics.recall == 0.75
+    assert metrics.f1 == 0.77
+    assert metrics.roc_auc == 0.91
+    assert metrics.n_test_samples == 200
+    assert metrics.is_mock is False
+
+
+def test_model_metrics_missing_field():
+    with pytest.raises(ValidationError):
+        ModelMetrics(
+            accuracy=0.85,
+            precision=0.80,
+            # missing recall, f1, roc_auc, n_test_samples, is_mock
+        )
+
+
+def test_model_metrics_invalid_type():
+    with pytest.raises(ValidationError):
+        ModelMetrics(
+            accuracy="not-a-float",
+            precision=0.80,
+            recall=0.75,
+            f1=0.77,
+            roc_auc=0.91,
+            n_test_samples=200,
+            is_mock=False,
+        )
+
+
+def test_model_result_with_model_metrics():
+    res = ModelResult(
+        predictions=[0, 1],
+        probabilities=[0.12, 0.81],
+        instance_ids=["gc-0000", "gc-0001"],
+        feature_matrix=[
+            {"income": 45000, "age": 34},
+            {"income": 120000, "age": 45},
+        ],
+        model_metadata=ModelMetadata(
+            model_type="xgboost",
+            version="0.1.0",
+            trained_on="data/sample/credit_sample.csv",
+            feature_names=["income", "age"],
+        ),
+        is_mock=False,
+        model_metrics=ModelMetrics(
+            accuracy=0.85,
+            precision=0.80,
+            recall=0.75,
+            f1=0.77,
+            roc_auc=0.91,
+            n_test_samples=200,
+            is_mock=False,
+        ),
+    )
+    assert res.model_metrics is not None
+    assert res.model_metrics.accuracy == 0.85
+    assert res.model_metrics.n_test_samples == 200
+
+
+def test_model_result_malformed_model_metrics():
+    with pytest.raises(ValidationError):
+        ModelResult(
+            predictions=[0, 1],
+            probabilities=[0.12, 0.81],
+            instance_ids=["gc-0000", "gc-0001"],
+            feature_matrix=[],
+            model_metadata=ModelMetadata(
+                model_type="xgboost",
+                version="0.1.0",
+                trained_on="data/sample/credit_sample.csv",
+                feature_names=[],
+            ),
+            is_mock=False,
+            model_metrics={"accuracy": "not-a-number"},
+        )
+
 
 
 def test_per_instance_contribution_valid():

@@ -813,9 +813,7 @@ already returns accuracy, precision, recall, f1, and roc_auc, but nothing in
 those already-computed metrics so Namitha's "model performance information"
 deliverable has a data source.
 
-**Model-side contract implemented on feature branch (2026-09-12) — API exposure pending integration.**
-`app/models/model.py::evaluate_current_model()` is now the model-owned half
-of D1(a):
+**SETTLED (2026-09-12, Khushi):** API exposure implemented. `app/models/model.py::evaluate_current_model()` is the model-owned half of D1(a):
 
 ```python
 {
@@ -837,12 +835,11 @@ persisted default model's performance on its canonical held-out test split
 `predict_batch()`. `predict_batch()`'s existing contract (the shape at the
 top of this section) is completely unchanged by this addition.
 
-The proposed API-facing field name is `model_metrics`, to be added to
-`ModelResult` as a new additive key alongside the existing ones. **This is the agreed API-facing shape; implementation is owned by Khushi** -- wiring `evaluate_current_model()`
-into `app/api/schemas.py`, `app/api/orchestration.py`, and the `/model`
-endpoint response is Khushi's file territory (`docs/architecture.md`, `app/api/`
-ownership) and is handed off for her review per `CLAUDE.md` §2, not landed by
-this change.
+The API-facing field name is `model_metrics`, added to `ModelResult` as an additive
+`Optional[ModelMetrics] = None` field validated by the `ModelMetrics` Pydantic model.
+Khushi wired `evaluate_current_model()` via `compute_real_model_metrics()` in
+`app/api/orchestration.py`, exposed it on `GET /model` and `build_assurance_result()`,
+and added realistic fixtures to `app/api/mock_data.py`.
 
 **D1(b) — per-feature PSI / KS (Arushi).** `drift_report()` computes a PSI and
 a KS value per evaluated feature, then returns only the MAX-aggregated `psi`

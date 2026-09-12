@@ -116,3 +116,15 @@ def get_report() -> tuple[dict, str]:
         return response.json(), "api"
     except requests.exceptions.RequestException:
         return MOCK_REPORT_RESULT, "fallback"
+
+
+def get_health() -> tuple[dict, str]:
+    """Check API health status or fallback."""
+    url = f"{API_BASE_URL}/health"
+    try:
+        response = requests.get(url, timeout=2)
+        response.raise_for_status()
+        return response.json(), "api"
+    except requests.exceptions.RequestException:
+        return {"status": "unreachable"}, "fallback"
+

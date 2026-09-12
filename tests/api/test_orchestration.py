@@ -48,6 +48,18 @@ def test_build_assurance_result_structure():
     assert len(res["model"]["predictions"]) == 200
     assert len(res["model"]["probabilities"]) == 200
     assert isinstance(res["model"]["feature_matrix"], list)
+    assert set(res["model"].keys()) == {
+        "predictions",
+        "probabilities",
+        "instance_ids",
+        "feature_matrix",
+        "model_metadata",
+        "is_mock",
+        "model_metrics",
+    }
+    assert res["model"]["model_metrics"] is not None
+    assert res["model"]["model_metrics"]["is_mock"] is False
+    assert res["model"]["model_metrics"]["n_test_samples"] == 200
 
     # Explainability domain
     assert res["explainability"]["is_mock"] is False

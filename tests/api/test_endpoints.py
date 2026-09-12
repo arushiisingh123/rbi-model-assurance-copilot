@@ -37,6 +37,14 @@ def test_model_endpoint():
     assert parsed.model_metadata.feature_names == FEATURE_COLUMNS
     assert parsed.model_metadata.label_semantics is not None
     assert parsed.model_metadata.label_semantics.favorable_outcome_label == 0
+    assert parsed.model_metrics is not None
+    assert parsed.model_metrics.is_mock is False
+    assert parsed.model_metrics.n_test_samples == 200
+    assert 0.0 <= parsed.model_metrics.accuracy <= 1.0
+    assert 0.0 <= parsed.model_metrics.precision <= 1.0
+    assert 0.0 <= parsed.model_metrics.recall <= 1.0
+    assert 0.0 <= parsed.model_metrics.f1 <= 1.0
+    assert 0.0 <= parsed.model_metrics.roc_auc <= 1.0
 
     # Feature matrix round-trips via DataFrame
     df_recovered = pd.DataFrame(body["feature_matrix"])
@@ -123,6 +131,9 @@ def test_assurance_result_endpoint():
     parsed = AssuranceResult(**body)
     # Each section independently reports is_mock
     assert parsed.model.is_mock is False
+    assert parsed.model.model_metrics is not None
+    assert parsed.model.model_metrics.is_mock is False
+    assert parsed.model.model_metrics.n_test_samples == 200
     assert len(parsed.model.instance_ids) == 200
     assert len(parsed.model.instance_ids) == len(parsed.model.predictions) == len(parsed.model.probabilities)
     assert all(isinstance(iid, str) and len(iid) > 0 for iid in parsed.model.instance_ids)
@@ -152,6 +163,7 @@ def test_mock_assurance_result_deprecated_endpoint():
     parsed = AssuranceResult(**mock_resp.json())
     assert parsed.model.is_mock is True
     assert parsed.model.instance_ids == ["gc-0000", "gc-0001", "gc-0002"]
+    assert parsed.model.model_metrics is not None
     assert parsed.compliance.is_mock is True
 
 

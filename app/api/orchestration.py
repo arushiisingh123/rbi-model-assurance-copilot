@@ -36,6 +36,13 @@ def compute_real_model() -> Dict[str, Any]:
     return predict_batch()
 
 
+def compute_real_model_metrics() -> Dict[str, Any]:
+    """Evaluate held-out metrics for the current trained credit model."""
+    from app.models.model import evaluate_current_model
+
+    return evaluate_current_model()
+
+
 def format_model_for_api(model_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Format model result for HTTP/JSON output (feature_matrix converted to list[dict])."""
     feat_matrix = model_dict["feature_matrix"]
@@ -250,12 +257,14 @@ _compute_real_explainability = compute_real_explainability
 _compute_real_fairness = compute_real_fairness
 _compute_real_drift = compute_real_drift
 _compute_real_compliance = compute_real_compliance
+_compute_real_model_metrics = compute_real_model_metrics
 
 
 def build_assurance_result() -> Dict[str, Any]:
     """Execute end-to-end model assurance evaluation across all domains."""
     raw_model = compute_real_model()
     api_model = format_model_for_api(raw_model)
+    api_model["model_metrics"] = compute_real_model_metrics()
     explain_res = compute_real_explainability(raw_model, method="shap")
     fairness_res = compute_real_fairness(raw_model)
     drift_res = compute_real_drift(raw_model)

@@ -1,15 +1,11 @@
-"""Regression test for the dashboard/app.py vs. app/ package name collision (Owner: Khushi).
+"""Regression and shell-integration tests for dashboard/dashboard_app.py (Owner: Khushi).
 
-Streamlit's ``streamlit run <script>`` puts the script's own directory at the
-front of ``sys.path``. When the Streamlit entry point lived at
-``dashboard/app.py``, that put a file literally named ``app.py`` ahead of the
-top-level ``app/`` package, so ``dashboard/api_client.py``'s
-``from app.api.mock_data import ...`` resolved to the wrong module and raised
-``ImportError: cannot import name 'get_compliance' from partially initialized
-module 'dashboard.api_client'``. The entry point was renamed to
-``dashboard/dashboard_app.py`` to remove the collision; this test simulates
-Streamlit's sys.path insertion directly (without spinning up a Streamlit
-server) so a future re-introduction of a ``dashboard/app.py`` file is caught.
+Covers two things:
+1. The dashboard/app.py vs. app/ package name collision regression (unchanged
+   from earlier phases -- see the docstrings below).
+2. Phase 4 shell behaviour: the entrypoint must delegate rendering to each
+   domain's own panel rather than reimplementing it, must not blank the whole
+   page when one panel fails, and must carry no stale phase/status language.
 """
 import subprocess
 import sys
@@ -45,16 +41,38 @@ def test_api_client_import_survives_streamlit_style_sys_path():
     assert "ImportError" not in result.stderr
 
 
-def test_dashboard_app_source_contains_drift_disclaimer():
-    """Verify that dashboard_app.py source code contains the approved drift disclaimer."""
+def test_dashboard_app_source_has_no_stale_phase_or_status_language():
+    """dashboard_app.py must not claim an outdated phase or a fixed mock/provisional
+    status -- both are now determined per-tab, at render time, by the fetched data.
+    """
     source_text = (DASHBOARD_DIR / "dashboard_app.py").read_text(encoding="utf-8")
-    assert "development training split" in source_text
-    assert "held-out test split" in source_text
-    assert "static mock fixture" in source_text
+    assert "Phase 2" not in source_text
+    assert "Phase 3" not in source_text
+    assert "PROVISIONAL" not in source_text
+    assert "Phase 4" in source_text
 
 
-def test_dashboard_app_renders_without_error_and_shows_disclaimer():
-    """Run dashboard_app via Streamlit AppTest and verify zero exceptions and disclaimer presence."""
+def test_dashboard_app_delegates_rendering_to_owning_panels():
+    """The shell must import and call each domain's own panel rather than
+    reimplementing that domain's presentation logic inline.
+    """
+    source_text = (DASHBOARD_DIR / "dashboard_app.py").read_text(encoding="utf-8")
+    assert "from dashboard.panels.compliance_panel import render_compliance_panel" in source_text
+    assert "from dashboard.panels.report_panel import render_report_panel" in source_text
+    assert (
+        "from dashboard.panels.fairness_drift_panel import render_fairness_drift_panel"
+        in source_text
+    )
+    assert (
+        "from dashboard.panels.explainability_panel import render as render_explainability_panel"
+        in source_text
+    )
+
+
+def test_dashboard_app_renders_without_error_and_shows_mock_labelling():
+    """Run dashboard_app via Streamlit AppTest (API unreachable -> every tab falls
+    back to mock data) and verify zero exceptions and visible mock labelling.
+    """
     from streamlit.testing.v1 import AppTest
 
     app_path = str(DASHBOARD_DIR / "dashboard_app.py")
@@ -63,17 +81,27 @@ def test_dashboard_app_renders_without_error_and_shows_disclaimer():
     assert not at.exception, f"Dashboard raised unexpected exception: {at.exception}"
 
     caption_texts = [c.value for c in at.caption]
-    matching = [
-        c for c in caption_texts
-        if "development training split" in c and "held-out test split" in c
+    mock_labelled = [
+        c
+        for c in caption_texts
+        if "**True**" in c and ("Mock data" in c or "is_mock" in c)
     ]
-    assert len(matching) >= 1, (
-        f"Expected visible drift disclaimer in dashboard captions, found: {caption_texts}"
+    assert len(mock_labelled) >= 4, (
+        "Expected mock/fallback labelling visible on multiple tabs, found "
+        f"captions: {caption_texts}"
+    )
+
+    # The drift half of the Fairness & Drift tab must still visibly flag
+    # fallback data as synthetic, not just the fairness half's caption.
+    warning_texts = [w.value for w in at.warning]
+    assert any("SYNTHETIC DRIFT SCENARIO" in w for w in warning_texts), (
+        f"Expected the drift panel's synthetic-scenario warning under fallback, "
+        f"found warnings: {warning_texts}"
     )
 
 
 def test_dashboard_app_renders_report_tab():
-    """Verify that the dashboard initializes with the new Report tab and no errors."""
+    """Verify that the dashboard initializes with the Report tab and no errors."""
     from streamlit.testing.v1 import AppTest
 
     app_path = str(DASHBOARD_DIR / "dashboard_app.py")
@@ -82,4 +110,103 @@ def test_dashboard_app_renders_report_tab():
     assert not at.exception, f"Dashboard raised unexpected exception: {at.exception}"
     tab_labels = [t.label for t in at.tabs]
     assert "Report" in tab_labels
+
+
+def test_dashboard_app_invokes_all_four_wired_panels(monkeypatch):
+    """Each of the four delegated panels must be invoked exactly once per page run."""
+    from streamlit.testing.v1 import AppTest
+
+    calls = {"compliance": 0, "report": 0, "fairness_drift": 0, "explainability": 0}
+
+    def _fake_compliance(data, source):
+        calls["compliance"] += 1
+
+    def _fake_report(data, source):
+        calls["report"] += 1
+
+    def _fake_fairness_drift(data, source):
+        calls["fairness_drift"] += 1
+
+    def _fake_explainability(fetch_explainability, **kwargs):
+        calls["explainability"] += 1
+
+    monkeypatch.setattr(
+        "dashboard.panels.compliance_panel.render_compliance_panel", _fake_compliance
+    )
+    monkeypatch.setattr("dashboard.panels.report_panel.render_report_panel", _fake_report)
+    monkeypatch.setattr(
+        "dashboard.panels.fairness_drift_panel.render_fairness_drift_panel",
+        _fake_fairness_drift,
+    )
+    monkeypatch.setattr("dashboard.panels.explainability_panel.render", _fake_explainability)
+
+    app_path = str(DASHBOARD_DIR / "dashboard_app.py")
+    at = AppTest.from_file(app_path)
+    at.run(timeout=30)
+    assert not at.exception, f"Dashboard raised unexpected exception: {at.exception}"
+
+    assert calls == {
+        "compliance": 1,
+        "report": 1,
+        "fairness_drift": 1,
+        "explainability": 1,
+    }, calls
+
+
+def test_dashboard_app_isolates_tab_failures(monkeypatch):
+    """One panel raising must not blank the page or stop the other tabs rendering."""
+    from streamlit.testing.v1 import AppTest
+
+    def _boom(data, source):
+        raise RuntimeError("simulated panel failure")
+
+    monkeypatch.setattr("dashboard.panels.compliance_panel.render_compliance_panel", _boom)
+
+    app_path = str(DASHBOARD_DIR / "dashboard_app.py")
+    at = AppTest.from_file(app_path)
+    at.run(timeout=30)
+    assert not at.exception, (
+        f"A single panel failure must not raise a top-level exception: {at.exception}"
+    )
+
+    error_texts = [e.value for e in at.error]
+    assert any("Compliance" in e and "failed to render" in e for e in error_texts), error_texts
+
+    # The Report tab (rendered after Compliance) must still have produced its
+    # own content -- the failure must not have stopped the rest of the page.
+    caption_texts = [c.value for c in at.caption]
+    assert any("Report is_mock" in c for c in caption_texts), caption_texts
+
+
+def test_dashboard_app_renders_health_banner(monkeypatch):
+    """The reachability banner must render without error in both reachable and fallback states."""
+    from streamlit.testing.v1 import AppTest
+
+    app_path = str(DASHBOARD_DIR / "dashboard_app.py")
+
+    # 1. Fallback / unreachable state
+    monkeypatch.setattr(
+        "dashboard.api_client.get_health",
+        lambda: ({"status": "unreachable"}, "fallback"),
+    )
+    at_fallback = AppTest.from_file(app_path)
+    at_fallback.run(timeout=30)
+    assert not at_fallback.exception, f"Unexpected exception in fallback state: {at_fallback.exception}"
+    warning_texts = [w.value for w in at_fallback.warning]
+    assert any("Unreachable" in w for w in warning_texts), (
+        f"Expected unreachable warning banner, found: {warning_texts}"
+    )
+
+    # 2. Reachable / live API state
+    monkeypatch.setattr(
+        "dashboard.api_client.get_health",
+        lambda: ({"status": "ok"}, "api"),
+    )
+    at_api = AppTest.from_file(app_path)
+    at_api.run(timeout=30)
+    assert not at_api.exception, f"Unexpected exception in api state: {at_api.exception}"
+    success_texts = [s.value for s in at_api.success]
+    assert any("Connected" in s for s in success_texts), (
+        f"Expected connected success banner, found: {success_texts}"
+    )
 

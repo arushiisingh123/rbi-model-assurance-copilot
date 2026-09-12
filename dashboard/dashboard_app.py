@@ -11,11 +11,10 @@ Panel ownership (Phase 4, docs/decisions.md "Phase 4 allocation," D2):
     - Fairness & Drift -- Arushi (``dashboard/panels/fairness_drift_panel.py``)
     - Compliance, Report -- Nidhi (``dashboard/panels/compliance_panel.py``,
       ``dashboard/panels/report_panel.py``)
-    - Model -- Namitha's panel does not exist yet. The Model tab below is the
-      original inline rendering from earlier development, kept as-is (while
-      ``model_metrics`` is now exposed by the API as of this change, dedicated
-      panel visualization remains to be wired when Namitha's panel lands);
-      it will be replaced by a delegated panel call once available.
+    - Model -- Namitha (``dashboard/panels/model_panel.py``)
+
+Every tab now delegates to its owning module's panel; no analytical domain is
+rendered inline in this shell.
 """
 import streamlit as st
 
@@ -30,6 +29,7 @@ from dashboard.api_client import (
 from dashboard.panels.compliance_panel import render_compliance_panel
 from dashboard.panels.explainability_panel import render as render_explainability_panel
 from dashboard.panels.fairness_drift_panel import render_fairness_drift_panel
+from dashboard.panels.model_panel import render_model_panel
 from dashboard.panels.report_panel import render_report_panel
 
 st.set_page_config(page_title="AI Model Risk & Assurance Copilot", layout="centered")
@@ -71,34 +71,7 @@ def _safe_render(label: str, render_fn) -> None:
 with tab_model:
     def _render_model_tab() -> None:
         data, source = get_model()
-        st.caption(f"Data source: **{source}** | Mock data: **{data.get('is_mock', False)}**")
-
-        st.subheader("Model Metadata")
-        meta = data.get("model_metadata", {})
-        col1, col2 = st.columns(2)
-        col1.metric("Model Type", meta.get("model_type", "N/A"))
-        col2.metric("Version", meta.get("version", "N/A"))
-        st.text(f"Trained on: {meta.get('trained_on', 'N/A')}")
-        st.text(f"Features: {', '.join(meta.get('feature_names', []))}")
-
-        label_sem = meta.get("label_semantics")
-        if label_sem:
-            st.info(
-                f"**Target Semantics**: 0 = GOOD (favorable outcome), 1 = BAD (positive class) | "
-                f"{label_sem.get('probabilities_represent', '')}"
-            )
-
-        st.subheader("Predictions & Probabilities")
-        preds = data.get("predictions", [])
-        probs = data.get("probabilities", [])
-        pred_records = [
-            {"Row": i, "Prediction": pred, "Probability": prob}
-            for i, (pred, prob) in enumerate(zip(preds, probs))
-        ]
-        st.dataframe(pred_records, use_container_width=True)
-
-        st.subheader("Feature Matrix (Input Records)")
-        st.dataframe(data.get("feature_matrix", []), use_container_width=True)
+        render_model_panel(data=data, source=source)
 
     _safe_render("Model", _render_model_tab)
 

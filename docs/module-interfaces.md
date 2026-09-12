@@ -753,27 +753,25 @@ drift charts have a data source. **MAX aggregation remains the reported
 headline metric and the basis of `status`** — unchanged from the Phase 1
 decision recorded in `docs/decisions.md`.
 
-**D1(c) — per-group fairness rates (Arushi).** `fairness_evidence()` already
-produces `group_count`, `favorable_count`, and `selection_rate` per observed
-group, but they reach consumers only through `GET /report` →
-`supporting_evidence`.
+**D1(c) — per-group fairness rates (Arushi, Khushi).** **SETTLED:** Route 1
+(extend `fairness_report()`'s output) was chosen and implemented. `fairness_report()`
+returns an additive `groups: list[dict]` field (typed as `list[FairnessGroup]` in
+`FairnessResult`), exposing the group breakdown directly without requiring consumers
+to traverse `GET /report` → `supporting_evidence`.
 
-D1 approves **that** these per-group values reach the dashboard. **The route
-is NOT yet decided**, and D1 does not choose between the two candidates:
+Each entry in `groups` carries:
+- `group` (`str`): the raw category label for the protected attribute (preserving Attribute 9 categories as-is).
+- `count` (`int`): total observations in this group (projected from `group_count`).
+- `favorable_count` (`int`): count of predictions matching the favorable outcome label.
+- `selection_rate` (`float`): proportion of favorable predictions (`favorable_count / count`), rounded to 4 decimal places.
 
-1. Extend the fairness output, or add an endpoint, so the dashboard reads
-   group rates without going through `GET /report`.
-2. Have the dashboard consume the existing `GET /report` →
-   `supporting_evidence` `fairness_group` records, which needs no schema
-   change at all.
+`groups` is populated whenever inputs validate, including **PENDING** cases (e.g. fewer than
+two groups or no favorable predictions), because observed group counts and rates represent real
+empirical observations even when the comparative ratio between groups is undefined.
 
-Arushi and Khushi settle the route, and the resulting field names and shapes,
-in the implementation pull request, which updates this section in place.
-Until then neither the route nor any field name here is approved.
-
-**The `fairness_report()` five-key contract (`protected_attribute`,
+**The `fairness_report()` baseline contract (`protected_attribute`,
 `demographic_parity_diff`, `disparate_impact_ratio`, `status`, `is_mock`) is
-unchanged** under either route. Group labels remain the raw Attribute 9
+preserved**, with `groups` acting as an additive 6th key. Group labels remain the raw Attribute 9
 categories; `personal_status_and_sex` is never renamed to `gender` or `sex`.
 
 **D1(d) — `supporting_evidence` consumption (Khushi, Nidhi).** The field is

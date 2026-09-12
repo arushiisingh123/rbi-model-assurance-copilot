@@ -7,10 +7,12 @@ from app.api.schemas import (
     Citation,
     ComplianceFinding,
     ComplianceResult,
+    DriftPerFeature,
     DriftResult,
     EvidenceCoverage,
     ExplainabilityResult,
     FairnessDriftResult,
+    FairnessGroup,
     FairnessResult,
     LabelSemantics,
     LLMInterpretation,
@@ -132,6 +134,132 @@ def test_fairness_result_invalid_status():
             disparate_impact_ratio=0.78,
             status="INVALID_STATUS",
             is_mock=True,
+        )
+
+
+def test_fairness_group_valid():
+    group = FairnessGroup(
+        group="A92",
+        count=310,
+        favorable_count=201,
+        selection_rate=0.6484,
+    )
+    assert group.group == "A92"
+    assert group.count == 310
+    assert group.favorable_count == 201
+    assert group.selection_rate == 0.6484
+
+
+def test_fairness_group_missing_key():
+    with pytest.raises(ValidationError):
+        FairnessGroup(
+            group="A92",
+            count=310,
+            favorable_count=201,
+            # missing selection_rate
+        )
+
+
+def test_fairness_group_invalid_type():
+    with pytest.raises(ValidationError):
+        FairnessGroup(
+            group="A92",
+            count="not_an_int",
+            favorable_count=201,
+            selection_rate=0.6484,
+        )
+
+
+def test_fairness_result_with_groups():
+    res = FairnessResult(
+        protected_attribute="personal_status_and_sex",
+        demographic_parity_diff=0.14,
+        disparate_impact_ratio=0.78,
+        status="WARNING",
+        is_mock=True,
+        groups=[
+            FairnessGroup(group="A92", count=310, favorable_count=201, selection_rate=0.65),
+            {"group": "A93", "count": 548, "favorable_count": 432, "selection_rate": 0.79},
+        ],
+    )
+    assert len(res.groups) == 2
+    assert res.groups[0].group == "A92"
+    assert res.groups[1].group == "A93"
+    assert isinstance(res.groups[1], FairnessGroup)
+
+
+def test_fairness_result_malformed_group_entry():
+    with pytest.raises(ValidationError):
+        FairnessResult(
+            protected_attribute="personal_status_and_sex",
+            demographic_parity_diff=0.14,
+            disparate_impact_ratio=0.78,
+            status="WARNING",
+            is_mock=True,
+            groups=[
+                {"group": "A92"},  # missing required count, favorable_count, selection_rate
+            ],
+        )
+
+
+def test_drift_per_feature_valid():
+    dpf = DriftPerFeature(
+        feature="duration_months",
+        psi=0.08,
+        ks_statistic=0.10,
+    )
+    assert dpf.feature == "duration_months"
+    assert dpf.psi == 0.08
+    assert dpf.ks_statistic == 0.10
+
+
+def test_drift_per_feature_missing_key():
+    with pytest.raises(ValidationError):
+        DriftPerFeature(
+            feature="duration_months",
+            psi=0.08,
+            # missing ks_statistic
+        )
+
+
+def test_drift_per_feature_invalid_type():
+    with pytest.raises(ValidationError):
+        DriftPerFeature(
+            feature="duration_months",
+            psi="not_a_float",
+            ks_statistic=0.10,
+        )
+
+
+def test_drift_result_with_per_feature():
+    res = DriftResult(
+        features_evaluated=["duration_months", "credit_amount"],
+        psi=0.09,
+        ks_statistic=0.11,
+        status="PASS",
+        is_mock=True,
+        per_feature=[
+            DriftPerFeature(feature="duration_months", psi=0.08, ks_statistic=0.10),
+            {"feature": "credit_amount", "psi": 0.09, "ks_statistic": 0.11},
+        ],
+    )
+    assert len(res.per_feature) == 2
+    assert res.per_feature[0].feature == "duration_months"
+    assert res.per_feature[1].feature == "credit_amount"
+    assert isinstance(res.per_feature[1], DriftPerFeature)
+
+
+def test_drift_result_malformed_per_feature_entry():
+    with pytest.raises(ValidationError):
+        DriftResult(
+            features_evaluated=["duration_months"],
+            psi=0.09,
+            ks_statistic=0.11,
+            status="PASS",
+            is_mock=True,
+            per_feature=[
+                {"feature": "duration_months"},  # missing psi and ks_statistic
+            ],
         )
 
 

@@ -297,6 +297,72 @@ convert between scales, compare SHAP and LIME magnitudes, or turn them into
 regulatory claims. `provenance.is_mock` is passed through from the
 explanation and must be surfaced wherever the evidence is presented.
 
+### Phase 4 — explainability presentation (`dashboard/panels/`)
+
+**The presentation layer calculates nothing.** Every number rendered is the
+exact float `explain()` produced. No SHAP value, LIME weight, global
+importance, prediction or probability is recomputed, rescaled, or rounded
+by the dashboard. `app/explainability/` remains the source of truth, and
+neither `explain.py` nor `evidence.py` was modified for Phase 4.
+
+Two modules, both owned by Manas:
+
+- `dashboard/panels/explainability_presentation.py` — **pure** sorting,
+  selection, top-N and labelling logic. No Streamlit import, so it is
+  testable headlessly with no dashboard and no API.
+- `dashboard/panels/explainability_panel.py` — the Streamlit rendering
+  shell. `render(fetch_explainability, *, instance_ids=None,
+  key_prefix=...)` takes the fetch callable as an argument rather than
+  importing the API client, so panel content (Manas) and dashboard
+  container (Khushi) can be wired without either editing the other's file.
+
+**Global vs instance are presented as distinct sections** and never share
+an axis:
+
+- **Global** — `global_importance`, sorted descending, horizontal bar
+  chart, captioned MODEL-LEVEL. Describes the model across every explained
+  record; it is not an attribution for any individual applicant. Values are
+  passed through, never re-derived from `per_instance`.
+- **Instance** — one record's `contributions`, signed diverging bar chart,
+  captioned RECORD-LEVEL.
+
+**Signed values are preserved exactly.** Absolute value is used *only* to
+order features by magnitude; the number plotted and tabulated is always the
+original signed contribution. Positive pushes toward class 1 (BAD / higher
+risk), negative toward class 0 (GOOD).
+
+**Top-N.** The instance table defaults to the 10 largest-magnitude features
+of 20, adjustable in the UI. It is a display cut only — no value changes.
+
+**Scale.** The scale label is read from
+`app.explainability.evidence.SCALE_BY_METHOD`, never hardcoded in the
+dashboard, so it cannot drift from the analytical module: SHAP →
+**log_odds**, LIME → **probability**. Both are shown on the axis label and
+in an on-screen caption stating the two are not comparable. SHAP and LIME
+are never placed on a shared numerical axis.
+
+**`instance_id` behaviour — no fabricated identity.** `explain()` reports
+`row_index`, a position inside the explained frame that restarts at 0 on
+every call. The presentation layer therefore:
+
+- uses caller-supplied `instance_ids` as record labels when given, marking
+  the options `is_identity=True`;
+- otherwise labels records by position (`"Row 0 (position in explained
+  set)"`), marks them `is_identity=False`, and states on screen that a
+  position is not an applicant identity;
+- raises if the supplied `instance_ids` length does not match the explained
+  rows, rather than truncating or padding — a silent trim is how one
+  record acquires another's label.
+
+The model layer produces `instance_ids` (`predict_batch()`), but the
+current `GET /explainability` response does **not** carry them; exposing
+them there is an open integration item owned by Khushi. Until then the
+panel operates in positional-label mode unless a caller passes ids in.
+
+**Full data.** The complete matrix (records x features) is available behind
+a collapsed expander, unmodified. It is an audit view and is deliberately
+not the default presentation.
+
 ## Arushi's output — `app/fairness/fairness.py` + `app/drift/drift.py`
 
 ```python

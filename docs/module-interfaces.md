@@ -813,6 +813,37 @@ already returns accuracy, precision, recall, f1, and roc_auc, but nothing in
 those already-computed metrics so Namitha's "model performance information"
 deliverable has a data source.
 
+**Model-side contract implemented on feature branch (2026-09-12) — API exposure pending integration.**
+`app/models/model.py::evaluate_current_model()` is now the model-owned half
+of D1(a):
+
+```python
+{
+    "accuracy": float,
+    "precision": float,
+    "recall": float,
+    "f1": float,
+    "roc_auc": float,
+    "n_test_samples": int,
+    "is_mock": False,
+}
+```
+
+This is **exactly** `evaluate()`'s existing return shape (`evaluate_current_model()`
+delegates to `evaluate()` and recalculates nothing). It describes the current
+persisted default model's performance on its canonical held-out test split
+(`split_data(..., test_size=0.2, random_state=42)` on the approved dataset)
+-- it is **not** per-batch performance, and it is **not** a field on
+`predict_batch()`. `predict_batch()`'s existing contract (the shape at the
+top of this section) is completely unchanged by this addition.
+
+The proposed API-facing field name is `model_metrics`, to be added to
+`ModelResult` as a new additive key alongside the existing ones. **This is the agreed API-facing shape; implementation is owned by Khushi** -- wiring `evaluate_current_model()`
+into `app/api/schemas.py`, `app/api/orchestration.py`, and the `/model`
+endpoint response is Khushi's file territory (`docs/architecture.md`, `app/api/`
+ownership) and is handed off for her review per `CLAUDE.md` §2, not landed by
+this change.
+
 **D1(b) — per-feature PSI / KS (Arushi).** `drift_report()` computes a PSI and
 a KS value per evaluated feature, then returns only the MAX-aggregated `psi`
 and `ks_statistic`. Phase 4 additionally exposes the per-feature values so

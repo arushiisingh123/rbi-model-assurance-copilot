@@ -1852,3 +1852,62 @@ before it is treated as binding:
 
 **Status:** Approved by the team, 2026-09-11. Governance only — no
 application, API, dashboard, or test code changed.
+
+## 2026-09-12 — Phase 4 (Nidhi): compliance and report presentation panels
+
+**Status:** Implemented by Nidhi (module owner), on
+`feature/nidhi-phase4-compliance-report`. Not committed — pending team
+review of the diff. Implements D2 (panel ownership) and D1(d)
+(`supporting_evidence` consumption) from the 2026-09-11 Phase 4 allocation
+decision above. D1(a)/(b)/(c), D3–D9, and Khushi's `dashboard/panels/__init__.py`
+/ `dashboard_app.py` wiring are unaffected and remain as before.
+
+**Decision / implementation:** Two new presentation-only modules render
+data the caller already fetched; neither calls an analytical module, RAG,
+the LLM, or an API itself.
+
+- **`dashboard/panels/compliance_panel.py`** — renders `GET /compliance`'s
+  `ComplianceResult`: one expander per finding, showing `rule_id`, the
+  shared `render_status()` label, `rule_description`, `technical_finding_ref`,
+  and `evidence_chunks`. An empty `evidence_chunks` (true of every finding
+  the compliance engine produces today) renders as "not currently
+  populated," explicitly distinguished from the RAG-retrieved evidence
+  shown on the report panel — the two are not the same channel.
+- **`dashboard/panels/report_panel.py`** — renders `GET /report`'s
+  `ReportResult`, per section, as four separate layers in a fixed order:
+  (1) technical finding, (2) LLM interpretation, (3) `supporting_evidence`
+  (D1(d)), (4) retrieved evidence/citations. Citation fields
+  (`source_url`, `document_type`, `publication_date`, `is_excerpt`,
+  `is_current`) render as given or as the literal `"not stated"` when
+  `None` — never guessed. `is_excerpt: True` / `is_current: False` render
+  as explicit non-current/excerpt warnings, matching the one approved 2014
+  source. `NOT_FOUND` always renders as "no verified evidence was
+  retrieved from the current approved/indexed corpus," with an explicit
+  negation that this does not mean no RBI rule exists; `NOT_ATTEMPTED` is
+  handled as a distinct branch, not folded into `NOT_FOUND`.
+
+**Nothing invented:** neither panel recalculates a status, reclassifies a
+finding, fabricates an evidence chunk or citation, or invents a source URL.
+No file outside `dashboard/panels/` and `tests/dashboard/` was modified;
+`app/compliance/`, `app/rbi/`, `app/rag/`, `app/report/generate.py`,
+`app/api/`, `dashboard/dashboard_app.py`, and `dashboard/api_client.py` were
+inspected and confirmed to need no change for this task.
+
+**Tests:** `tests/dashboard/test_compliance_panel.py` (12 tests) and
+`tests/dashboard/test_report_panel.py` (16 tests), using
+`streamlit.testing.v1.AppTest.from_function()` against `MOCK_COMPLIANCE_RESULT`
+/ `MOCK_REPORT_RESULT` and hand-built fixtures covering full citation
+metadata, missing optional fields, `NOT_ATTEMPTED`, and `supporting_evidence`.
+Includes AST-based import-inspection tests asserting neither panel imports
+`app.compliance`, `app.rbi`, `app.rag`, `app.config`, `app.report.generate`,
+or an LLM SDK. Full regression: 686 passed, 1 skipped (was 658 passed, 1
+skipped before this task — the 28-test difference is exactly the two new
+files).
+
+**Not in this task:** `dashboard/panels/__init__.py` (none was needed —
+`dashboard/panels/` works as an implicit namespace package, matching
+`dashboard/`'s own convention) and any change to `dashboard/dashboard_app.py`
+wiring the two panels into the existing tabs, which remains Khushi's D2/D8
+integration work.
+
+---

@@ -784,11 +784,12 @@ because no drift evidence producer exists (deliberately deferred, see
 excluded from the LLM prompt (`_PROMPT_EXCLUDED_EVIDENCE_TYPES`) pending an
 approved sampling policy.
 
-### Approved Phase 4 interface additions (D1 — approved 2026-09-11, NOT yet implemented)
+### Approved Phase 4 interface additions (D1 — approved 2026-09-11, status per item below)
 
 The team approved four additive interface changes to unblock Phase 4
-visualization work. **None is implemented yet.** This section records what was
-approved so the change is visible before code lands.
+visualization work. **D1(a), D1(b), and D1(c) are not implemented yet; D1(d)
+is implemented (see below).** This section records what was approved so each
+change is visible before/as code lands.
 
 **D1 approves the scope — that each data category is exposed — not the
 shape.** Concrete field names and shapes, and for D1(c) the route itself, are
@@ -842,10 +843,15 @@ Until then neither the route nor any field name here is approved.
 unchanged** under either route. Group labels remain the raw Attribute 9
 categories; `personal_status_and_sex` is never renamed to `gender` or `sex`.
 
-**D1(d) — `supporting_evidence` consumption (Khushi, Nidhi).** The field is
-already populated on every `ReportSection` but has no reader in `dashboard/`.
-Phase 4 consumes it for the compliance and report panels. No schema change is
-required for this item.
+**D1(d) — `supporting_evidence` consumption (Khushi, Nidhi). Implemented.**
+The field is already populated on every `ReportSection`. Nidhi's
+`dashboard/panels/report_panel.py` now reads and renders it (as a distinct
+fourth layer, alongside the technical finding, LLM interpretation, and
+retrieved-evidence citations) on branch
+`feature/nidhi-phase4-compliance-report`, pending team review before merge.
+No schema change was required for this item. `dashboard/panels/compliance_panel.py`
+(also Nidhi, same branch) separately renders `ComplianceFinding.evidence_chunks`,
+a distinct field that remains unpopulated by any producer today.
 
 ## Changing an interface
 

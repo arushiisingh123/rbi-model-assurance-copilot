@@ -122,7 +122,11 @@ def _render_global(explanation: Mapping[str, Any], method: str, axis_label: str)
         x_label="Feature",
         y_label=f"Mean absolute contribution ({scale_label(method)})",
         horizontal=True,
-        sort=None,  # keep the helper's descending order
+        # sort=False keeps the helper's descending order. It must be False,
+        # not None: Streamlit treats anything that is not a bool as a column
+        # name and calls .removeprefix() on it, so None raises AttributeError
+        # (see streamlit/elements/lib/built_in_chart_utils.py::_parse_sort_column).
+        sort=False,
         use_container_width=True,
     )
     with st.expander("Global importance values", expanded=False):
@@ -187,7 +191,7 @@ def _render_instance(
         x_label="Feature",
         y_label=axis_label,
         horizontal=True,
-        sort=None,
+        sort=False,  # preserve the magnitude ordering the helper produced
         use_container_width=True,
     )
     st.caption(

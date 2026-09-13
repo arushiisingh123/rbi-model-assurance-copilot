@@ -69,11 +69,23 @@ def test_dashboard_app_delegates_rendering_to_owning_panels():
     )
 
 
-def test_dashboard_app_renders_without_error_and_shows_mock_labelling():
+def test_dashboard_app_renders_without_error_and_shows_mock_labelling(monkeypatch):
     """Run dashboard_app via Streamlit AppTest (API unreachable -> every tab falls
     back to mock data) and verify zero exceptions and visible mock labelling.
+
+    The unreachable state is FORCED rather than assumed. Previously this test
+    relied on nothing listening on the default port 8000, so it failed on any
+    machine where a developer had ``uvicorn`` running for live verification --
+    every tab then reported real data and only 2 of the expected 4 mock captions
+    appeared. Pointing ``API_BASE_URL`` at a reserved port makes the fallback
+    path deterministic. Production fallback behaviour is unchanged; only the
+    address the client dials during this test is.
     """
     from streamlit.testing.v1 import AppTest
+
+    # Port 1 on loopback is reserved and refuses immediately, so each client
+    # call takes the RequestException branch without waiting for a timeout.
+    monkeypatch.setattr("dashboard.api_client.API_BASE_URL", "http://127.0.0.1:1")
 
     app_path = str(DASHBOARD_DIR / "dashboard_app.py")
     at = AppTest.from_file(app_path)

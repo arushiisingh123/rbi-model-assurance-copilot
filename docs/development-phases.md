@@ -19,7 +19,10 @@ CLAUDE.md §17.
 
 ## Current phase
 
-**PHASE 3 — RAG + LLM.**
+**PHASE 4 — DASHBOARD + UX.** Implementation is complete and merged into
+`main`, and the checkpoint is **approved by Manas for this project review** —
+see `docs/decisions.md`, "Phase 4 checkpoint sign-off", including "Level of
+approval". Phase 5 has not begun.
 
 Phase 0 was signed off on 2026-08-27, with two accepted limitations that
 must be closed early in Phase 1 — see `docs/decisions.md`, "Phase 0
@@ -45,14 +48,28 @@ grounds 1 of the 5 report sections and the other 4 return `NOT_FOUND`.
 — never that no RBI rule exists. Phase 3 sign-off is an engineering and
 integration milestone, not complete regulatory coverage.
 
-**Phase 4 is allocated but not started.** The Phase 4 allocation, Definition
-of Done, and checkpoint criteria were approved on 2026-09-11 (decisions
-D1-D9, see `docs/decisions.md`, "Phase 4 allocation") and are recorded in
-`docs/phase4-allocation.md`. This declaration and the one in `CLAUDE.md` §20
-deliberately still read Phase 3; both flip to Phase 4 in the **first Phase 4
-implementation pull request**. During Phase 3 the `CLAUDE.md` declaration
-lagged the real phase for the whole phase and was corrected only at sign-off,
-as identified by the Phase 3 post-merge audit.
+**Phase 4 — implemented, checkpoint approved by Manas.** The allocation,
+Definition of Done, and checkpoint criteria were approved on 2026-09-11
+(decisions D1-D9, see `docs/decisions.md`, "Phase 4 allocation") and are
+recorded in `docs/phase4-allocation.md`.
+
+Phase 4 delivered domain-owned dashboard panels under `dashboard/panels/`,
+one per analytical module, with `dashboard/dashboard_app.py` reduced to a
+shell that fetches data and delegates rendering. Seven charts now exist where
+Phase 3 had none, and the D1 interface additions (model evaluation metrics,
+per-feature PSI/KS, per-group fairness rates, `supporting_evidence`) are
+exposed and displayed.
+
+The filled Definition of Done is in `docs/phase4-allocation.md` §10: **22 of
+22 PASS**. Both live walkthroughs required by the exit criteria — API
+reachable and API stopped — were performed by Manas on 2026-09-13. The other
+four owners did not each personally review their own panel; the approval
+recorded is Manas's, at the level he authorised.
+
+*Process note.* The declaration above was supposed to flip to Phase 4 in the
+first Phase 4 implementation pull request; it did not, and was corrected
+during Phase 4 finalisation instead — the same lag this file recorded against
+Phase 3. Worth addressing before Phase 5 defines its own criteria.
 
 ## Phase 0 checkpoint criteria (from docs/TASK.md §7)
 

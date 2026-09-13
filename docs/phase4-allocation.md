@@ -4,11 +4,17 @@
 D1-D9. See `docs/decisions.md`, "Phase 4 allocation: interface additions,
 panel ownership, Definition of Done, and Phase 3 deferral assignments".
 
-**Phase 4 implementation has not begun.** This document is governance only.
-No application, API, dashboard, or test code is changed by it. The current
-phase declarations in `CLAUDE.md` §20 and `docs/development-phases.md` still
-read Phase 3 and flip to Phase 4 in the first Phase 4 implementation pull
-request (see §14).
+**Phase 4 implementation is complete and merged.** This document began as
+governance only; §10 has since been filled in against the delivered code and
+now records the Definition of Done status (22 of 22 PASS) together with the
+evidence for each item. The checkpoint is approved by Manas for this project
+review — see `docs/decisions.md`, "Phase 4 checkpoint sign-off", including
+"Level of approval" for exactly what that approval covers.
+
+The phase declarations in `CLAUDE.md` §20 and `docs/development-phases.md`
+were flipped to Phase 4 during finalisation rather than in the first
+implementation pull request as §14 intended; that lag is noted in
+`docs/development-phases.md`.
 
 ---
 
@@ -312,30 +318,73 @@ them; they need an ownership decision (see §15).
 > a value, and mock, synthetic, observed, and unverified-evidence states
 > remain distinguishable on screen.**
 
+Status reviewed against the implementation on 2026-09-13. All 22 items are
+`[x]` = PASS. Evidence for each is given below the list; nothing is marked
+PASS on documentation alone. Two items whose original wording assumed a
+five-owner team review are annotated — see the note under the list.
+
 ```text
-[ ] Model result visualization present (predictions / probabilities distribution)
-[ ] Model performance information displayed from real evaluate() output
-[ ] SHAP global importance visualized (not a table)
-[ ] SHAP/LIME per-instance contributions visualized (not raw st.json)
-[ ] Fairness charts present (per-group selection rates)
-[ ] Drift charts present (per-feature PSI / KS)
-[ ] RBI compliance findings displayed with rule, status, and technical reference
-[ ] Compliance evidence displayed, including supporting_evidence where records exist (drift has no evidence producer by design - see section 8)
-[ ] Report information displayed with all three layers kept separate
-[ ] Citations show source, locator, quote, provenance, is_excerpt, is_current
-[ ] NOT_FOUND renders as "no verified evidence retrieved", never "no RBI rule exists"
-[ ] UX flow reviewed and accepted by the team across every tab
-[ ] is_mock visible on every tab
-[ ] Synthetic drift never presented as observed production drift
-[ ] No value recalculated, overridden, or fabricated anywhere in dashboard/
-[ ] Status vocabulary limited to PASS / WARNING / FAIL / PENDING
-[ ] Dashboard renders with the API unreachable (labelled fallback)
-[ ] Dashboard renders with the API reachable (real data)
-[ ] D1 interface additions documented in docs/module-interfaces.md
-[ ] Dashboard tests pass; full regression suite passes
-[ ] docs/decisions.md updated
-[ ] Team approval recorded
+[x] Model result visualization present (predictions / probabilities distribution)
+[x] Model performance information displayed from real evaluate() output
+[x] SHAP global importance visualized (not a table)
+[x] SHAP/LIME per-instance contributions visualized (not raw st.json)
+[x] Fairness charts present (per-group selection rates)
+[x] Drift charts present (per-feature PSI / KS)
+[x] RBI compliance findings displayed with rule, status, and technical reference
+[x] Compliance evidence displayed, including supporting_evidence where records exist (drift has no evidence producer by design - see section 8)
+[x] Report information displayed with all three layers kept separate
+[x] Citations show source, locator, quote, provenance, is_excerpt, is_current
+[x] NOT_FOUND renders as "no verified evidence retrieved", never "no RBI rule exists"
+[x] UX flow reviewed across every tab                                 <- by Manas; see note
+[x] is_mock visible on every tab
+[x] Synthetic drift never presented as observed production drift
+[x] No value recalculated, overridden, or fabricated anywhere in dashboard/
+[x] Status vocabulary limited to PASS / WARNING / FAIL / PENDING
+[x] Dashboard renders with the API unreachable (labelled fallback)
+[x] Dashboard renders with the API reachable (real data)
+[x] D1 interface additions documented in docs/module-interfaces.md
+[x] Dashboard tests pass; full regression suite passes
+[x] docs/decisions.md updated
+[x] Phase 4 approval recorded                                         <- by Manas; see note
 ```
+
+**Who performed the review — stated precisely.** The last two items were
+satisfied by **Manas alone**, acting for this project review. Namitha,
+Arushi, Nidhi and Khushi did **not** each personally review their own panel,
+and nothing in this document should be read as saying they did. The original
+wording of these two items ("accepted by the team", "Team approval") assumed
+a five-owner review that did not take place; they are recorded here as
+completed by a single reviewer taking responsibility for the whole dashboard.
+See `docs/decisions.md`, "Phase 4 checkpoint sign-off", for the authorisation.
+
+**Evidence.**
+
+| Item | Evidence |
+|---|---|
+| Model visualization | `dashboard/panels/model_panel.py` renders prediction-class and probability-band bar charts; `tests/dashboard/test_model_panel.py` asserts two charts and that counts match the supplied predictions |
+| Model performance | `model_metrics` from `evaluate()` surfaced via `GET /model`; tests assert displayed values equal the API's exactly |
+| SHAP global / per-instance | `dashboard/panels/explainability_panel.py` bar charts; the former `st.json` dump is gone |
+| Fairness / drift charts | `dashboard/panels/fairness_drift_panel.py`, three charts over `groups` and `per_feature` |
+| Compliance + evidence | `compliance_panel.py`; `report_panel.py:117` renders `supporting_evidence` |
+| Three report layers | `report_panel.py` renders `technical_finding`, `retrieved_evidence`, `llm_interpretation` separately |
+| Citations | all six fields (`source`, `locator`, `quote`, `provenance`, `is_excerpt`, `is_current`) referenced in `report_panel.py` |
+| `NOT_FOUND` wording | `report_panel.py:191` |
+| `is_mock` on every tab | present in all five panels and the shell |
+| No recalculation | no analytical computation in `dashboard/`; panel tests assert values are passed through unchanged |
+| Status vocabulary | only `PASS`/`WARNING`/`FAIL`/`PENDING` appear in `dashboard/`; no `NOT_EVALUATED` |
+| API reachable | headless `AppTest` against a live `uvicorn`: 0 exceptions, 5 tabs, 7 charts, health banner "Connected", 6 api-sourced captions. **Also manually walked in a browser by Manas (2026-09-13)** across Model, Explainability (SHAP and LIME), Fairness & Drift, Compliance and Report |
+| API unreachable | headless `AppTest` with no listener: 0 exceptions, 5 tabs, 7 charts, 6 mock-labelled captions, no "Connected" banner. `tests/dashboard/test_dashboard_entrypoint.py::test_dashboard_app_renders_without_error_and_shows_mock_labelling` forces the unreachable state rather than assuming it. **Also manually walked in a browser by Manas (2026-09-13) with the API stopped: all five tabs rendered with the expected fallback/mock behaviour and no crashes** |
+| UX flow | every tab walked in a browser by Manas in both the API-reachable and API-stopped states |
+| Tests | 870 passed, 1 skipped with the API stopped |
+
+**Both live walkthroughs required by the exit criteria (§11 items 2 and 3)
+have now been performed**, by Manas, on 2026-09-13. The programmatic
+`AppTest` evidence above came first; the browser walkthroughs confirm it.
+
+**What is still not claimed.** Four owners did not personally review their
+own panels, and no five-person team poll took place. The approval recorded
+is Manas's, at the level he authorised — see `docs/decisions.md`, "Phase 4
+checkpoint sign-off", under "Level of approval".
 
 **This checklist must be filled in as a precondition of the Phase 4 sign-off
 entry, not after it.** Phase 3 was signed off with all seventeen boxes of its

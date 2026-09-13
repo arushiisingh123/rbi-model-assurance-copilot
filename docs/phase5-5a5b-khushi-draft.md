@@ -1,6 +1,6 @@
 # Phase 5A/5B Design Spec — Khushi's Half (API / Integration)
 
-**Status: DRAFT — Phase 5 formally approved (P1-P3, docs/decisions.md). This half now incorporates Namitha's model-side ownership proposal and the 4 jointly-resolved open points, independently confirmed by Namitha. Ready to merge with Namitha's model-facing half for team circulation.**
+**Status: DRAFT — Phase 5 formally approved (P1-P3, docs/decisions.md). Both halves are now fully resolved, ready to merge into one combined 5A/5B spec.**
 
 Grounded directly in the current codebase as of this draft (`app/api/schemas.py`, `app/api/orchestration.py`, `app/models/model.py` read fresh).
 
@@ -123,7 +123,9 @@ Not a field on `DriftResult` itself (comparability is a property of a *pair*, no
 - `assurance_run_id` boundary — orchestration-only, doesn't cross into the model layer.
 - Probability-capability exception contract — `ProbabilityCapabilityUnavailable`, per §2, independently confirmed by Namitha.
 - `explainer_type` — stays internal to explainability, not part of the shared contract.
+- `model_id` value — Namitha confirmed stable logical-model identity, separate from `model_version` and `assurance_run_id` (won't change on retraining or per run). Concrete values: `"german-credit-logistic-regression"` (current LR), `"german-credit-random-forest"` (future RF). Exposed from the model/adapter layer; orchestration consumes it when constructing `AssuranceRunContext`.
+- `supports_probability` — Namitha confirmed this stays adapter-internal only: NOT added to `ModelMetadata`, `model_metadata`, or any shared Pydantic schema. LR and RF both support probabilities. For a future model that doesn't, the adapter/model layer checks capability internally and raises `ProbabilityCapabilityUnavailable`. No redundant API-facing capability flag needed since `roc_auc_status` already provides that signal.
 
 **Still open:**
-- The exact value/format Namitha's model layer will use for `model_id` on the current single model, before a formal second model exists.
-- Final schema field names for `supports_probability` and where it surfaces (model layer internal vs. exposed on `ModelMetadata`) — Namitha's call, flagged here for cross-reference.
+- None. Both halves are fully resolved, ready to merge into one combined 5A/5B design specification.
+

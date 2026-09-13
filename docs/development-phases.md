@@ -140,6 +140,19 @@ final project-completion phase, and "project complete" is undefined here. No
 Phase 5 Definition of Done or checkpoint criteria exists yet; it should be
 defined before Phase 4 exit.
 
+**Phase 5 direction is under discussion (PROPOSED, pending team approval).**
+The phase table above is unchanged and still defines Phase 5 as Testing +
+Demo. Separately, `docs/decisions.md` (Phase 4 checkpoint sign-off) records
+an external-bank / model-adapter architecture as Phase-5-era work that was
+never designed or allocated. `docs/phase5-allocation.md` proposes
+reconciling those two statements by redefining Phase 5 as "Model-Agnostic
+Assurance + Local LLM", with workstreams 5A-5G, a proposed Definition of
+Done, and proposed checkpoint criteria — see also `docs/decisions.md`,
+"Phase 5 scope and model-agnostic assurance proposal". **Neither the
+redefinition nor that Definition of Done is approved**, and Phase 5 has not
+begun. If the proposal is declined, the definition in the phase table stands
+as written.
+
 ## What each phase adds, per module
 
 See `docs/TASK.md` §3 for the full per-member, per-phase breakdown, and §12

@@ -24,6 +24,7 @@ from app.api.mock_data import (
 )
 from app.api.schemas import ReportResult
 from app.report.generate import (
+    DEFAULT_PROVIDER_LABEL,
     IsolatedRAGRetriever,
     ReportGenerationError,
     ReportGenerationUnavailable,
@@ -490,3 +491,39 @@ def test_generate_report_with_real_retrieval_has_nonzero_coverage(sample_inputs)
         # A RETRIEVED section may claim an illustrative basis; never cited_evidence
         # while the corpus is the interim single document.
         assert section["llm_interpretation"]["regulatory_basis"] == "illustrative_rule_only"
+
+
+def test_generate_report_custom_provider_label(sample_inputs):
+    """Verify passing a custom provider_label updates the disclaimer text accordingly."""
+    fake_client = FakeGroqClient()
+    custom_label = "Local HuggingFace (meta-llama/Llama-3-8B-Instruct)"
+    result = generate_report(
+        **sample_inputs,
+        llm_client=fake_client,
+        retrieval_fn=fake_retrieval_mixed,
+        provider_label=custom_label,
+    )
+    parsed = ReportResult(**result)
+    assert any(
+        f"LLM-generated report text produced via {custom_label}." in d
+        for d in parsed.disclaimers
+    )
+    assert not any("produced via Groq" in d for d in parsed.disclaimers)
+
+
+def test_generate_report_default_provider_label(sample_inputs):
+    """Verify default provider_label produces the standard Groq disclaimer."""
+    fake_client = FakeGroqClient()
+    result = generate_report(
+        **sample_inputs,
+        llm_client=fake_client,
+        retrieval_fn=fake_retrieval_mixed,
+    )
+    parsed = ReportResult(**result)
+    expected_disclaimer = (
+        f"LLM-generated report text produced via {DEFAULT_PROVIDER_LABEL}. "
+        "Technical findings are calculated by Python analytical modules and passed verbatim."
+    )
+    assert expected_disclaimer in parsed.disclaimers
+    assert "produced via Groq (openai/gpt-oss-120b)" in expected_disclaimer
+

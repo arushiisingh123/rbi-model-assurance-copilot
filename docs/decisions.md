@@ -2235,3 +2235,97 @@ test, and no threshold was changed. `docs/architecture.md` deliberately still
 describes the current single-model system, and `CLAUDE.md` §20 still declares
 Phase 4 — per the recorded convention, the current-phase declaration flips in
 the first Phase 5 *implementation* pull request, not in this one.
+
+---
+
+### 2026-09-13 — Phase 5 direction approved (Model-Agnostic Assurance + Local LLM)
+
+**Status:** Approved by team consensus (via team chat), recorded by
+Khushi.
+
+**Decision:** The team adopts Model-Agnostic Assurance + Local LLM as
+the Phase 5 direction, per Arushi's consolidated proposal
+(docs/phase5-allocation.md, feature/arushi-phase5-governance) and the
+team's replies confirming alignment. Specifically:
+
+- Testing + Demo folds into 5G, not a separate phase.
+- Proposed 5A-5G ownership stands as documented in
+  docs/phase5-allocation.md.
+- A single, additive Model Assurance Contract wraps existing results
+  (FairnessResult, DriftResult, etc.) without modifying their existing
+  fields.
+- model_id, model_version, and assurance_run_id are required for
+  model-aware assurance; missing identity fails clearly rather than
+  substituting a default.
+- NOT_COMPARABLE is the required outcome when drift/fairness results
+  can't be legitimately compared.
+- Existing provenance vocabulary is reused/extended, not replaced.
+- The local LLM candidate is benchmarked before being locked in.
+- Namitha and Khushi take the lead on 5A/5B design specs (not
+  implementation) first, per the agreed division: Namitha on
+  model-facing fields/adapter interface, Khushi on API contract/schema/
+  validation/run-identity propagation.
+
+**Still open, per docs/phase5-allocation.md's own text (quoted
+verbatim):**
+
+1. **Is model-agnostic assurance Phase 5 work at all**, or does Phase 5 remain
+   Testing + Demo with this direction becoming a later phase? Everything else
+   in this document depends on that answer.
+2. **If adopted, does Phase 5 replace or absorb the existing Testing + Demo
+   content?** The cross-test cycle in `CLAUDE.md` §5 and the demo requirement
+   would otherwise have no home.
+3. **Who owns `predict_batch()` accepting a model?** It gates 5C and 5D and is
+   currently in Namitha's module with no allocation.
+4. **Is `ModelResult.probabilities` to become optional?** It is required today,
+   so a model without probability output breaks the API. Fairness and drift do
+   not need probabilities.
+5. **Does Phase 5 get an allocation approval entry before implementation**, as
+   Phase 4 did with D1–D9?
+
+**Recorded by:** Khushi, based on the team chat thread. If any owner's
+understanding differs from what's written here, raise it and this
+entry will be corrected.
+
+---
+
+### 2026-09-13 — Phase 5 formal approval (P1-P3, superseding the earlier informal entry)
+
+**Status:** Approved — Arushi (proposal author) provided explicit
+written answers to the 3 blocking open questions; recorded here as the
+formal numbered approval entry per Phase 4's D-series precedent.
+
+**P1 — Phase 5 scope:** Model-agnostic assurance IS Phase 5. Quote
+Arushi's exact answer: "Yes. We are adopting Model-Agnostic Assurance +
+Local LLM as Phase 5. This is the agreed direction from the team
+discussion. The existing development-phases.md wording saying Phase 5
+is Testing + Demo is now stale and should be updated once we record
+the approval."
+
+**P2 — Testing + Demo absorption:** Quote Arushi's exact answer: "Yes.
+We are not creating a separate phase just for Testing + Demo. That work
+is absorbed into Phase 5 as 5G: End-to-End Demonstration + Testing. So
+the existing testing/demo scope remains, but it becomes the final Phase
+5 workstream rather than defining the whole phase."
+
+**P3 — Approval entry required before implementation:** Quote Arushi's
+exact answer: "Yes. I think we should follow the Phase 4 precedent and
+make this a formal numbered approval/decision entry in docs/decisions.md
+before implementation starts... I don't want 5A/5B implementation to
+begin while the phase itself is technically still marked as
+proposed/pending."
+
+**Governance sequence going forward, per Arushi:** (1) this entry
+records the formal approval; (2) docs/development-phases.md is updated
+next to reflect Phase 5 = Model-Agnostic Assurance + Local LLM, Testing
++ Demo folded into 5G; (3) exact field names/adapter interface/
+provenance vocabulary/NOT_COMPARABLE shape are treated as part of the
+5A/5B design review, not reopened architectural decisions; (4) Khushi +
+Namitha proceed with 5A/5B design artifacts; (5) those artifacts get
+team review before any implementation.
+
+**Recorded by:** Khushi, directly quoting Arushi's explicit written
+answers (not inferred from general chat consensus, unlike the earlier
+2026-09-13 entry this supersedes).
+
+

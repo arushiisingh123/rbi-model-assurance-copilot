@@ -15,7 +15,7 @@ CLAUDE.md §17.
 | 2 — Integration | Real modules wired together via agreed interfaces; `run_assurance.py` produces real (non-hardcoded) results | Phase 1 checkpoint passed |
 | 3 — RAG + LLM | Full multi-document RAG pipeline; LLM explains/summarizes but never calculates metrics or invents citations | Phase 2 checkpoint passed |
 | 4 — Dashboard + UX | Full result visualization across all modules | Phase 3 checkpoint passed |
-| 5 — Testing + Demo | Team-wide cross-testing, debugging, docs, demo prep | Phase 4 checkpoint passed |
+| 5 — Model-Agnostic Assurance + Local LLM | Model-agnostic assurance and local LLM (5A-5G), with Testing + Demo absorbed into 5G | Phase 4 checkpoint passed |
 
 ## Current phase
 
@@ -134,24 +134,9 @@ Definition of Done left blank.
 Gate to enter Phase 5 remains "Phase 4 checkpoint passed" (phase table
 above).
 
-**Note on Phase 5.** Phase 5 — Testing + Demo is the highest-numbered phase
-in this roadmap, but the repository does **not** formally define it as the
-final project-completion phase, and "project complete" is undefined here. No
-Phase 5 Definition of Done or checkpoint criteria exists yet; it should be
-defined before Phase 4 exit.
+**Note on Phase 5.** Phase 5 is formally approved as **Model-Agnostic Assurance + Local LLM** (workstreams 5A-5G), per `docs/phase5-allocation.md` and the formal approval entry in `docs/decisions.md` (P1-P3).
 
-**Phase 5 direction is under discussion (PROPOSED, pending team approval).**
-The phase table above is unchanged and still defines Phase 5 as Testing +
-Demo. Separately, `docs/decisions.md` (Phase 4 checkpoint sign-off) records
-an external-bank / model-adapter architecture as Phase-5-era work that was
-never designed or allocated. `docs/phase5-allocation.md` proposes
-reconciling those two statements by redefining Phase 5 as "Model-Agnostic
-Assurance + Local LLM", with workstreams 5A-5G, a proposed Definition of
-Done, and proposed checkpoint criteria — see also `docs/decisions.md`,
-"Phase 5 scope and model-agnostic assurance proposal". **Neither the
-redefinition nor that Definition of Done is approved**, and Phase 5 has not
-begun. If the proposal is declined, the definition in the phase table stands
-as written.
+Testing + Demo is absorbed into Phase 5 as workstream **5G: End-to-End Demonstration + Testing**, rather than defining the whole phase. Proposed workstreams, Definition of Done, and checkpoint criteria stand as documented in `docs/phase5-allocation.md`. Per the agreed governance sequence, Khushi and Namitha lead initial 5A/5B design specifications for team review before implementation begins.
 
 ## What each phase adds, per module
 

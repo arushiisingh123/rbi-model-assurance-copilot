@@ -38,16 +38,24 @@ Intended data flow (target shape, reached incrementally across phases):
                   API / Dashboard
 ```
 
-## 2. Current state (Phase 3 complete — integrated, evidence-grounded reporting)
+## 2. Current state (Phase 4 implemented — results presented in the dashboard)
 
 Phase 0 closed on 2026-08-27, Phase 1 on 2026-09-05, Phase 2 on 2026-09-07,
-and Phase 3 on 2026-09-11. Every transition has a dated sign-off entry in
-`docs/decisions.md`.
+and Phase 3 on 2026-09-11. Each has a dated sign-off entry in
+`docs/decisions.md`. **Phase 4 is implemented, merged, and approved by Manas
+for this project review** — see `docs/decisions.md`, "Phase 4 checkpoint
+sign-off", including "Level of approval" for what that approval covers.
 
 **The modules are real and the system is integrated end to end.** The
 assurance chain runs dataset → model → explainability / fairness / drift →
 compliance → RBI evidence retrieval → evidence-grounded report → API / CLI /
-dashboard. Regression suite at Phase 3 sign-off: 658 passed, 1 skipped.
+dashboard. Regression suite at Phase 4 finalisation: 870 passed, 1 skipped
+(API stopped).
+
+**One model, not a model platform.** The system trains and explains exactly
+one model: the scikit-learn pipeline in `app/models/` fitted on the UCI
+German Credit dataset. There is no model adapter and no support for
+arbitrary external models; that is future work, not current architecture.
 
 Per-module state:
 
@@ -92,10 +100,18 @@ The Streamlit dashboard (`dashboard/dashboard_app.py`) calls the API and
 falls back to built-in mock data when the API is not running, showing
 which source it used.
 
-**Phase 4 (Dashboard + UX) is allocated but not started.** The dashboard
-currently presents results as tables, metrics, and raw JSON; it contains no
-visualization primitives. See `docs/phase4-allocation.md` for the approved
-Phase 4 scope, panel ownership, Definition of Done, and checkpoint criteria.
+**Phase 4 (Dashboard + UX) is implemented.** `dashboard/dashboard_app.py` is
+now a shell: it fetches each domain's result via `dashboard/api_client.py`
+and delegates rendering to that domain's own panel in `dashboard/panels/`.
+No analytical domain is rendered inline, and no value is recalculated in
+`dashboard/`. Seven charts exist across the Model, Explainability and
+Fairness & Drift tabs where Phase 3 had none.
+
+Each tab is wrapped in a failure-isolation helper, so a malformed response
+in one panel surfaces an error in that tab only and the other four still
+render. The filled Definition of Done is in `docs/phase4-allocation.md` §10
+(22 of 22 PASS). Both live walkthroughs — API reachable and API stopped —
+were performed by Manas on 2026-09-13.
 
 ## 3. Repository structure (actual)
 
@@ -116,7 +132,7 @@ rbi-model-assurance-copilot/
 ├── dashboard/
 │   ├── dashboard_app.py     # Khushi — Streamlit UI (entry point, shell/tabs/UX)
 │   ├── api_client.py        # Khushi — API calls with mock fallback
-│   └── panels/              # Phase 4 (approved, not yet created) — domain-owned panels, see §4
+│   └── panels/              # domain-owned panels (model, explainability, fairness_drift, compliance, report), see §4
 ├── data/
 │   ├── sample/               # tiny synthetic dataset (credit_sample.csv)
 │   ├── german_credit/         # UCI German Credit dataset (model training)
@@ -156,7 +172,7 @@ rbi-model-assurance-copilot/
   ownership is recorded in `docs/decisions.md`, 2026-09-08
   ("generate_report() ownership split, clarified").
 
-### Dashboard panels (Phase 4, approved 2026-09-11 — not yet created)
+### Dashboard panels (Phase 4, approved 2026-09-11 — implemented)
 
 Phase 4 is the first phase in which all five owners contribute code to the
 dashboard. Rather than every owner editing `dashboard/dashboard_app.py`,

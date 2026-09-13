@@ -1976,3 +1976,129 @@ Full test suite executed and validated against baseline. Panel wiring,
 schema validation, API endpoints, mock data, and Streamlit AppTest integration
 tests all pass without regression. Zero modifications made to `app/models/`.
 
+---
+
+## 2026-09-13 — Phase 4 checkpoint sign-off (APPROVED BY MANAS)
+
+**Status: APPROVED BY MANAS** for this project review (2026-09-13). Every
+Definition of Done item is satisfied and both required live walkthroughs have
+been performed. Read "Level of approval" below before citing this entry —
+what was approved, and by whom, is narrower than a five-owner team vote.
+
+**What Phase 4 delivered.** Every analytical result the system calculates is
+now visually presented in the dashboard by the module that owns the
+calculation. `dashboard/dashboard_app.py` is a shell: all five tabs delegate to
+domain-owned panels in `dashboard/panels/`, and no analytical domain is
+rendered inline. Seven charts exist where Phase 3 had none.
+
+| Panel | Owner | File |
+|---|---|---|
+| Model | Namitha | `dashboard/panels/model_panel.py` |
+| Explainability | Manas | `dashboard/panels/explainability_panel.py` (+ `explainability_presentation.py`) |
+| Fairness & Drift | Arushi | `dashboard/panels/fairness_drift_panel.py` |
+| Compliance | Nidhi | `dashboard/panels/compliance_panel.py` |
+| Report | Nidhi | `dashboard/panels/report_panel.py` |
+
+**Definition of Done.** **22 of 22 items PASS.** The filled checklist and the
+evidence for each item are in `docs/phase4-allocation.md` §10. Two of those
+items were originally worded as team activities and were satisfied by Manas
+alone — see "Level of approval" below for exactly what that means.
+
+**Test status (2026-09-13, API server stopped, CI-like environment):**
+
+```
+870 passed, 1 skipped
+```
+
+The single skip is `tests/report/test_generate_report.py` "Manual live
+verification only" — a deliberate pre-existing skip requiring a live LLM key.
+
+**Dashboard verification — API reachable.** Headless `AppTest` against a live
+`uvicorn`: 0 exceptions, 5 tabs, 7 charts, 6 api-sourced captions, health
+banner "API Backend: Connected". Additionally walked in a browser by Manas
+across Model, Explainability (SHAP and LIME), Fairness & Drift, Compliance and
+Report tabs.
+
+**Dashboard verification — API unreachable.** Verified programmatically —
+headless `AppTest` with no listener gives 0 exceptions, 5 tabs, 7 charts, 6
+mock-labelled captions and no "Connected" banner — **and manually walked in a
+browser by Manas on 2026-09-13 with the API stopped: all five tabs rendered
+with the expected fallback/mock behaviour and no crashes.** Exit criterion 3
+is met.
+
+**Known limitations — accurate as of this entry, not defects:**
+
+1. **Compliance rules are illustrative.** `evaluate_compliance()` returns
+   `is_mock: True`. The rule *engine* is real; the rules are not verified
+   against binding RBI regulation (`app/rbi/metadata.py`).
+2. **RAG evidence coverage is one source.** The approved corpus holds a single
+   2014 excerpt (`is_excerpt: True`, `is_current: False`), so real retrieval
+   grounds 1 of 5 report sections; the other 4 return `NOT_FOUND`, meaning
+   nothing was retrieved from the indexed corpus — never that no RBI rule
+   exists.
+3. **Report falls back to a labelled mock** when `GROQ_API_KEY` is absent or
+   live generation fails. `GET /report` never returns 500. The provider
+   decision is deferred (see below).
+4. **Drift is not production monitoring.** It compares the development
+   training split with the held-out test split of one static dataset. The
+   synthetic scenario generator is testing infrastructure and is labelled as
+   such wherever shown.
+5. **`GET /explainability` carries no `instance_id`.** The explainability
+   panel therefore labels records by position and says so on screen. See the
+   Phase 5 note below.
+6. **`dashboard/panels/` has no `__init__.py`.** Namespace-package resolution
+   works; this is not a blocker and was deliberately left alone.
+
+**Level of approval — read this before citing the entry.**
+
+Phase 4 is approved **by Manas**, who performed the complete dashboard
+verification and is taking responsibility for it for this project review.
+That is the level of approval authorised, and it is the level claimed.
+
+What this is **not**:
+
+- It is **not** four separate owner reviews. Namitha, Arushi, Nidhi and
+  Khushi did **not** each personally review their own panel on screen, and
+  this entry must never be cited as saying they did.
+- It is **not** a five-person team vote. The Definition of Done items
+  originally worded "accepted by the team" and "Team approval" were written
+  assuming that process; the project decided not to wait for it.
+
+The distinction between **technical verification** and **formal team
+approval** is deliberately preserved: the technical verification is complete
+and evidenced above; the formal multi-owner approval did not take place and
+is not claimed. If a broader sign-off is wanted later, it can be added as a
+separate dated entry rather than by editing this one.
+
+**Deferred to Phase 5 (not started, not designed here):** adding `instance_id`
+to the explainability API response; any external-bank / model-adapter
+architecture; the LLM provider decision; a Phase 5 Definition of Done, which
+does not yet exist (`docs/development-phases.md` §"Note on Phase 5").
+
+**Verification record.** What was actually done, and by whom:
+
+```text
+[x] Model panel walked on screen                    Manas   2026-09-13
+[x] Explainability panel walked (SHAP and LIME)     Manas   2026-09-13
+[x] Fairness & Drift panel walked on screen         Manas   2026-09-13
+[x] Compliance panel walked on screen               Manas   2026-09-13
+[x] Report panel walked on screen                   Manas   2026-09-13
+[x] Full walkthrough, API reachable                 Manas   2026-09-13
+[x] Full walkthrough, API stopped (fallback/mock)   Manas   2026-09-13
+[x] Phase 4 implementation approved                 Manas   2026-09-13
+
+[ ] Namitha — Model                    not performed
+[ ] Arushi — Fairness & Drift          not performed
+[ ] Nidhi — RBI Compliance / RAG       not performed
+[ ] Khushi — API / Dashboard           not performed
+```
+
+The four unticked lines are left visible on purpose. They are an accurate
+record that those reviews did not happen, not an outstanding blocker: the
+project decided to proceed on Manas's verification. Any owner who later
+reviews their own panel can tick their line and add a date.
+
+**Status:** Approved by Manas, 2026-09-13. Phase 4 is closed for the purposes
+of this project review. Phase 5 has not begun and nothing in Phase 5 is
+designed or implemented.
+

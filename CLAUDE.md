@@ -949,7 +949,7 @@ A phase is complete only when its checkpoint criteria have been satisfied and th
 
 Current phase:
 
-PHASE 3 — RAG + LLM
+PHASE 4 — DASHBOARD + UX (implemented; approved by Manas 2026-09-13)
 
 Phase 0 (Foundation) was completed and signed off on 2026-08-27, with two
 accepted limitations that must be closed early in Phase 1. See
@@ -966,24 +966,39 @@ start".
 The Phase 1 and Phase 2 module contracts remain authoritative unless
 explicitly superseded by a later approved decision in docs/decisions.md.
 
-The current objective is Phase 3: retrieve RBI source material through the
-RAG pipeline, carry structured evidence records into the assurance report,
-keep LLM output grounded in retrieved evidence, and preserve a stable
-per-record instance_id from the data/model boundary through to the report.
-
-The Phase 3 integration work has been implemented and merged into main. The
-formal Phase 3 checkpoint sign-off is being recorded now; see
+Phase 3 (RAG + LLM) was completed and signed off on 2026-09-11. See
 docs/decisions.md, "Phase 3 checkpoint sign-off".
 
-Now in scope — Phase 3:
+The current objective is Phase 4: present every analytical result the system
+already calculates, each visual sourced from the module that owns the
+calculation, with no visual modifying or fabricating a value, and with mock,
+synthetic, observed, and unverified-evidence states distinguishable on
+screen.
 
-- RBI document processing, chunking, embeddings, and vector storage.
-- Retrieval of RBI source material and construction of evidence records.
-- Routing evidence records into report sections so evidence is consumed, not merely produced.
-- Evidence-grounded LLM report generation, with every technical metric still calculated in Python.
-- Stable instance_id preserved from dataset through model, explainability evidence, and report.
-- Connecting report generation to the API, CLI, and dashboard.
-- Integration tests and documentation required for Phase 3 sign-off.
+The Phase 4 implementation has been merged into main and the checkpoint is
+APPROVED BY MANAS for this project review; see docs/decisions.md, "Phase 4
+checkpoint sign-off", including "Level of approval" for exactly what that
+covers. Phase 5 has not begun.
+
+Now in scope — Phase 4:
+
+- Domain-owned dashboard panels under dashboard/panels/, one per analytical
+  module, with dashboard/dashboard_app.py as a shell that fetches and
+  delegates.
+- Model result and model performance visualization.
+- SHAP/LIME global and per-instance visualization.
+- Fairness per-group and drift per-feature charts.
+- RBI compliance findings, evidence, and report display with the three
+  report layers kept separate.
+- The two live walkthroughs (API reachable and API stopped) required by the
+  Phase 4 exit criteria. Both were performed by Manas on 2026-09-13.
+
+Phase 4 Definition of Done status: 22 of 22 PASS. The filled checklist and
+per-item evidence are in docs/phase4-allocation.md section 10. Both live
+walkthroughs (API reachable and API stopped) were performed by Manas on
+2026-09-13. The four other owners did not each personally review their own
+panel; the approval recorded is Manas's, at the level he authorised. See
+docs/decisions.md, "Phase 4 checkpoint sign-off", under "Level of approval".
 
 Evidence coverage limitation — do not overstate it:
 
@@ -994,18 +1009,28 @@ no verified evidence was retrieved from the indexed corpus — it does NOT
 mean that no RBI rule exists. Phase 3 completion must never be described as
 complete regulatory coverage.
 
-Deferred inside Phase 3 and NOT yet implemented — see docs/decisions.md,
-"Phase 3 checkpoint sign-off":
+Carried forward and NOT yet implemented — see docs/decisions.md, "Phase 3
+checkpoint sign-off" and "Phase 4 checkpoint sign-off":
 
 Instance-level evidence in the LLM prompt (no approved sampling policy yet)
 A drift evidence producer
 Live Groq verification in CI
 A broader approved RBI corpus
+instance_id on the GET /explainability response (the explainability panel
+  labels records by position and says so on screen)
 
-Still out of scope until the team explicitly begins the relevant phase:
+Still out of scope until the team explicitly begins the relevant phase —
+FUTURE / PHASE 5, none of it designed or implemented:
 
-Full dashboard analytics and UX (Phase 4)
-Team-wide cross-testing, debugging, and demo preparation (Phase 5)
+Team-wide cross-testing, debugging, and demo preparation
+Any external-bank / model-adapter architecture. The system currently
+  supports exactly one model: the scikit-learn pipeline in app/models/
+  trained on the UCI German Credit dataset. Arbitrary external models are
+  NOT supported.
+The LLM provider decision. Report generation currently calls Groq and falls
+  back to a clearly labelled mock when GROQ_API_KEY is absent or generation
+  fails.
+A Phase 5 Definition of Done, which does not exist yet.
 
 Analytical thresholds (fairness, drift) have a single authoritative
 location and must not be independently defined per module. See
@@ -1013,9 +1038,9 @@ docs/thresholds.md. Those thresholds are project/industry conventions,
 NOT RBI requirements, and must never be presented as RBI requirements
 without a cited RBI source.
 
-The immediate goal is to record the Phase 3 checkpoint, close the documented
-Phase 3 follow-ups, and keep Phase 4 functionality out of scope until
-explicitly authorized.
+Phase 4 is closed for the purposes of this project review. Keep Phase 5
+functionality out of scope until the team explicitly authorizes it; nothing
+in Phase 5 is designed or implemented.
 
 21. Default Behavior for Claude Code
 

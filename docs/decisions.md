@@ -2102,3 +2102,136 @@ reviews their own panel can tick their line and add a date.
 of this project review. Phase 5 has not begun and nothing in Phase 5 is
 designed or implemented.
 
+---
+
+## 2026-09-13 — Phase 5 scope and model-agnostic assurance proposal
+
+**Status:** **PROPOSED / PENDING TEAM APPROVAL.** Nothing in this entry is
+approved. Phase 5 has not begun, no Phase 5 implementation has started, and no
+approval is attributed to any individual. The full proposal is
+`docs/phase5-allocation.md`.
+
+**What this entry records:** a proposal to reconcile a conflict already present
+in the repository, and the fairness/drift responsibilities that would follow if
+the team accepts it.
+
+### The conflict being reconciled
+
+- **The existing Phase 5 roadmap is testing- and demo-oriented.**
+  `docs/development-phases.md` (phase table) defines Phase 5 as *"Testing +
+  Demo | Team-wide cross-testing, debugging, docs, demo prep"*, and
+  `CLAUDE.md` §5 and `docs/TASK.md` §2 agree. That wording is **not changed**
+  by this entry.
+- **Model-agnostic assurance is recorded as future work but never allocated.**
+  The 2026-09-13 "Phase 4 checkpoint sign-off" entry lists, under *"Deferred to
+  Phase 5 (not started, not designed here)"*: *"any external-bank /
+  model-adapter architecture; the LLM provider decision; a Phase 5 Definition
+  of Done, which does not yet exist"*.
+- So the adapter direction is acknowledged but undesigned, unallocated, and
+  without completion criteria, while the phase it would occupy is officially
+  about testing and demo preparation. **This proposal exists to put that
+  question to the team rather than resolve it silently in code.**
+
+### Proposed objective
+
+**Phase 5 — Model-Agnostic Assurance + Local LLM.** Evolve the current
+single-model system toward a controlled model-adapter architecture while
+preserving deterministic analytical calculation in Python and end-to-end
+evidence provenance. Arbitrary model support without an approved adapter
+contract is a non-goal.
+
+### Proposed workstreams
+
+| ID | Workstream | Proposed owner |
+|---|---|---|
+| 5A | Model Assurance Contract | Khushi + Namitha |
+| 5B | Model Adapter | Khushi + Namitha |
+| 5C | Second model: Random Forest | Namitha |
+| 5D | Assurance against multiple models | All modules |
+| 5E | Local Hugging Face LLM | Nidhi + Khushi |
+| 5F | Multi-model dashboard integration | Khushi + all reviewers |
+| 5G | End-to-end demonstration + testing | All |
+
+### Proposed Arushi (fairness/drift) responsibilities
+
+- **5A:** supply the fairness/drift requirements of the assurance contract.
+- **5D:** fairness/drift compatibility across supported models, and the
+  cross-model comparison rules.
+- **5F:** fairness/drift presentation for multi-model assurance.
+- **5G:** the fairness/drift test matrix and regression integrity.
+- Throughout: configuration/threshold integrity —
+  `app/config/thresholds.py` remains the single source of truth, and no
+  threshold constant may appear in `app/fairness/` or `app/drift/`.
+
+### Proposed identity fields
+
+Neither `fairness_report()` nor `drift_report()` carries any identity today,
+which is why two models' results are currently indistinguishable.
+
+| Field | Fairness | Drift |
+|---|---|---|
+| `model_id` | Required | Required |
+| `model_version` | Required | Required |
+| `assurance_run_id` | Required | Required |
+| `dataset_id` / `dataset_version` | Optional provenance | Required |
+| `feature_space` / schema version | n/a | Required |
+| `adapter_id` | Optional provenance | Optional provenance |
+
+**`instance_id` is NOT required on fairness or drift aggregate results.**
+Fairness is population-level by design (Phase 3 decision); attaching
+record-level identity to a group statistic would misrepresent it.
+
+**Collision risk to close first.** Fairness evidence records carry no model
+identity, and `app/report/generate.py` routes them by `evidence_type` alone, so
+two models evaluated in one run would have their `fairness_group` records
+placed in the same report section, interleaved. This must be resolved before
+any two models are evaluated together.
+
+### Proposed drift comparability rule
+
+Two drift results may be compared directly only when `feature_space` matches,
+the feature schema/version matches, the reference and current dataset
+definitions are known and comparable, and `features_evaluated` are compatible.
+
+Because aggregate PSI and KS are **MAX across evaluated features**, and
+`features_evaluated` is the intersection of usable numeric columns, a
+different feature set changes what the maximum is taken over — and adding one
+volatile feature can change the reported PSI and its status with no change in
+the features the models share. A comparison violating any condition must be
+refused or explicitly flagged, never silently rendered side by side.
+
+### Backward compatibility requirement
+
+Frozen; no field may be renamed or removed, and any extension must be
+additive, optional, and defaulted:
+
+- **Fairness:** `protected_attribute`, `demographic_parity_diff`,
+  `disparate_impact_ratio`, `status`, `is_mock`, `groups`.
+- **Drift:** `features_evaluated`, `psi`, `ks_statistic`, `status`, `is_mock`,
+  `per_feature`.
+
+No change to PSI/KS or DPD/DI calculations, rounding behaviour, the
+`PASS`/`WARNING`/`FAIL`/`PENDING` vocabulary, threshold definitions, or MAX
+aggregation.
+
+### Approval required before implementation
+
+No fairness, drift, contract, adapter, model, LLM, schema, orchestration, or
+dashboard code may be written under this proposal until the team records a
+dated approval entry. Specifically unresolved:
+
+1. Whether model-agnostic assurance belongs to Phase 5 at all, or Phase 5
+   remains Testing + Demo.
+2. If adopted, where the existing Testing + Demo content goes.
+3. Who owns making `predict_batch()` accept a model — it gates 5C and 5D.
+4. Whether `ModelResult.probabilities` becomes optional (a model without
+   probability output currently breaks the API; fairness and drift never use
+   probabilities).
+5. Whether Phase 5 requires an allocation approval entry before
+   implementation, as Phase 4 did with D1-D9.
+
+**This pull request is governance only.** No application code, no schema, no
+test, and no threshold was changed. `docs/architecture.md` deliberately still
+describes the current single-model system, and `CLAUDE.md` §20 still declares
+Phase 4 — per the recorded convention, the current-phase declaration flips in
+the first Phase 5 *implementation* pull request, not in this one.

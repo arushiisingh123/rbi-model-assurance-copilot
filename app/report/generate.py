@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 DEFAULT_MODEL_NAME = "openai/gpt-oss-120b"
+DEFAULT_PROVIDER_LABEL = "Groq (openai/gpt-oss-120b)"
 INTERIM_SOURCE_LABEL = "INTERIM SINGLE-DOC: RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt"
 
 # Regulatory claim detection regex
@@ -549,6 +550,7 @@ def generate_report(
     llm_client: Optional[Any] = None,
     retrieval_fn: Optional[Any] = None,
     skip_live: bool = False,
+    provider_label: str = DEFAULT_PROVIDER_LABEL,
 ) -> Dict[str, Any]:
     """Generate a structured, three-layer assurance report (validating against ReportResult).
 
@@ -572,6 +574,9 @@ def generate_report(
         Injectable retrieval function or test double. If None, uses an isolated RAG retriever.
     skip_live : bool, optional
         If True, immediately raises ReportGenerationUnavailable without running any pipeline work.
+    provider_label : str, optional
+        Human-readable label for the LLM provider/model used to generate interpretations.
+        Defaults to "Groq (openai/gpt-oss-120b)".
 
     Returns
     -------
@@ -740,7 +745,7 @@ def generate_report(
     )
 
     disclaimers = [
-        "LLM-generated report text produced via Groq (openai/gpt-oss-120b). Technical findings are calculated by Python analytical modules and passed verbatim.",
+        f"LLM-generated report text produced via {provider_label}. Technical findings are calculated by Python analytical modules and passed verbatim.",
         "Retrieved evidence is sourced from the Phase 0 interim single-document excerpt (RBI IRAC Advances 2014), not a full verified RBI regulatory corpus.",
         "Regulatory basis is restricted to illustrative_rule_only or none; full cited_evidence requires the upcoming verified regulatory corpus.",
         "For sections without supporting evidence (NOT_FOUND), text is restricted to technical explanation with no regulatory claims.",

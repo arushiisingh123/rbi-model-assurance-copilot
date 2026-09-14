@@ -6,13 +6,14 @@ from app.api.main import app
 from app.api.schemas import (
     AssuranceResult,
     ComplianceResult,
+    DriftAssuranceEnvelope,
     ExplainabilityResult,
     FairnessAssuranceEnvelope,
     FairnessDriftResult,
     ModelResult,
     ReportResult,
 )
-from app.models.preprocessing import FEATURE_COLUMNS
+from app.models.preprocessing import DEFAULT_DATASET_PATH, FEATURE_COLUMNS
 
 client = TestClient(app)
 
@@ -204,5 +205,21 @@ def test_assurance_result_top_level_keys_unchanged():
     expected_top_keys = {"model", "explainability", "fairness_drift", "compliance", "note"}
     assert set(body.keys()) == expected_top_keys
     assert len(body.keys()) == 5
+
+
+def test_drift_assurance_endpoint():
+    response = client.get("/drift-assurance")
+    assert response.status_code == 200
+    body = response.json()
+    parsed = DriftAssuranceEnvelope(**body)
+    assert parsed.context.model_id == "german-credit-logistic-regression"
+    assert parsed.context.model_version == "0.1.0"
+    assert isinstance(parsed.context.assurance_run_id, str)
+    assert len(parsed.context.assurance_run_id) > 0
+    assert parsed.dataset_id == DEFAULT_DATASET_PATH
+    assert parsed.dataset_version is None
+    assert len(parsed.feature_space) == 16
+    assert parsed.result.is_mock is False
+    assert len(parsed.result.features_evaluated) > 0
 
 

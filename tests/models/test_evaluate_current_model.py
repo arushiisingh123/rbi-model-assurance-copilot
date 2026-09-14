@@ -146,3 +146,31 @@ def test_predict_batch_contract_unchanged_by_this_addition():
         "P(class == 1) = P(BAD / high credit risk)"
     )
     assert result["is_mock"] is False
+
+
+def test_evaluate_without_predict_proba_returns_none_roc_auc():
+    """When a model lacks predict_proba, evaluate() returns real hard-label
+    metrics (accuracy, precision, recall, f1) and roc_auc=None rather than raising.
+    """
+    import numpy as np
+
+    class FakeNoProbaModel:
+        def predict(self, X):
+            return np.zeros(len(X), dtype=int)
+
+    df = load_dataset(DEFAULT_DATASET_PATH)
+    X, y, _, _ = preprocess(df)
+    _, X_test, _, y_test = split_data(X, y, test_size=0.2, random_state=42)
+
+    fake_model = FakeNoProbaModel()
+    res = evaluate(fake_model, X_test, y_test)
+
+    assert res["roc_auc"] is None
+    assert isinstance(res["accuracy"], float)
+    assert isinstance(res["precision"], float)
+    assert isinstance(res["recall"], float)
+    assert isinstance(res["f1"], float)
+    assert 0.0 <= res["accuracy"] <= 1.0
+    assert res["n_test_samples"] == len(X_test)
+    assert res["is_mock"] is False
+

@@ -331,17 +331,29 @@ def evaluate(
     Returns
     -------
     Dict[str, Any]
-        Dictionary containing accuracy, precision, recall, f1, roc_auc,
-        n_test_samples, and is_mock=False.
+        Dictionary containing accuracy, precision, recall, f1, roc_auc
+        (Optional[float], None if model does not support probability
+        predictions), n_test_samples, and is_mock=False.
+
+    Notes
+    -----
+    accuracy/precision/recall/f1 never need probabilities; only roc_auc
+    does. A model without predict_proba still receives real hard-label
+    metrics, with roc_auc explicitly set to None rather than failing the
+    entire evaluation.
     """
     y_pred = model.predict(X_test)
-    y_prob = _positive_class_probabilities(model, X_test)
 
     accuracy = float(accuracy_score(y_test, y_pred))
     precision = float(precision_score(y_test, y_pred, zero_division=0))
     recall = float(recall_score(y_test, y_pred, zero_division=0))
     f1 = float(f1_score(y_test, y_pred, zero_division=0))
-    roc_auc = float(roc_auc_score(y_test, y_prob))
+
+    try:
+        y_prob = _positive_class_probabilities(model, X_test)
+        roc_auc: Optional[float] = float(roc_auc_score(y_test, y_prob))
+    except ProbabilityCapabilityUnavailable:
+        roc_auc = None
 
     return {
         "accuracy": accuracy,
@@ -352,6 +364,7 @@ def evaluate(
         "n_test_samples": int(len(y_test)),
         "is_mock": False,
     }
+
 
 
 def evaluate_current_model() -> Dict[str, Any]:

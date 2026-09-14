@@ -14,6 +14,7 @@ from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.orchestration import (
     build_assurance_result,
     build_evidence_records,
+    build_fairness_assurance_envelope,
     compute_real_compliance,
     compute_real_drift,
     compute_real_explainability,
@@ -26,6 +27,7 @@ from app.api.schemas import (
     AssuranceResult,
     ComplianceResult,
     ExplainabilityResult,
+    FairnessAssuranceEnvelope,
     FairnessDriftResult,
     ModelResult,
     ReportResult,
@@ -78,6 +80,17 @@ def get_fairness_drift() -> dict:
         "fairness": fairness_res,
         "drift": drift_res,
     }
+
+
+@app.get("/fairness-assurance", response_model=FairnessAssuranceEnvelope)
+def get_fairness_assurance() -> dict:
+    """Retrieve real fairness metrics wrapped in a Phase 5A identity envelope."""
+    raw_model = compute_real_model()
+    fairness_res = compute_real_fairness(raw_model)
+    model_version = raw_model.get("model_metadata", {}).get("version", "0.1.0")
+    return build_fairness_assurance_envelope(
+        fairness_res, model_version=model_version
+    )
 
 
 @app.get("/compliance", response_model=ComplianceResult)

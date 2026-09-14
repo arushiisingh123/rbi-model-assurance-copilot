@@ -7,6 +7,7 @@ from app.api.schemas import (
     AssuranceResult,
     ComplianceResult,
     ExplainabilityResult,
+    FairnessAssuranceEnvelope,
     FairnessDriftResult,
     ModelResult,
     ReportResult,
@@ -179,4 +180,29 @@ def test_report_endpoint():
     assert parsed.evidence_coverage.not_found == 4
     assert parsed.model_version == "0.1.0"
     assert len(parsed.disclaimers) > 0
+
+
+def test_fairness_assurance_endpoint():
+    response = client.get("/fairness-assurance")
+    assert response.status_code == 200
+    body = response.json()
+    parsed = FairnessAssuranceEnvelope(**body)
+    assert parsed.context.model_id == "german-credit-logistic-regression"
+    assert parsed.context.model_version == "0.1.0"
+    assert isinstance(parsed.context.assurance_run_id, str)
+    assert len(parsed.context.assurance_run_id) > 0
+    assert parsed.context.adapter_id is None
+    assert parsed.result.protected_attribute == "personal_status_and_sex"
+    assert parsed.result.is_mock is False
+    assert len(parsed.result.groups) > 0
+
+
+def test_assurance_result_top_level_keys_unchanged():
+    response = client.get("/assurance-result")
+    assert response.status_code == 200
+    body = response.json()
+    expected_top_keys = {"model", "explainability", "fairness_drift", "compliance", "note"}
+    assert set(body.keys()) == expected_top_keys
+    assert len(body.keys()) == 5
+
 

@@ -36,7 +36,8 @@ class ModelMetrics(BaseModel):
     precision: float
     recall: float
     f1: float
-    roc_auc: float
+    roc_auc: Optional[float] = None
+    roc_auc_status: Literal["computed", "unavailable_no_probabilities"] = "computed"
     n_test_samples: int
     is_mock: bool
 
@@ -131,6 +132,38 @@ class AssuranceResult(BaseModel):
     fairness_drift: FairnessDriftResult
     compliance: ComplianceResult
     note: str
+
+
+# =============================================================================
+# Phase 5A/5B Model Assurance Contract & Identity Envelopes (New, additive)
+# =============================================================================
+
+class AssuranceRunContext(BaseModel):
+    """Identity envelope threaded through one assurance run. New (5A)."""
+    model_id: str
+    model_version: str
+    assurance_run_id: str
+    adapter_id: Optional[str] = None
+
+
+class FairnessAssuranceEnvelope(BaseModel):
+    context: AssuranceRunContext
+    result: FairnessResult          # existing, unmodified
+
+
+class DriftAssuranceEnvelope(BaseModel):
+    context: AssuranceRunContext
+    dataset_id: str
+    dataset_version: Optional[str] = None
+    feature_space: str
+    result: DriftResult             # existing, unmodified
+
+
+class DriftComparisonResult(BaseModel):
+    comparability: Literal["COMPARABLE", "NOT_COMPARABLE"]
+    reason: Optional[str] = None
+    drift_a: DriftAssuranceEnvelope
+    drift_b: DriftAssuranceEnvelope
 
 
 # =============================================================================

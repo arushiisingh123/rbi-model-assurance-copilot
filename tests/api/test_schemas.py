@@ -4,13 +4,17 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     AssuranceResult,
+    AssuranceRunContext,
     Citation,
     ComplianceFinding,
     ComplianceResult,
+    DriftComparisonResult,
+    DriftAssuranceEnvelope,
     DriftPerFeature,
     DriftResult,
     EvidenceCoverage,
     ExplainabilityResult,
+    FairnessAssuranceEnvelope,
     FairnessDriftResult,
     FairnessGroup,
     FairnessResult,
@@ -685,6 +689,169 @@ def test_report_result_invalid_technical_finding_provenance_raises():
             source_module="app.fairness",
             provenance="unrecognized_provenance",
         )
+
+
+def test_assurance_run_context_missing_required_fields():
+    # Rejects construction missing model_id
+    with pytest.raises(ValidationError):
+        AssuranceRunContext(
+            model_version="0.1.0",
+            assurance_run_id="run-1",
+        )
+    # Rejects construction missing model_version
+    with pytest.raises(ValidationError):
+        AssuranceRunContext(
+            model_id="german-credit-logistic-regression",
+            assurance_run_id="run-1",
+        )
+    # Rejects construction missing assurance_run_id
+    with pytest.raises(ValidationError):
+        AssuranceRunContext(
+            model_id="german-credit-logistic-regression",
+            model_version="0.1.0",
+        )
+
+
+def test_assurance_run_context_accepts_without_adapter_id():
+    ctx = AssuranceRunContext(
+        model_id="german-credit-logistic-regression",
+        model_version="0.1.0",
+        assurance_run_id="run-12345",
+    )
+    assert ctx.model_id == "german-credit-logistic-regression"
+    assert ctx.model_version == "0.1.0"
+    assert ctx.assurance_run_id == "run-12345"
+    assert ctx.adapter_id is None
+
+
+def test_fairness_and_drift_assurance_envelopes_preserve_nested_results():
+    ctx = AssuranceRunContext(
+        model_id="german-credit-logistic-regression",
+        model_version="0.1.0",
+        assurance_run_id="run-12345",
+    )
+    fairness_payload = {
+        "protected_attribute": "personal_status_and_sex",
+        "demographic_parity_diff": 0.14,
+        "disparate_impact_ratio": 0.78,
+        "status": "WARNING",
+        "is_mock": False,
+        "groups": [
+            {"group": "A92", "count": 310, "favorable_count": 201, "selection_rate": 0.65},
+            {"group": "A93", "count": 548, "favorable_count": 432, "selection_rate": 0.79},
+        ],
+    }
+    bare_fairness = FairnessResult(**fairness_payload)
+    envelope_fairness = FairnessAssuranceEnvelope(
+        context=ctx,
+        result=fairness_payload,
+    )
+    assert envelope_fairness.result.model_dump() == bare_fairness.model_dump()
+    assert envelope_fairness.context == ctx
+
+    drift_payload = {
+        "features_evaluated": ["duration_months", "credit_amount"],
+        "psi": 0.09,
+        "ks_statistic": 0.11,
+        "status": "PASS",
+        "is_mock": False,
+        "note": "No drift detected",
+        "per_feature": [
+            {"feature": "duration_months", "psi": 0.08, "ks_statistic": 0.10},
+        ],
+    }
+    bare_drift = DriftResult(**drift_payload)
+    envelope_drift = DriftAssuranceEnvelope(
+        context=ctx,
+        dataset_id="german_credit_test",
+        dataset_version="1.0",
+        feature_space="0123456789abcdef",
+        result=drift_payload,
+    )
+    assert envelope_drift.result.model_dump() == bare_drift.model_dump()
+    assert envelope_drift.dataset_id == "german_credit_test"
+    assert envelope_drift.dataset_version == "1.0"
+    assert envelope_drift.feature_space == "0123456789abcdef"
+    assert envelope_drift.context == ctx
+
+
+def test_model_metrics_existing_caller_backward_compatibility():
+    # Existing construction pattern without roc_auc_status validates and defaults to "computed"
+    metrics = ModelMetrics(
+        accuracy=0.85,
+        precision=0.80,
+        recall=0.75,
+        f1=0.77,
+        roc_auc=0.91,
+        n_test_samples=200,
+        is_mock=False,
+    )
+    assert metrics.roc_auc == 0.91
+    assert metrics.roc_auc_status == "computed"
+
+
+def test_model_metrics_unavailable_probabilities():
+    # Validates when roc_auc is None and roc_auc_status is "unavailable_no_probabilities"
+    metrics = ModelMetrics(
+        accuracy=0.85,
+        precision=0.80,
+        recall=0.75,
+        f1=0.77,
+        roc_auc=None,
+        roc_auc_status="unavailable_no_probabilities",
+        n_test_samples=200,
+        is_mock=False,
+    )
+    assert metrics.roc_auc is None
+    assert metrics.roc_auc_status == "unavailable_no_probabilities"
+
+
+def test_drift_comparison_result_validation():
+    ctx = AssuranceRunContext(
+        model_id="german-credit-logistic-regression",
+        model_version="0.1.0",
+        assurance_run_id="run-1",
+    )
+    drift_env = DriftAssuranceEnvelope(
+        context=ctx,
+        dataset_id="german_credit",
+        feature_space="abcdef0123456789",
+        result=DriftResult(
+            features_evaluated=["duration_months"],
+            psi=0.05,
+            ks_statistic=0.08,
+            status="PASS",
+            is_mock=False,
+        ),
+    )
+
+    # Valid COMPARABLE
+    comp = DriftComparisonResult(
+        comparability="COMPARABLE",
+        reason=None,
+        drift_a=drift_env,
+        drift_b=drift_env,
+    )
+    assert comp.comparability == "COMPARABLE"
+
+    # Valid NOT_COMPARABLE
+    not_comp = DriftComparisonResult(
+        comparability="NOT_COMPARABLE",
+        reason="Different feature spaces",
+        drift_a=drift_env,
+        drift_b=drift_env,
+    )
+    assert not_comp.comparability == "NOT_COMPARABLE"
+    assert not_comp.reason == "Different feature spaces"
+
+    # Invalid comparability value rejected
+    with pytest.raises(ValidationError):
+        DriftComparisonResult(
+            comparability="PARTIALLY_COMPARABLE",
+            drift_a=drift_env,
+            drift_b=drift_env,
+        )
+
 
 
 

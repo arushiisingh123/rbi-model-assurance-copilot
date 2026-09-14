@@ -3,9 +3,13 @@
 Pure Python module with zero FastAPI/uvicorn dependencies. Orchestrates end-to-end
 evaluation across Model, Explainability, Fairness, Drift, and RBI Compliance modules.
 """
+import hashlib
 from typing import Any, Dict, List, Optional
+import uuid
+
 import pandas as pd
 
+from app.api.schemas import AssuranceRunContext
 from app.compliance.compliance import evaluate_compliance
 from app.drift.drift import drift_report
 from app.explainability.evidence import (
@@ -258,6 +262,87 @@ _compute_real_fairness = compute_real_fairness
 _compute_real_drift = compute_real_drift
 _compute_real_compliance = compute_real_compliance
 _compute_real_model_metrics = compute_real_model_metrics
+
+
+# =============================================================================
+# Phase 5A/5B Identity & Context Helpers
+# =============================================================================
+
+def mint_assurance_run_id() -> str:
+    """Mint one unique assurance_run_id per assurance run using uuid.uuid4()."""
+    return str(uuid.uuid4())
+
+
+def _current_model_id() -> str:
+    """Stable logical model identity for the current default model.
+
+    TODO(Namitha adapter, Phase 5A/5B): this is a hardcoded stand-in
+    for model_metadata["model_id"] or an adapter's .model_id
+    attribute, neither of which exists yet in app/models/model.py.
+    Replace this function's body with the real source once Namitha's
+    adapter work lands (docs/phase5-5a5b-khushi-draft.md, Part A).
+    Nothing that calls this function should need to change when that
+    happens -- only this function's internals.
+    """
+    return "german-credit-logistic-regression"
+
+
+def _derive_feature_space(features_evaluated: list[str]) -> str:
+    """Stable fingerprint of the feature set a DriftResult actually evaluated.
+
+    Raises ValueError on an empty list rather than hashing an empty
+    string -- an empty features_evaluated means drift_report() reached
+    its PENDING path (nothing was evaluable), and a feature_space
+    value in that case would fabricate a fingerprint for a
+    measurement that didn't happen. Callers must not construct a
+    DriftAssuranceEnvelope from a PENDING DriftResult.
+    """
+    if not features_evaluated:
+        raise ValueError(
+            "Cannot derive feature_space from an empty features_evaluated "
+            "list (drift_report() returned its PENDING path -- nothing was "
+            "evaluated, so there is no feature space to fingerprint)."
+        )
+    joined = "|".join(features_evaluated)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+
+def build_assurance_run_context(
+    assurance_run_id: str,
+    *,
+    model_version: str = "0.1.0",
+    adapter_id: Optional[str] = None,
+) -> AssuranceRunContext:
+    """Demonstration helper constructing an AssuranceRunContext for testing/integration.
+
+    Combines the minted assurance_run_id with _current_model_id() and model_version.
+    """
+    return AssuranceRunContext(
+        model_id=_current_model_id(),
+        model_version=model_version,
+        assurance_run_id=assurance_run_id,
+        adapter_id=adapter_id,
+    )
+
+
+def build_fairness_assurance_envelope(
+    fairness_dict: Dict[str, Any],
+    *,
+    model_version: str,
+) -> Dict[str, Any]:
+    """Wrap a real FairnessResult in a Phase 5A identity envelope.
+
+    Pure wrapping -- fairness_dict must already be a real
+    compute_real_fairness() output; nothing is recalculated here.
+    """
+    assurance_run_id = mint_assurance_run_id()
+    context = build_assurance_run_context(
+        assurance_run_id, model_version=model_version
+    )
+    return {
+        "context": context.model_dump(),
+        "result": fairness_dict,
+    }
 
 
 def build_assurance_result() -> Dict[str, Any]:

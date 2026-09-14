@@ -38,6 +38,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -67,6 +68,13 @@ DEFAULT_MODEL_ARTIFACT_PATH = "app/models/artifacts/credit_model.joblib"
 MODEL_ID = "german-credit-logistic-regression"
 MODEL_VERSION = "0.1.0"
 MODEL_TYPE = "logistic_regression"
+
+# Phase 5C -- second supported model (Random Forest). Distinct artifact path
+# so training/loading RF can never overwrite the LR artifact above.
+RF_MODEL_ARTIFACT_PATH = "app/models/artifacts/credit_model_random_forest.joblib"
+RF_MODEL_ID = "german-credit-random-forest"
+RF_MODEL_VERSION = "0.1.0"
+RF_MODEL_TYPE = "random_forest"
 
 class ProbabilityCapabilityUnavailable(Exception):
     """Raised when an operation requires probability output but the model does not support it."""
@@ -104,6 +112,33 @@ def _positive_class_probabilities(model: Any, X: pd.DataFrame) -> np.ndarray:
     return proba[:, classes.index(POSITIVE_CLASS)]
 
 
+def _build_preprocessor(
+    categorical_cols: List[str],
+    numeric_cols: List[str],
+) -> ColumnTransformer:
+    """Shared preprocessing step: one-hot encode categoricals, scale numerics.
+
+    Used by every model-type pipeline builder (``build_pipeline()`` for
+    Logistic Regression, ``build_rf_pipeline()`` for Random Forest, and any
+    future model) so preprocessing behavior never diverges by model type.
+    """
+    return ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                categorical_cols,
+            ),
+            (
+                "num",
+                StandardScaler(),
+                numeric_cols,
+            ),
+        ],
+        remainder="drop",
+    )
+
+
 def build_pipeline(
     categorical_cols: Optional[List[str]] = None,
     numeric_cols: Optional[List[str]] = None,
@@ -136,26 +171,74 @@ def build_pipeline(
     if numeric_cols is None:
         numeric_cols = NUMERIC_FEATURES
 
-    preprocessor = ColumnTransformer(
-        transformers=[
-            (
-                "cat",
-                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-                categorical_cols,
-            ),
-            (
-                "num",
-                StandardScaler(),
-                numeric_cols,
-            ),
-        ],
-        remainder="drop",
-    )
+    preprocessor = _build_preprocessor(categorical_cols, numeric_cols)
 
     classifier = LogisticRegression(
         max_iter=max_iter,
         random_state=random_state,
         solver="lbfgs",
+    )
+
+    pipeline = Pipeline(
+        steps=[
+            ("preprocessor", preprocessor),
+            ("classifier", classifier),
+        ]
+    )
+    return pipeline
+
+
+def build_rf_pipeline(
+    categorical_cols: Optional[List[str]] = None,
+    numeric_cols: Optional[List[str]] = None,
+    random_state: int = 42,
+    n_estimators: int = 200,
+    max_depth: Optional[int] = 10,
+    min_samples_leaf: int = 2,
+) -> Pipeline:
+    """Build an sklearn Pipeline combining preprocessing and RandomForestClassifier.
+
+    Phase 5C: the second supported model. Reuses the exact same preprocessing
+    approach as ``build_pipeline()`` (one-hot encoding + scaling via
+    ``_build_preprocessor()``) so the two models differ only in classifier.
+    StandardScaler is a no-op for tree splits but is kept for consistency
+    with the shared preprocessing step rather than diverging per model type.
+
+    Hyperparameters are conservative, fixed defaults -- no tuning performed
+    in Phase 5C.
+
+    Parameters
+    ----------
+    categorical_cols : Optional[List[str]]
+        Names of categorical columns to encode.
+    numeric_cols : Optional[List[str]]
+        Names of numeric columns to scale.
+    random_state : int, default=42
+        Random seed for classifier reproducibility.
+    n_estimators : int, default=200
+        Number of trees in the forest.
+    max_depth : Optional[int], default=10
+        Maximum tree depth (bounded to limit overfitting on 800 training rows).
+    min_samples_leaf : int, default=2
+        Minimum samples required at a leaf node.
+
+    Returns
+    -------
+    Pipeline
+        Unfitted sklearn Pipeline.
+    """
+    if categorical_cols is None:
+        categorical_cols = CATEGORICAL_FEATURES
+    if numeric_cols is None:
+        numeric_cols = NUMERIC_FEATURES
+
+    preprocessor = _build_preprocessor(categorical_cols, numeric_cols)
+
+    classifier = RandomForestClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        random_state=random_state,
     )
 
     pipeline = Pipeline(
@@ -427,6 +510,44 @@ def _get_or_train_default_model() -> Pipeline:
     return result["model"]
 
 
+def _get_or_train_default_rf_model() -> Pipeline:
+    """Return the persisted default Random Forest model, training + saving it
+    once if absent.
+
+    Phase 5C counterpart to ``_get_or_train_default_model()``. Deliberately
+    does not call ``train()`` (which is hardcoded to
+    ``build_pipeline()``/Logistic Regression and is kept unchanged per the
+    approved Phase 5C plan); instead it repeats the same
+    load -> preprocess -> split -> fit -> evaluate -> save sequence with
+    ``build_rf_pipeline()``, on the same deterministic dataset and split
+    (``random_state=42``, canonical 80/20 stratified split) so the RF
+    artifact is reproducible exactly like the LR one. Saves to
+    ``RF_MODEL_ARTIFACT_PATH`` -- the LR artifact is never touched.
+    """
+    if os.path.exists(RF_MODEL_ARTIFACT_PATH):
+        try:
+            return load(RF_MODEL_ARTIFACT_PATH)
+        except Exception:
+            # Corrupt, unreadable, or stale-schema artifact: fall back to a
+            # fresh deterministic rebuild, mirroring the LR self-heal above.
+            pass
+
+    df = load_dataset(DEFAULT_DATASET_PATH)
+    X, y, cat_cols, num_cols = preprocess(df)
+    X_train, X_test, y_train, y_test = split_data(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    model = build_rf_pipeline(
+        categorical_cols=cat_cols,
+        numeric_cols=num_cols,
+        random_state=42,
+    )
+    model.fit(X_train, y_train)
+    save(model, path=RF_MODEL_ARTIFACT_PATH)
+    return model
+
+
 class ModelAdapter(ABC):
     """Model-facing boundary so downstream assurance code (explainability,
     orchestration) does not need separate per-model-type interfaces.
@@ -524,6 +645,60 @@ class LogisticRegressionAdapter(ModelAdapter):
         this module, not a newly invented sample.
         """
         model = _get_or_train_default_model()
+        df = load_dataset(DEFAULT_DATASET_PATH)
+        X, y, _, _ = preprocess(df)
+        X_train, _, _, _ = split_data(X, y, test_size=0.2, random_state=42)
+        background = X_train.reset_index(drop=True)
+        return cls(model, background=background)
+
+
+class RandomForestAdapter(ModelAdapter):
+    """Adapter wrapping the Random Forest pipeline (Phase 5C).
+
+    Same shape as ``LogisticRegressionAdapter``: wraps a fitted
+    ``sklearn.pipeline.Pipeline`` (preprocessing + ``RandomForestClassifier``)
+    trained on the same dataset, same 20 raw features, same target polarity,
+    and the same deterministic 80/20 split. ``predict_proba()`` returns the
+    same 1-D ``P(class == 1) == P(BAD)`` vector as every other adapter, via
+    the same shared ``_positive_class_probabilities()`` helper.
+    """
+
+    model_type = RF_MODEL_TYPE
+
+    def __init__(self, fitted_model: Any, background: Optional[pd.DataFrame] = None):
+        self.model_id = RF_MODEL_ID
+        self.model_version = RF_MODEL_VERSION
+        self.feature_names: List[str] = list(FEATURE_COLUMNS)
+        self._fitted_model = fitted_model
+        self._background = background
+
+    @property
+    def supports_probability(self) -> bool:
+        return hasattr(self._fitted_model, "predict_proba")
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        return self._fitted_model.predict(X)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        return _positive_class_probabilities(self._fitted_model, X)
+
+    def load_fitted_model(self) -> Any:
+        return self._fitted_model
+
+    def background_data(self) -> Optional[pd.DataFrame]:
+        return self._background
+
+    @classmethod
+    def load_default(cls) -> "RandomForestAdapter":
+        """Build an adapter around the current persisted default RF model.
+
+        ``background_data()`` on the result is the same canonical
+        deterministic training split (``split_data(..., test_size=0.2,
+        random_state=42)`` on the approved dataset) that
+        ``LogisticRegressionAdapter.load_default()`` uses -- the same
+        source, not a separately derived sample.
+        """
+        model = _get_or_train_default_rf_model()
         df = load_dataset(DEFAULT_DATASET_PATH)
         X, y, _, _ = preprocess(df)
         X_train, _, _, _ = split_data(X, y, test_size=0.2, random_state=42)

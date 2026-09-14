@@ -10,8 +10,12 @@ from app.models.model import (
     MODEL_ID,
     MODEL_TYPE,
     MODEL_VERSION,
+    RF_MODEL_ID,
+    RF_MODEL_TYPE,
+    RF_MODEL_VERSION,
     LogisticRegressionAdapter,
     ModelAdapter,
+    RandomForestAdapter,
     evaluate,
     evaluate_current_model,
     load,
@@ -68,4 +72,9 @@ __all__ = [
     # Model adapter boundary (Phase 5A/5B)
     "ModelAdapter",
     "LogisticRegressionAdapter",
+    # Second model: Random Forest (Phase 5C)
+    "RF_MODEL_ID",
+    "RF_MODEL_TYPE",
+    "RF_MODEL_VERSION",
+    "RandomForestAdapter",
 ]

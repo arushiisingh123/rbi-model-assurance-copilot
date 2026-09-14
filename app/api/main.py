@@ -14,6 +14,7 @@ from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.orchestration import (
     build_assurance_result,
     build_evidence_records,
+    build_drift_assurance_envelope,
     build_fairness_assurance_envelope,
     compute_real_compliance,
     compute_real_drift,
@@ -26,6 +27,7 @@ from app.api.orchestration import (
 from app.api.schemas import (
     AssuranceResult,
     ComplianceResult,
+    DriftAssuranceEnvelope,
     ExplainabilityResult,
     FairnessAssuranceEnvelope,
     FairnessDriftResult,
@@ -91,6 +93,18 @@ def get_fairness_assurance() -> dict:
     return build_fairness_assurance_envelope(
         fairness_res, model_version=model_version
     )
+
+
+@app.get("/drift-assurance", response_model=DriftAssuranceEnvelope)
+def get_drift_assurance() -> dict:
+    """Retrieve real drift metrics wrapped in a Phase 5A identity envelope."""
+    raw_model = compute_real_model()
+    drift_res = compute_real_drift(raw_model)
+    model_version = raw_model.get("model_metadata", {}).get("version", "0.1.0")
+    try:
+        return build_drift_assurance_envelope(drift_res, model_version=model_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @app.get("/compliance", response_model=ComplianceResult)

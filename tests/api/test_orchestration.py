@@ -18,14 +18,17 @@ from app.api.orchestration import (
     _derive_feature_space,
     build_assurance_result,
     build_assurance_run_context,
+    build_drift_assurance_envelope,
     build_fairness_assurance_envelope,
     compute_real_drift,
     compute_real_fairness,
     compute_real_model,
+    compute_real_model_metrics,
     mint_assurance_run_id,
     summarize,
 )
-from app.api.schemas import FairnessAssuranceEnvelope, FairnessResult
+from app.api.schemas import DriftAssuranceEnvelope, FairnessAssuranceEnvelope, FairnessResult
+from app.models.preprocessing import DEFAULT_DATASET_PATH
 
 
 def test_orchestration_zero_fastapi_imports():
@@ -333,5 +336,52 @@ def test_build_assurance_result_exact_five_top_level_keys():
     expected_keys = {"model", "explainability", "fairness_drift", "compliance", "note"}
     assert set(res.keys()) == expected_keys
     assert len(res.keys()) == 5
+
+
+def test_compute_real_model_metrics_returns_computed_roc_auc_status():
+    """Assert compute_real_model_metrics() against real LR model returns roc_auc_status == 'computed'."""
+    metrics = compute_real_model_metrics()
+    assert metrics["roc_auc_status"] == "computed"
+    assert isinstance(metrics["roc_auc"], float)
+    assert 0.0 <= metrics["roc_auc"] <= 1.0
+    assert metrics["is_mock"] is False
+
+
+def test_build_drift_assurance_envelope_with_real_drift():
+    """Wrap real compute_real_drift() output in DriftAssuranceEnvelope."""
+    raw_model = compute_real_model()
+    real_drift = compute_real_drift(raw_model)
+    model_version = "0.1.0"
+
+    envelope_dict = build_drift_assurance_envelope(
+        real_drift, model_version=model_version
+    )
+
+    # Validates against DriftAssuranceEnvelope
+    parsed = DriftAssuranceEnvelope(**envelope_dict)
+    assert parsed.context.model_id == "german-credit-logistic-regression"
+    assert parsed.context.model_version == "0.1.0"
+    assert isinstance(parsed.context.assurance_run_id, str)
+    assert len(parsed.context.assurance_run_id) > 0
+    assert parsed.dataset_id == DEFAULT_DATASET_PATH
+    assert parsed.dataset_version is None
+    assert len(parsed.feature_space) == 16
+
+    # Result matches the input drift_dict field-for-field
+    assert envelope_dict["result"] == real_drift
+
+
+def test_build_drift_assurance_envelope_empty_features_raises():
+    """Empty features_evaluated (PENDING path) raises ValueError."""
+    fake_drift = {
+        "drift_detected": False,
+        "features_evaluated": [],
+        "features_with_drift": [],
+        "per_feature": {},
+        "is_mock": False,
+    }
+    with pytest.raises(ValueError) as exc_info:
+        build_drift_assurance_envelope(fake_drift, model_version="0.1.0")
+    assert "PENDING" in str(exc_info.value) or "empty" in str(exc_info.value)
 
 

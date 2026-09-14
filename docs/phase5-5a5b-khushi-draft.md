@@ -170,7 +170,7 @@ No new validator mechanism needed. Required-field-no-default is the entire valid
 
 ### B4. Run identity propagation
 
-`build_assurance_result()` becomes the minting authority — generates one `assurance_run_id` at the top of the function, passes it explicitly into whichever `compute_real_*` calls produce envelope-wrapped results. Does **not** follow `ReportResult.report_id`'s per-call-minting pattern.
+Each envelope-wrapping function (`build_fairness_assurance_envelope()`, `build_drift_assurance_envelope()`) mints its own `assurance_run_id` via `mint_assurance_run_id()`, constructing an `AssuranceRunContext` directly for the envelope. `build_assurance_result()` remains unchanged with its original 5 top-level keys rather than acting as a central minting authority.
 
 ### B5. `feature_space` — derived, not separately constructed (resolved with Arushi)
 
@@ -184,9 +184,12 @@ match what drift actually evaluated. This resolves Arushi's concern
 that orchestration simply constructing the value could silently
 diverge from reality.
 
-`dataset_id`/`dataset_version` remain flagged as depending on 5B/5C
-work (per §B5's original note) — `compute_real_drift()` still
-hardcodes its dataset import today.
+**Status update (2026-09-15):** dataset_id resolved -- there is exactly
+one dataset in this system, so dataset_id is
+app.models.preprocessing.DEFAULT_DATASET_PATH's real value, not an
+invented scheme. Decided by Khushi in the absence of any existing
+dataset-identity concept; revisit once multi-dataset support exists.
+
 
 ### B6. `NOT_COMPARABLE` behavior — enforced, not advisory (resolved with Arushi)
 

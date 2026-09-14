@@ -19,7 +19,8 @@ from app.explainability.evidence import (
 from app.explainability.explain import explain
 from app.fairness.evidence import fairness_evidence
 from app.fairness.fairness import fairness_report
-from app.models.model import predict_batch
+from app.models.model import MODEL_ID, predict_batch
+from app.models.preprocessing import DEFAULT_DATASET_PATH
 
 # LIME is materially more expensive per row than SHAP, so the explained frame
 # is capped. Declared once and used by both the explainability call and the
@@ -44,7 +45,12 @@ def compute_real_model_metrics() -> Dict[str, Any]:
     """Evaluate held-out metrics for the current trained credit model."""
     from app.models.model import evaluate_current_model
 
-    return evaluate_current_model()
+    raw_metrics = evaluate_current_model()
+    roc_auc_status = (
+        "computed" if raw_metrics.get("roc_auc") is not None
+        else "unavailable_no_probabilities"
+    )
+    return {**raw_metrics, "roc_auc_status": roc_auc_status}
 
 
 def format_model_for_api(model_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -276,15 +282,10 @@ def mint_assurance_run_id() -> str:
 def _current_model_id() -> str:
     """Stable logical model identity for the current default model.
 
-    TODO(Namitha adapter, Phase 5A/5B): this is a hardcoded stand-in
-    for model_metadata["model_id"] or an adapter's .model_id
-    attribute, neither of which exists yet in app/models/model.py.
-    Replace this function's body with the real source once Namitha's
-    adapter work lands (docs/phase5-5a5b-khushi-draft.md, Part A).
-    Nothing that calls this function should need to change when that
-    happens -- only this function's internals.
+    Sourced from app.models.model.MODEL_ID (Namitha's Phase 5A/5B
+    model adapter foundation, merged PR #41).
     """
-    return "german-credit-logistic-regression"
+    return MODEL_ID
 
 
 def _derive_feature_space(features_evaluated: list[str]) -> str:
@@ -342,6 +343,43 @@ def build_fairness_assurance_envelope(
     return {
         "context": context.model_dump(),
         "result": fairness_dict,
+    }
+
+
+def _current_dataset_id() -> str:
+    """Identifier for the dataset currently used by drift evaluation.
+
+    There is exactly one dataset in this system today
+    (app.models.preprocessing.DEFAULT_DATASET_PATH) -- this returns
+    that real, existing value rather than inventing a naming scheme.
+    Revisit once multi-dataset support exists.
+    """
+    return DEFAULT_DATASET_PATH
+
+
+def build_drift_assurance_envelope(
+    drift_dict: Dict[str, Any],
+    *,
+    model_version: str,
+) -> Dict[str, Any]:
+    """Wrap a real DriftResult in a Phase 5A identity envelope.
+
+    Raises ValueError if drift_dict['features_evaluated'] is empty
+    (the drift_report() PENDING path) -- propagates
+    _derive_feature_space()'s refusal to fingerprint nothing;
+    callers must not build an envelope from a PENDING drift result.
+    """
+    assurance_run_id = mint_assurance_run_id()
+    context = build_assurance_run_context(
+        assurance_run_id, model_version=model_version
+    )
+    feature_space = _derive_feature_space(drift_dict["features_evaluated"])
+    return {
+        "context": context.model_dump(),
+        "dataset_id": _current_dataset_id(),
+        "dataset_version": None,
+        "feature_space": feature_space,
+        "result": drift_dict,
     }
 
 

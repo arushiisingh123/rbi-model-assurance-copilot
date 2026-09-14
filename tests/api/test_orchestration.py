@@ -14,9 +14,18 @@ import pytest
 import run_assurance
 from app.api.orchestration import (
     ASSURANCE_NOTE,
+    _current_model_id,
+    _derive_feature_space,
     build_assurance_result,
+    build_assurance_run_context,
+    build_fairness_assurance_envelope,
+    compute_real_drift,
+    compute_real_fairness,
+    compute_real_model,
+    mint_assurance_run_id,
     summarize,
 )
+from app.api.schemas import FairnessAssuranceEnvelope, FairnessResult
 
 
 def test_orchestration_zero_fastapi_imports():
@@ -220,3 +229,109 @@ def test_run_assurance_subprocess():
     assert "AI Model Risk & Assurance Copilot - Assurance Report" in proc.stdout
     assert "Drift:          PASS" in proc.stdout
     assert "Per-Domain Status:" in proc.stdout
+
+
+def test_mint_assurance_run_id_consecutive_calls_unique():
+    """Two consecutive calls that mint an assurance_run_id produce two different values."""
+    id1 = mint_assurance_run_id()
+    id2 = mint_assurance_run_id()
+    assert isinstance(id1, str) and len(id1) > 0
+    assert isinstance(id2, str) and len(id2) > 0
+    assert id1 != id2
+
+
+def test_current_model_id_default():
+    """_current_model_id() returns 'german-credit-logistic-regression' today."""
+    assert _current_model_id() == "german-credit-logistic-regression"
+
+
+def test_swap_proof_current_model_id_monkeypatch(monkeypatch):
+    """Assert AssuranceRunContext built from _current_model_id reflects monkeypatched value."""
+    monkeypatch.setattr(
+        "app.api.orchestration._current_model_id",
+        lambda: "german-credit-random-forest",
+    )
+    ctx = build_assurance_run_context(
+        assurance_run_id="run-test-123",
+        model_version="0.2.0",
+    )
+    assert ctx.model_id == "german-credit-random-forest"
+    assert ctx.model_version == "0.2.0"
+    assert ctx.assurance_run_id == "run-test-123"
+
+
+def test_derive_feature_space_deterministic():
+    """_derive_feature_space(): same input list twice -> same hash (string equal and length 16)."""
+    features = ["duration_months", "credit_amount", "age_years"]
+    h1 = _derive_feature_space(features)
+    h2 = _derive_feature_space(features)
+    assert h1 == h2
+    assert len(h1) == 16
+    assert isinstance(h1, str)
+
+
+def test_derive_feature_space_different_inputs():
+    """_derive_feature_space(): two different feature lists -> different hashes."""
+    h1 = _derive_feature_space(["feat_a", "feat_b"])
+    h2 = _derive_feature_space(["feat_a", "feat_c"])
+    assert h1 != h2
+    assert len(h1) == 16
+    assert len(h2) == 16
+
+
+def test_derive_feature_space_empty_raises():
+    """_derive_feature_space(): empty list -> raises ValueError with message mentioning PENDING or empty."""
+    with pytest.raises(ValueError) as exc_info:
+        _derive_feature_space([])
+    msg = str(exc_info.value)
+    assert "PENDING" in msg or "empty" in msg
+
+
+def test_derive_feature_space_real_drift_output():
+    """_derive_feature_space(): called against a REAL drift_report() output."""
+    raw_model = compute_real_model()
+    drift_res = compute_real_drift(raw_model)
+    features_evaluated = drift_res["features_evaluated"]
+
+    assert isinstance(features_evaluated, list)
+    assert len(features_evaluated) > 0
+    assert all(isinstance(f, str) for f in features_evaluated)
+
+    fingerprint = _derive_feature_space(features_evaluated)
+    assert len(fingerprint) == 16
+    assert isinstance(fingerprint, str)
+    # Confirm stability
+    assert fingerprint == _derive_feature_space(features_evaluated)
+
+
+def test_build_fairness_assurance_envelope_with_real_fairness():
+    """Wrap real compute_real_fairness() output in FairnessAssuranceEnvelope."""
+    raw_model = compute_real_model()
+    real_fairness = compute_real_fairness(raw_model)
+    model_version = "0.1.0"
+
+    envelope_dict = build_fairness_assurance_envelope(
+        real_fairness, model_version=model_version
+    )
+
+    # Validates against FairnessAssuranceEnvelope
+    parsed = FairnessAssuranceEnvelope(**envelope_dict)
+    assert parsed.context.model_id == "german-credit-logistic-regression"
+    assert parsed.context.model_version == "0.1.0"
+    assert isinstance(parsed.context.assurance_run_id, str)
+    assert len(parsed.context.assurance_run_id) > 0
+    assert parsed.context.adapter_id is None
+
+    # Result matches the input fairness_dict's fields exactly (byte-identical)
+    assert envelope_dict["result"] == real_fairness
+    assert parsed.result.model_dump() == FairnessResult(**real_fairness).model_dump()
+
+
+def test_build_assurance_result_exact_five_top_level_keys():
+    """Verify build_assurance_result still returns exactly the 5 original top-level keys."""
+    res = build_assurance_result()
+    expected_keys = {"model", "explainability", "fairness_drift", "compliance", "note"}
+    assert set(res.keys()) == expected_keys
+    assert len(res.keys()) == 5
+
+

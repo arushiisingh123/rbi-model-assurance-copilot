@@ -7,8 +7,11 @@ modules can read the model contract without guessing.
 
 from app.models.model import (
     LABEL_SEMANTICS,
+    MODEL_ID,
     MODEL_TYPE,
     MODEL_VERSION,
+    LogisticRegressionAdapter,
+    ModelAdapter,
     evaluate,
     evaluate_current_model,
     load,
@@ -59,6 +62,10 @@ __all__ = [
     "FAVORABLE_OUTCOME_LABEL",
     "LABEL_SEMANTICS",
     # Model identity
+    "MODEL_ID",
     "MODEL_TYPE",
     "MODEL_VERSION",
+    # Model adapter boundary (Phase 5A/5B)
+    "ModelAdapter",
+    "LogisticRegressionAdapter",
 ]

@@ -2328,4 +2328,24 @@ team review before any implementation.
 answers (not inferred from general chat consensus, unlike the earlier
 2026-09-13 entry this supersedes).
 
+---
 
+### 2026-09-14 — 5A/5B implementation cleared to begin
+
+**Status:** Approved — Arushi gave explicit go-ahead to begin 5A/5B
+implementation, relayed by Khushi (not a direct written quote from
+Arushi in this repo — recorded as Khushi's account of the
+conversation, same honesty standard as other entries this session).
+
+**Context:** The combined 5A/5B design spec (docs/phase5-5a5b-khushi-draft.md)
+has Namitha's formal model-side write-up incorporated and Arushi's 3
+fairness/drift review points (feature_space derivation, unchanged
+fairness_report()/drift_report() signatures, enforced NOT_COMPARABLE)
+resolved. Arushi confirmed the design is aligned from the fairness/
+drift side and gave the go-ahead to begin implementation, superseding
+the earlier P3 entry's "I don't want implementation to begin while the
+phase is still proposed/pending" — that concern is now addressed by
+this explicit approval.
+
+**Recorded by:** Khushi. If Arushi's understanding differs from what's
+written here, raise it and this entry will be corrected.

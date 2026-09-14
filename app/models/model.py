@@ -30,6 +30,7 @@ Public model contract (Phase 1)
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 import os
 from typing import Any, Dict, List, Optional
 
@@ -63,9 +64,12 @@ from app.models.preprocessing import (
 )
 
 DEFAULT_MODEL_ARTIFACT_PATH = "app/models/artifacts/credit_model.joblib"
+MODEL_ID = "german-credit-logistic-regression"
 MODEL_VERSION = "0.1.0"
 MODEL_TYPE = "logistic_regression"
 
+class ProbabilityCapabilityUnavailable(Exception):
+    """Raised when an operation requires probability output but the model does not support it."""
 # Project-agreed target label semantics, surfaced in model_metadata so every
 # downstream consumer reads the same contract instead of assuming a polarity.
 # 0 = GOOD (low risk), 1 = BAD (high risk / default) = positive class.
@@ -86,6 +90,10 @@ def _positive_class_probabilities(model: Any, X: pd.DataFrame) -> np.ndarray:
     positive class, but this looks the column up explicitly so the contract
     ("probabilities mean P(BAD)") cannot silently break.
     """
+    if not hasattr(model, "predict_proba"):
+        raise ProbabilityCapabilityUnavailable(
+            "This model does not support probability predictions."
+        )
     proba = model.predict_proba(X)
     classes = list(getattr(model, "classes_", [0, 1]))
     if POSITIVE_CLASS not in classes:
@@ -419,8 +427,114 @@ def _get_or_train_default_model() -> Pipeline:
     return result["model"]
 
 
+class ModelAdapter(ABC):
+    """Model-facing boundary so downstream assurance code (explainability,
+    orchestration) does not need separate per-model-type interfaces.
+
+    A concrete adapter owns: model identity (``model_id``, ``model_version``,
+    ``model_type``), the expected raw feature schema, prediction execution,
+    probability capability, and internal -- never serialized -- access to the
+    fitted model/artifact and explainability background/reference data.
+
+    ``predict_proba`` contract: returns the 1-D positive-class probability
+    vector ``P(class == 1) == P(BAD)``, one value per row -- NOT sklearn's
+    raw 2-column ``predict_proba`` matrix. Every adapter (the current
+    LogisticRegression one, and any future model type) must return
+    probabilities in this same shape and polarity, so callers never need
+    per-model-type branching.
+    """
+
+    model_id: str
+    model_version: str
+    model_type: str
+    feature_names: List[str]
+
+    @property
+    @abstractmethod
+    def supports_probability(self) -> bool:
+        """Whether this adapter can provide probability predictions.
+
+        Internal capability signal only -- never serialized into
+        ``model_metadata`` or any shared/API schema.
+        """
+
+    @abstractmethod
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Return hard class predictions (0 = GOOD, 1 = BAD) for X."""
+
+    @abstractmethod
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Return P(class == 1) == P(BAD) as a 1-D array, one value per row.
+
+        Must raise ``ProbabilityCapabilityUnavailable`` when
+        ``supports_probability`` is False.
+        """
+
+    @abstractmethod
+    def load_fitted_model(self) -> Any:
+        """Return the underlying fitted model/artifact (internal use only)."""
+
+    @abstractmethod
+    def background_data(self) -> Optional[pd.DataFrame]:
+        """Return reference/background data for explainability (internal use only)."""
+
+
+class LogisticRegressionAdapter(ModelAdapter):
+    """Adapter wrapping the existing Logistic Regression pipeline (Phase 5A/5B).
+
+    Wraps the same fitted ``sklearn.pipeline.Pipeline`` produced by
+    ``train()``/``load()`` -- no new model, no changed preprocessing, no
+    changed target polarity. Existing LR behavior and P(BAD) probability
+    semantics are unchanged; this only adds a uniform access boundary
+    around them.
+    """
+
+    model_type = MODEL_TYPE
+
+    def __init__(self, fitted_model: Any, background: Optional[pd.DataFrame] = None):
+        self.model_id = MODEL_ID
+        self.model_version = MODEL_VERSION
+        self.feature_names: List[str] = list(FEATURE_COLUMNS)
+        self._fitted_model = fitted_model
+        self._background = background
+
+    @property
+    def supports_probability(self) -> bool:
+        return hasattr(self._fitted_model, "predict_proba")
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        return self._fitted_model.predict(X)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        return _positive_class_probabilities(self._fitted_model, X)
+
+    def load_fitted_model(self) -> Any:
+        return self._fitted_model
+
+    def background_data(self) -> Optional[pd.DataFrame]:
+        return self._background
+
+    @classmethod
+    def load_default(cls) -> "LogisticRegressionAdapter":
+        """Build an adapter around the current persisted default LR model.
+
+        ``background_data()`` on the result is the canonical deterministic
+        training split (``split_data(..., test_size=0.2, random_state=42)``
+        on the approved dataset) -- the same split used everywhere else in
+        this module, not a newly invented sample.
+        """
+        model = _get_or_train_default_model()
+        df = load_dataset(DEFAULT_DATASET_PATH)
+        X, y, _, _ = preprocess(df)
+        X_train, _, _, _ = split_data(X, y, test_size=0.2, random_state=42)
+        background = X_train.reset_index(drop=True)
+        return cls(model, background=background)
+
+
 def predict_batch(
     feature_matrix: Optional[pd.DataFrame] = None,
+    *,
+    adapter: Optional[ModelAdapter] = None,
 ) -> Dict[str, Any]:
     """Run batch prediction on input feature matrix adhering to the frozen interface.
 
@@ -471,6 +585,17 @@ def predict_batch(
         Input features DataFrame. If None, uses the held-out test split of the
         German Credit dataset for a runnable demonstration. May optionally
         carry an ``instance_id`` column (see "Record identity" above).
+    adapter : Optional[ModelAdapter]
+        Phase 5A/5B, additive. When omitted (the default), behavior is
+        exactly the current Logistic Regression path: same predictions,
+        probabilities, instance_ids, feature_matrix content/order, and
+        ``model_metadata`` keys/values as before this parameter existed.
+        When supplied, prediction execution and the raw feature schema are
+        delegated to the adapter instead of the default LR model, but the
+        returned dict's top-level keys and ``model_metadata`` key shape are
+        identical either way -- the adapter's ``model_id`` is never added to
+        ``model_metadata`` (it stays available as a property on the adapter
+        itself for orchestration to read separately).
 
     Returns
     -------
@@ -478,7 +603,11 @@ def predict_batch(
         Shared dictionary containing predictions, probabilities, batch-aligned
         instance_ids, raw feature matrix, metadata, and is_mock=False.
     """
-    model = _get_or_train_default_model()
+    if adapter is None:
+        model = _get_or_train_default_model()
+        schema = FEATURE_COLUMNS
+    else:
+        schema = list(adapter.feature_names)
 
     if feature_matrix is None:
         # Provide held-out test split as sensible default
@@ -512,17 +641,25 @@ def predict_batch(
             instance_ids = make_fallback_instance_ids(len(feature_matrix))
 
     # Ensure required features exist in input matrix
-    missing_cols = [c for c in FEATURE_COLUMNS if c not in feature_matrix.columns]
+    missing_cols = [c for c in schema if c not in feature_matrix.columns]
     if missing_cols:
         raise ValueError(
             f"Input feature_matrix is missing required columns: {missing_cols}"
         )
 
     # Reorder columns to guarantee exact match with training pipeline
-    scored_features = feature_matrix[FEATURE_COLUMNS].copy()
+    scored_features = feature_matrix[schema].copy()
 
-    raw_preds = model.predict(scored_features)
-    raw_probs = _positive_class_probabilities(model, scored_features)
+    if adapter is None:
+        raw_preds = model.predict(scored_features)
+        raw_probs = _positive_class_probabilities(model, scored_features)
+        meta_model_type = MODEL_TYPE
+        meta_model_version = MODEL_VERSION
+    else:
+        raw_preds = adapter.predict(scored_features)
+        raw_probs = adapter.predict_proba(scored_features)
+        meta_model_type = adapter.model_type
+        meta_model_version = adapter.model_version
 
     predictions: List[int] = [int(p) for p in raw_preds]
     probabilities: List[float] = [float(p) for p in raw_probs]
@@ -533,8 +670,8 @@ def predict_batch(
         "instance_ids": instance_ids,
         "feature_matrix": scored_features,
         "model_metadata": {
-            "model_type": MODEL_TYPE,
-            "version": MODEL_VERSION,
+            "model_type": meta_model_type,
+            "version": meta_model_version,
             "trained_on": DEFAULT_DATASET_PATH,
             "feature_names": list(scored_features.columns),
             "label_semantics": LABEL_SEMANTICS,

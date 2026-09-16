@@ -128,3 +128,23 @@ def get_health() -> tuple[dict, str]:
     except requests.exceptions.RequestException:
         return {"status": "unreachable"}, "fallback"
 
+
+def get_drift_comparison() -> tuple[dict | None, str]:
+    """Fetch the LR-vs-RF drift comparison from API, or report unavailable.
+
+    Unlike every other function in this file, there is no mock
+    fallback: DriftComparisonResult requires two real trained
+    models to answer meaningfully, and fabricating one would
+    misrepresent an actual model comparison as real. On failure,
+    returns (None, "unavailable") -- the dashboard shows an
+    explicit "live API required" message instead.
+    """
+    url = f"{API_BASE_URL}/drift-comparison"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        return response.json(), "api"
+    except requests.exceptions.RequestException:
+        return None, "unavailable"
+
+

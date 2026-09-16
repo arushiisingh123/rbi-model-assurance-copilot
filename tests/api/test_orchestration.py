@@ -518,6 +518,32 @@ def test_build_evidence_records_threads_model_id():
             assert "assurance_run_id" not in r["provenance"]
 
 
+def test_run_assurance_compare_models_subprocess():
+    """Verify executing python run_assurance.py --compare-models via subprocess runs successfully."""
+    proc = subprocess.run(
+        [sys.executable, "run_assurance.py", "--compare-models"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    assert "Cross-Model Drift Comparison" in proc.stdout
+    assert "Comparability: COMPARABLE" in proc.stdout
+    assert "german-credit-logistic-regression" in proc.stdout
+    assert "german-credit-random-forest" in proc.stdout
+
+
+def test_run_assurance_cli_compare_models(capsys):
+    """Verify run_assurance.main with --compare-models prints comparison and returns 0."""
+    exit_code = run_assurance.main(["--compare-models"])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Cross-Model Drift Comparison" in captured.out
+    assert "Comparability: COMPARABLE" in captured.out
+    assert "german-credit-logistic-regression" in captured.out
+    assert "german-credit-random-forest" in captured.out
+
+
+
 
 
 

@@ -14,6 +14,7 @@ from app.api.mock_data import (
 from dashboard.api_client import (
     get_assurance_result,
     get_compliance,
+    get_drift_comparison,
     get_explainability,
     get_fairness_drift,
     get_health,
@@ -223,3 +224,22 @@ def test_render_status():
 
     int_res = render_status(123)
     assert int_res == "❔ 123"
+
+
+def test_get_drift_comparison_success(monkeypatch):
+    test_data = {"comparability": "COMPARABLE", "drift_a": {}, "drift_b": {}}
+    monkeypatch.setattr(requests, "get", lambda url, timeout=5: DummyResponse(test_data))
+    data, source = get_drift_comparison()
+    assert source == "api"
+    assert data == test_data
+
+
+def test_get_drift_comparison_fallback_unavailable(monkeypatch):
+    def mock_get(url, timeout=5):
+        raise requests.exceptions.ConnectionError("Backend unreachable")
+
+    monkeypatch.setattr(requests, "get", mock_get)
+    data, source = get_drift_comparison()
+    assert source == "unavailable"
+    assert data is None
+

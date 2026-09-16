@@ -879,6 +879,156 @@ No schema change was required for this item. `dashboard/panels/compliance_panel.
 (also Nidhi, same branch) separately renders `ComplianceFinding.evidence_chunks`,
 a distinct field that remains unpopulated by any producer today.
 
+## Phase 5 interface additions — multi-model assurance
+
+Phase 5 introduces model adapter abstractions, outer assurance identity envelopes, cross-model drift comparability, and end-to-end evidence identity threading across multiple models.
+
+### Model boundary — `app/models/model.py` (Namitha)
+
+#### `ModelAdapter` abstract base class
+Concrete adapters must implement the abstract contract defined in `app/models/model.py`:
+
+```python
+class ModelAdapter(ABC):
+    model_id: str
+    model_version: str
+    model_type: str
+    feature_names: List[str]
+
+    @property
+    @abstractmethod
+    def supports_probability(self) -> bool:
+        """Whether this adapter can provide probability predictions."""
+
+    @abstractmethod
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Return hard class predictions (0 = GOOD, 1 = BAD) for X."""
+
+    @abstractmethod
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Return P(class == 1) == P(BAD) as a 1-D array, one value per row.
+
+        Must raise ProbabilityCapabilityUnavailable when supports_probability is False.
+        """
+
+    @abstractmethod
+    def load_fitted_model(self) -> Any:
+        """Return the underlying fitted model/artifact (internal use only)."""
+
+    @abstractmethod
+    def background_data(self) -> Optional[pd.DataFrame]:
+        """Return reference/background data for explainability (internal use only)."""
+```
+
+Concrete implementations:
+- `LogisticRegressionAdapter(ModelAdapter)`: Wraps the default Logistic Regression pipeline (`model_id="credit_scoring_lr"`, `model_version="0.1.0"`, `model_type="logistic_regression"`).
+- `RandomForestAdapter(ModelAdapter)`: Wraps the Random Forest pipeline (`model_id="credit_scoring_rf"`, `model_version="0.1.0"`, `model_type="random_forest"`).
+
+Both adapters provide a `load_default()` classmethod returning an instance initialized with the persisted default model artifact and canonical background training data (`random_state=42`).
+
+#### `predict_batch()` adapter parameter
+`app/models/model.py::predict_batch()` accepts an additive keyword-only `adapter` parameter:
+
+```python
+def predict_batch(
+    feature_matrix: Optional[pd.DataFrame] = None,
+    *,
+    adapter: Optional[ModelAdapter] = None,
+) -> Dict[str, Any]:
+```
+- **Default behavior (`adapter=None`)**: Exactly preserves prior caller behavior by delegating to `_get_or_train_default_model()` (the Logistic Regression pipeline). The output schema (`predictions`, `probabilities`, `instance_ids`, `feature_matrix`, `model_metadata`, `is_mock`) remains completely unchanged.
+- **When `adapter` is provided**: Predictions and probabilities are obtained via `adapter.predict(X)` and `adapter.predict_proba(X)`, and `model_metadata` is populated with `adapter.model_type`, `adapter.model_version`, and `adapter.model_id`.
+
+---
+
+### Layer 2 evidence identity — `app/fairness/evidence.py` & `app/explainability/evidence.py` (Arushi, Manas)
+
+Phase 5 threads optional model and run identity into Layer 2 evidence records to prevent cross-model evidence collisions during multi-model reporting (PR #51).
+
+#### Fairness evidence — `app/fairness/evidence.py`
+```python
+def fairness_evidence(
+    predictions: Any = None,
+    sensitive_feature: Any = None,
+    favorable_label: Any = DEFAULT_FAVORABLE_LABEL,
+    *,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+```
+- When `model_id` and/or `assurance_run_id` are passed, they are stamped as top-level fields on both `fairness_group` and `fairness_summary` records.
+- When omitted (default `None`), neither key is emitted, preserving exact backward compatibility with existing tests.
+
+#### Explainability evidence — `app/explainability/evidence.py`
+```python
+def build_instance_evidence(
+    explanation: Mapping[str, Any],
+    prediction_records: Sequence[Mapping[str, Any]],
+    *,
+    model_version: str,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+
+def build_global_evidence(
+    explanation: Mapping[str, Any],
+    *,
+    model_version: str,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+```
+- When `model_id` and/or `assurance_run_id` are provided, they are stamped into the record's `provenance` sub-dict (`provenance["model_id"]`, `provenance["assurance_run_id"]`).
+- When omitted (default `None`), provenance contains only `method`, `scale`, `model_version`, and `is_mock`.
+
+---
+
+### Identity envelopes & comparability schemas — `app/api/schemas.py` (Khushi)
+
+Phase 5 adds outer Pydantic envelope models to wrap frozen domain results without altering their internal contracts:
+
+- **`AssuranceRunContext`**:
+  ```python
+  class AssuranceRunContext(BaseModel):
+      model_id: str
+      model_version: str
+      assurance_run_id: str
+      adapter_id: Optional[str] = None
+  ```
+- **`FairnessAssuranceEnvelope`**:
+  ```python
+  class FairnessAssuranceEnvelope(BaseModel):
+      context: AssuranceRunContext
+      result: FairnessResult  # Phase 2 FairnessResult, unmodified
+  ```
+- **`DriftAssuranceEnvelope`**:
+  ```python
+  class DriftAssuranceEnvelope(BaseModel):
+      context: AssuranceRunContext
+      dataset_id: str
+      dataset_version: Optional[str] = None
+      feature_space: str
+      result: DriftResult  # Phase 2 DriftResult, unmodified
+  ```
+- **`DriftComparisonResult`**:
+  ```python
+  class DriftComparisonResult(BaseModel):
+      comparability: Literal["COMPARABLE", "NOT_COMPARABLE"]
+      reason: Optional[str] = None
+      drift_a: DriftAssuranceEnvelope
+      drift_b: DriftAssuranceEnvelope
+  ```
+
+---
+
+### API routes — `app/api/main.py` (Khushi)
+
+Phase 5 adds three new endpoints for envelope-wrapped assurance and cross-model comparison:
+
+- **`GET /fairness-assurance`** → Returns `FairnessAssuranceEnvelope`: demographic parity and disparate impact metrics stamped with `AssuranceRunContext`.
+- **`GET /drift-assurance`** → Returns `DriftAssuranceEnvelope`: PSI and KS drift metrics stamped with `AssuranceRunContext`, `dataset_id`, and `feature_space`.
+- **`GET /drift-comparison`** → Returns `DriftComparisonResult`: compares drift envelopes between the default Logistic Regression and Random Forest models with comparability enforcement (always HTTP 200).
+
 ## Changing an interface
 
 Small additive changes (a new optional key) are low-friction. Renaming or

@@ -260,3 +260,46 @@ visualization requires it (decision D3).
 
 Supported Python version: **3.11**, matching CI
 (`.github/workflows/pytest.yml`) and the team's local environments.
+
+## 6. Phase 5 delivered architecture — multi-model assurance & identity isolation
+
+Phase 5 transitions the system from a single-model pipeline into a multi-model assurance framework while preserving analytical integrity and strict identity isolation across models.
+
+### Model adapter boundary (`app/models/model.py`)
+- **`ModelAdapter` (abstract base)**, **`LogisticRegressionAdapter`**, and **`RandomForestAdapter`**: Define a uniform access boundary across model architectures. Downstream assurance components (orchestration, explainability, fairness, drift) interact with models through this contract rather than per-model-type conditionals.
+- Both concrete adapters wrap their respective scikit-learn pipelines (`Pipeline` fitted on the canonical 80/20 train split of UCI German Credit data with `random_state=42`) and expose:
+  - Uniform hard predictions via `predict(X)` (`0 = GOOD`, `1 = BAD`).
+  - Standardized 1-D probability vectors via `predict_proba(X)` representing `P(class == 1) == P(BAD)` (losslessly converted from raw probabilities).
+  - Explicit model identity: `model_id`, `model_version`, `model_type`, and `feature_names`.
+  - Internal, non-serialized methods for explainability background data (`background_data()`) and fitted artifact access (`load_fitted_model()`).
+- **`predict_batch(feature_matrix=None, *, adapter=None)`**: Accepts an optional keyword-only `adapter` parameter. The default (`adapter=None`) preserves the canonical Logistic Regression pipeline, ensuring complete backward compatibility with all prior callers.
+
+### Assurance identity envelopes (`app/api/schemas.py`)
+- Rather than mutating the frozen Phase 2 domain result schemas (`FairnessResult`, `DriftResult`), Phase 5 introduces outer identity envelopes:
+  - **`AssuranceRunContext`**: Captures execution provenance via `model_id`, `model_version`, `assurance_run_id`, and optional `adapter_id`.
+  - **`FairnessAssuranceEnvelope`**: Pairs an `AssuranceRunContext` with the unmodified `FairnessResult`.
+  - **`DriftAssuranceEnvelope`**: Pairs an `AssuranceRunContext` with `dataset_id`, optional `dataset_version`, `feature_space`, and the unmodified `DriftResult`.
+- **Compliance envelope asymmetry (explicit note)**: Unlike fairness and drift, compliance findings do not have a dedicated `ComplianceAssuranceEnvelope`. Instead, PR #49 threaded identity directly via additive dict-level fields (`model_id`, `assurance_run_id`) on findings and summary results. This is a real architectural asymmetry; it maintains isolation without adding an extra schema layer.
+
+### End-to-end model/run identity threading
+Model and run identity is explicitly threaded through five distinct architectural touchpoints across the evaluation pipeline:
+1. **Adapter**: Concrete adapters (`LogisticRegressionAdapter`, `RandomForestAdapter`) own and emit canonical model identity (`model_id`, `model_version`, `model_type`).
+2. **Envelope**: Orchestration wraps domain calculations into `FairnessAssuranceEnvelope` and `DriftAssuranceEnvelope`, stamping `model_id`, `model_version`, and `assurance_run_id`.
+3. **Compliance findings**: `evaluate_compliance()`, `build_technical_findings()`, and `compute_real_compliance()` conditionally stamp `model_id` and `assurance_run_id` onto each `TechnicalFinding`.
+4. **Layer 2 evidence records**: Evidence builders in fairness (`fairness_evidence()`) and explainability (`build_instance_evidence()`, `build_global_evidence()`) accept additive `model_id` and `assurance_run_id` kwargs, embedding them into record provenance.
+5. **Report sections**: `generate_report()` (in `app/report/generate.py`) routes evidence records matching the evaluated model's identity into `ReportSection.supporting_evidence` and stamps `model_id` onto Layer 1 `TechnicalFinding` objects, ensuring distinct models' evidence records never collapse into an interleaved bucket.
+
+### Cross-model drift comparability (`app/drift/comparability.py`)
+- Direct cross-model drift comparison is strictly governed by `compare_drift_envelopes(envelope_a, envelope_b)`.
+- Because aggregate PSI and KS are MAX aggregations over evaluated features, comparing models with mismatched feature sets or differing feature spaces compares different mathematical functions (the "max aggregation trap").
+- Comparability enforcement refuses invalid comparisons structurally:
+  - Returns `comparability="COMPARABLE"` when feature space, feature sets, feature ordering, and dataset IDs match across completed envelopes.
+  - Returns `comparability="NOT_COMPARABLE"` with a typed reason prefix (`pending_result:`, `dataset_id_mismatch:`, `feature_set_mismatch:`, `feature_order_mismatch:`, `feature_space_mismatch:`) when preconditions fail.
+- Exposed via **`GET /drift-comparison`**, returning a schema-validated `DriftComparisonResult` comparing the default Logistic Regression and Random Forest models (always HTTP 200; comparability status is communicated in the payload, not an HTTP error).
+
+### Dashboard presentation & multi-model demonstration status
+- On the active `main` branch, the dashboard (`dashboard/dashboard_app.py`) provides 5 tabs corresponding to the Phase 4 delivery.
+- The multi-model presentation work — comprising a dedicated **Model Comparison tab** in the Streamlit UI displaying side-by-side drift metrics with comparability enforcement, and a CLI demonstration flag (`python run_assurance.py --compare-models`) — has been implemented and verified on branch `feature/khushi-phase5-multimodel-demo` (PR #52), pending team review and merge into `main`.
+
+### Deferred components
+- **Local LLM provider abstraction (5E)**: As documented in [`docs/phase5-allocation.md` §I](file:///c:/Users/USER/rbi-model-assurance-copilot/rbi-model-assurance-copilot/docs/phase5-allocation.md) (2026-09-16 note), the swappable local LLM provider abstraction is deferred. The production Groq provider in `app/report/generate.py` remains active and continues to enforce the foundational rule that LLMs only explain deterministic Python findings and never override analytical calculations.

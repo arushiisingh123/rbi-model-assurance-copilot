@@ -2478,6 +2478,23 @@ insertions, 47 deletions.
 
 ---
 
+### 2026-09-15 — PR #49: Compliance + report identity threading (Khushi)
+
+**Status:** Merged (backfilled record).
+
+Adds additive, optional model_id/assurance_run_id kwargs to
+evaluate_compliance() and build_technical_findings()/run_compliance()
+(app/compliance/compliance.py, app/compliance/technical_findings.py),
+and to compute_real_compliance() (app/api/orchestration.py) --
+conditionally stamped onto every finding and the top-level result,
+omitted by default so every existing caller is unaffected. Also
+threads model_id into generate_report()'s Layer 1 TechnicalFinding
+construction (app/report/generate.py). This is the Layer 1/compliance
+identity path -- distinct from the Layer 2 evidence-record identity
+path completed later in PR #51 (B7).
+
+---
+
 ### 2026-09-16 — 5E (local LLM) deferred, no code change
 
 **Status:** Noted, not a design reversal.
@@ -2530,4 +2547,53 @@ rediscovered:**
 
 **Recorded by:** Nidhi (Phase 5D — Compliance/RAG scope), per the
 same honesty standard as other entries this session.
+
+---
+
+### 2026-09-16 — Phase 5 implementation status (not a sign-off)
+
+**Status:** Implementation status snapshot, for team review --
+NOT a claimed team sign-off. Per CLAUDE.md §14, AI-generated code
+requires review by the responsible team member(s) before being
+considered approved; this entry records what exists so that review
+can happen, it does not substitute for it.
+
+Checked against docs/phase5-allocation.md §I's proposed Definition
+of Done (itself still headed "PROPOSED — not adopted" -- adopting
+it is a team decision this entry does not make):
+
+[x] Model assurance contract approved and recorded — 2026-09-14 entry
+[x] Model adapter design approved and recorded — PR #41
+[x] Second model (Random Forest) supported through the adapter — PR #43
+[x] At least two models evaluated without evidence mixing — proven
+    via PR #51's isolation test suites
+[x] Fairness produces correct results across every supported model
+[x] Drift produces correct results across every supported model
+[x] Model/run identity preserved end to end: adapter -> contract ->
+    fairness/drift -> evidence -> API -> dashboard — dashboard
+    consumption (Model Comparison tab) merged via PR #52
+[x] Cross-model comparability enforced, not merely documented — PR #45 + #48
+[x] Phase 1-4 regression suite remains green — full suite passing (1027 passed,
+    1 skipped, including PR #52's dashboard/demo tests)
+[ ] Local LLM provider abstraction, swappable — DEFERRED, see
+    docs/phase5-allocation.md's 2026-09-16 note. Not a gap; a
+    recorded decision.
+[x] LLM cannot override deterministic calculations — unaffected by
+    any Phase 5 work
+[x] Evidence provenance stays distinguishable — unaffected
+[x] Dashboard distinguishes models, never merges results — dashboard
+    Model Comparison tab merged via PR #52
+[x] End-to-end multi-model demonstration completed — both `run_assurance.py --compare-models`
+    and the dashboard Model Comparison tab, merged via PR #52
+[x] Documentation reflects delivered state — this entry plus Steps
+    1-3 above
+[x] Known limitations explicitly recorded — evidence_chunks gap,
+    ComplianceAssuranceEnvelope asymmetry, 5E deferral, all logged
+
+**Explicitly NOT claimed by this entry:** formal DoD adoption (§I is
+still "PROPOSED"), and team sign-off (§J item 10) -- both require
+the team's own review and a decision this entry cannot make on
+their behalf.
+
+**Recorded by:** Khushi, implementation-side status only.
 

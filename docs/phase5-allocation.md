@@ -353,6 +353,20 @@ the team must take.
 Per the lesson recorded for Phase 4, this checklist must be filled in as a
 **precondition** of the Phase 5 sign-off entry, not after it.
 
+**2026-09-16 note — 5E deferred given the team deadline.** The `[ ] A
+local LLM provider abstraction works, with the provider swappable`
+item above is not being pursued right now. The current Groq-based
+provider (`app/report/generate.py`) remains the working
+implementation: it already satisfies the LLM rule (Python calculates,
+the LLM only explains), and it never breaks — a clearly labelled mock
+report is served whenever `GROQ_API_KEY` is absent or live generation
+fails, so this deferral does not create a broken or missing report
+path. No code changes are required elsewhere in Phase 5 as a result of
+this deferral; nothing else in the DoD depends on 5E being done first.
+This is a scheduling note, not a reversal of the Phase 5 design — the
+provider-swap goal stays on the list, just not staffed against the
+current deadline.
+
 ---
 
 ## J. Proposed Phase 5 checkpoint

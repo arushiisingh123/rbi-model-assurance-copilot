@@ -176,24 +176,6 @@ def test_lr_fairness_envelope_identity_matches_the_lr_adapter(
     assert envelope["context"]["model_id"] == lr_adapter.model_id
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN LIMITATION (Phase 5 model-identity propagation gap): a Random "
-        "Forest assurance run is currently labelled "
-        "'german-credit-logistic-regression'. "
-        "app.api.orchestration._current_model_id() returns the module-level LR "
-        "MODEL_ID constant and takes no adapter argument, and model_id is "
-        "deliberately absent from model_metadata, so orchestration cannot "
-        "recover the real identity from a model_dict. RF fairness is "
-        "WARNING/0.7273 while LR is FAIL/0.4, so this misattributes a "
-        "compliance-relevant finding. Owner: orchestration / model integration "
-        "(Khushi + Namitha, 5B/5D) -- the seam already exists and is proven "
-        "swappable by tests/api/test_orchestration.py::"
-        "test_swap_proof_current_model_id_monkeypatch. This test flips to "
-        "passing once an adapter is threaded through; it is not to be weakened."
-    ),
-)
 def test_rf_fairness_envelope_should_report_random_forest_identity(
     rf_model_output: dict, rf_adapter: RandomForestAdapter
 ):
@@ -201,27 +183,8 @@ def test_rf_fairness_envelope_should_report_random_forest_identity(
     result = compute_real_fairness(rf_model_output)
 
     envelope = build_fairness_assurance_envelope(
-        result, model_version=rf_adapter.model_version
+        result, model_version=rf_adapter.model_version, model_id=rf_adapter.model_id
     )
 
     assert envelope["context"]["model_id"] == rf_adapter.model_id
 
-
-def test_known_limitation_rf_envelope_currently_carries_the_lr_identity(
-    rf_model_output: dict, rf_adapter: RandomForestAdapter
-):
-    """The same gap, asserted positively so its current shape is pinned.
-
-    Paired with the strict xfail above: that one states the intent, this one
-    records today's behaviour. When orchestration is fixed, the xfail starts
-    passing and THIS test starts failing -- which is the signal to delete it.
-    """
-    envelope = build_fairness_assurance_envelope(
-        compute_real_fairness(rf_model_output),
-        model_version=rf_adapter.model_version,
-    )
-
-    assert envelope["context"]["model_id"] == "german-credit-logistic-regression"
-    assert envelope["context"]["model_id"] != rf_adapter.model_id
-    # The RF result itself is carried correctly -- only the label is wrong.
-    assert envelope["result"]["status"] == RF_STATUS

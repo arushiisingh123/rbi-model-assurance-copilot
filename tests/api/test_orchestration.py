@@ -19,6 +19,7 @@ from app.api.orchestration import (
     build_assurance_result,
     build_assurance_run_context,
     build_drift_assurance_envelope,
+    build_drift_comparison,
     build_fairness_assurance_envelope,
     compute_real_drift,
     compute_real_fairness,
@@ -28,6 +29,7 @@ from app.api.orchestration import (
     summarize,
 )
 from app.api.schemas import DriftAssuranceEnvelope, FairnessAssuranceEnvelope, FairnessResult
+from app.models.model import RandomForestAdapter, predict_batch
 from app.models.preprocessing import DEFAULT_DATASET_PATH
 
 
@@ -383,5 +385,71 @@ def test_build_drift_assurance_envelope_empty_features_raises():
     with pytest.raises(ValueError) as exc_info:
         build_drift_assurance_envelope(fake_drift, model_version="0.1.0")
     assert "PENDING" in str(exc_info.value) or "empty" in str(exc_info.value)
+
+
+def test_build_assurance_run_context_explicit_model_id_overrides_default():
+    """Explicit model_id parameter overrides default model id."""
+    ctx = build_assurance_run_context(
+        "run-1", model_id="german-credit-random-forest", model_version="0.1.0"
+    )
+    assert ctx.model_id == "german-credit-random-forest"
+
+
+def test_build_assurance_run_context_omitted_model_id_falls_back():
+    """Omitted model_id parameter falls back to default LR model id."""
+    ctx = build_assurance_run_context("run-1", model_version="0.1.0")
+    assert ctx.model_id == "german-credit-logistic-regression"
+
+
+def test_build_fairness_assurance_envelope_with_explicit_model_id():
+    """Wrap real fairness output with an explicit model_id."""
+    raw_model = compute_real_model()
+    real_fairness = compute_real_fairness(raw_model)
+    envelope = build_fairness_assurance_envelope(
+        real_fairness,
+        model_version="0.1.0",
+        model_id="german-credit-random-forest",
+    )
+    parsed = FairnessAssuranceEnvelope(**envelope)
+    assert parsed.context.model_id == "german-credit-random-forest"
+
+
+def test_build_drift_assurance_envelope_with_explicit_model_id():
+    """Wrap real drift output with an explicit model_id."""
+    raw_model = compute_real_model()
+    real_drift = compute_real_drift(raw_model)
+    envelope = build_drift_assurance_envelope(
+        real_drift,
+        model_version="0.1.0",
+        model_id="german-credit-random-forest",
+    )
+    parsed = DriftAssuranceEnvelope(**envelope)
+    assert parsed.context.model_id == "german-credit-random-forest"
+
+
+def test_compute_real_model_with_rf_adapter_matches_predict_batch():
+    """compute_real_model(adapter=adapter) delegates faithfully to predict_batch."""
+    adapter = RandomForestAdapter.load_default()
+    real_res = compute_real_model(adapter=adapter)
+    expected_res = predict_batch(adapter=adapter)
+    assert real_res["predictions"] == expected_res["predictions"]
+    assert real_res["probabilities"] == expected_res["probabilities"]
+    assert real_res["instance_ids"] == expected_res["instance_ids"]
+    assert real_res["model_metadata"] == expected_res["model_metadata"]
+    assert real_res["is_mock"] == expected_res["is_mock"]
+
+
+def test_build_drift_comparison_returns_comparable_with_correct_identities():
+    """build_drift_comparison compares LR and RF drift envelopes."""
+    result = build_drift_comparison()
+    assert result["comparability"] == "COMPARABLE"
+    assert result["drift_a"]["context"]["model_id"] == "german-credit-logistic-regression"
+    assert result["drift_b"]["context"]["model_id"] == "german-credit-random-forest"
+    assert result["drift_a"]["context"]["model_id"] != result["drift_b"]["context"]["model_id"]
+
+    # Validate both envelopes parse as DriftAssuranceEnvelope
+    DriftAssuranceEnvelope(**result["drift_a"])
+    DriftAssuranceEnvelope(**result["drift_b"])
+
 
 

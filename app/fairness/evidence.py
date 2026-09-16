@@ -27,7 +27,7 @@ module's job, and the thresholds behind ``status`` are project conventions, not
 RBI requirements (docs/thresholds.md).
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.fairness.fairness import DEFAULT_FAVORABLE_LABEL, _analyse_fairness
 
@@ -41,6 +41,9 @@ def fairness_evidence(
     predictions: Any = None,
     sensitive_feature: Any = None,
     favorable_label: Any = DEFAULT_FAVORABLE_LABEL,
+    *,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Build group-level fairness evidence records.
 
@@ -55,6 +58,10 @@ def fairness_evidence(
             to ``DEFAULT_FAVORABLE_LABEL`` (0), matching the current credit
             model where 0 = GOOD and 1 = BAD. Echoed on every record so a
             reader never has to guess which polarity produced a rate.
+        model_id: Additive (Phase 5D). Included on every returned record only
+            when provided.
+        assurance_run_id: Additive (Phase 5D). Included on every returned
+            record only when provided.
 
     Returns:
         One ``fairness_group`` record per observed group, in first-observed
@@ -65,6 +72,15 @@ def fairness_evidence(
         summary carries the same PENDING status and neutral aggregates that
         ``fairness_report()`` returns. No disparity is invented.
 
+        model_id / assurance_run_id are additive (Phase 5D): included on
+        every returned record only when provided, using the same
+        None-filtering already required elsewhere in this codebase for
+        an identical reason -- test_exact_record_key_sets asserts an
+        EXACT key set on every record when called without these
+        arguments, so an always-present None field would break it.
+        Omitted, output is byte-identical to before this parameter
+        existed.
+
     Raises:
         ValueError: on exactly the same conditions as ``fairness_report()``
             (``favorable_label`` of None, a None input, a non-positional pandas
@@ -72,6 +88,12 @@ def fairness_evidence(
     """
     analysis = _analyse_fairness(predictions, sensitive_feature, favorable_label)
     protected_attribute = analysis["protected_attribute"]
+
+    identity = {
+        k: v
+        for k, v in {"model_id": model_id, "assurance_run_id": assurance_run_id}.items()
+        if v is not None
+    }
 
     records: List[Dict[str, Any]] = [
         {
@@ -83,6 +105,7 @@ def fairness_evidence(
             "selection_rate": group["selection_rate"],
             "favorable_label": favorable_label,
             "is_mock": False,
+            **identity,
         }
         for group in analysis["groups"]
     ]
@@ -96,6 +119,7 @@ def fairness_evidence(
             "status": analysis["status"],
             "favorable_label": favorable_label,
             "is_mock": False,
+            **identity,
         }
     )
 

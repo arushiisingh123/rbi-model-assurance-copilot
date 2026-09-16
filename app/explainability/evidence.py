@@ -41,7 +41,7 @@ scale here. Every record states its own scale so a downstream report cannot
 silently mix them.
 """
 
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 __all__ = [
     "EVIDENCE_TYPE_INSTANCE",
@@ -118,18 +118,33 @@ def _validate_explanation(explanation: Any) -> str:
     return method
 
 
-def _build_provenance(method: str, explanation: Mapping, model_version: str) -> Dict[str, Any]:
+def _build_provenance(
+    method: str,
+    explanation: Mapping,
+    model_version: str,
+    *,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """Provenance carried on every record so values cannot be misread.
 
-    ``is_mock`` is passed through from the explanation exactly as produced;
-    this module never asserts a trust level of its own.
+    model_id / assurance_run_id are additive (Phase 5D): included
+    only when provided. No existing test checks provenance's own key
+    set exactly (confirmed by inspection this session), so this is
+    safe either way -- conditional inclusion is used anyway for
+    consistency with fairness_evidence()'s identical fix.
     """
-    return {
+    provenance: Dict[str, Any] = {
         "method": method,
         "scale": SCALE_BY_METHOD[method],
         "model_version": model_version,
         "is_mock": explanation["is_mock"],
     }
+    if model_id is not None:
+        provenance["model_id"] = model_id
+    if assurance_run_id is not None:
+        provenance["assurance_run_id"] = assurance_run_id
+    return provenance
 
 
 def _validate_model_version(model_version: Any) -> str:
@@ -237,6 +252,8 @@ def build_instance_evidence(
     prediction_records: Sequence[Mapping[str, Any]],
     *,
     model_version: str,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Flatten per-instance contributions into identified evidence records.
 
@@ -286,7 +303,9 @@ def build_instance_evidence(
         )
 
     records = _validate_prediction_records(prediction_records, per_instance)
-    provenance = _build_provenance(method, explanation, version)
+    provenance = _build_provenance(
+        method, explanation, version, model_id=model_id, assurance_run_id=assurance_run_id,
+    )
 
     evidence: List[Dict[str, Any]] = []
     for position, (row, record) in enumerate(zip(per_instance, records)):
@@ -334,6 +353,8 @@ def build_global_evidence(
     explanation: Mapping[str, Any],
     *,
     model_version: str,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Flatten global feature importance into evidence records.
 
@@ -365,7 +386,9 @@ def build_global_evidence(
             f"feature -> value, got {type(global_importance).__name__}."
         )
 
-    provenance = _build_provenance(method, explanation, version)
+    provenance = _build_provenance(
+        method, explanation, version, model_id=model_id, assurance_run_id=assurance_run_id,
+    )
 
     return [
         {

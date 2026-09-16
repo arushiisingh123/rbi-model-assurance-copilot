@@ -453,3 +453,118 @@ def test_unknown_evidence_type_is_rejected_not_silently_dropped():
     message = str(exc.value)
     assert "drift_feature" in message
     assert "EVIDENCE_SECTION_BY_TYPE" in message
+
+
+def test_two_models_supporting_evidence_isolated_by_model_id(pipeline):
+    """End-to-end: build_evidence_records() for two models, pool them
+    into one evidence_records list, and confirm the resulting report
+    section's supporting_evidence lets each model's records be told
+    apart -- this is the actual B7 gap, exercised through
+    generate_report(), not just the lower-level builders."""
+    from app.models.model import LogisticRegressionAdapter, RandomForestAdapter
+
+    lr_adapter = LogisticRegressionAdapter.load_default()
+    rf_adapter = RandomForestAdapter.load_default()
+    lr_records = build_evidence_records(
+        pipeline["model"],
+        pipeline["explainability"],
+        method="shap",
+        model_id=lr_adapter.model_id,
+    )
+    rf_model = compute_real_model(adapter=rf_adapter)
+    rf_explain = compute_real_explainability(rf_model, method="shap")
+    rf_records = build_evidence_records(
+        rf_model,
+        rf_explain,
+        method="shap",
+        model_id=rf_adapter.model_id,
+    )
+
+    report = generate_report(
+        **pipeline,
+        evidence_records=lr_records + rf_records,
+        llm_client=FakeGroqClient(),
+    )
+    fairness_section = _section(report, "Fairness Evaluation")
+    model_ids = {
+        r.get("model_id")
+        for r in fairness_section["supporting_evidence"]
+        if r.get("evidence_type") in ("fairness_group", "fairness_summary")
+    }
+    assert model_ids == {lr_adapter.model_id, rf_adapter.model_id}
+
+
+def test_two_models_full_report_stays_isolated_end_to_end(pipeline):
+    """The complete Phase 5D proof: compliance findings, Layer 2
+    evidence, and RAG citations all stay correctly attributed when
+    two models' reports are generated in the same process."""
+    from app.models.model import RandomForestAdapter
+    from app.api.orchestration import (
+        build_evidence_records,
+        compute_real_compliance,
+        compute_real_drift,
+        compute_real_explainability,
+        compute_real_fairness,
+        compute_real_model,
+    )
+
+    rf_adapter = RandomForestAdapter.load_default()
+    rf_model = compute_real_model(adapter=rf_adapter)
+    rf_explain = compute_real_explainability(rf_model, method="shap")
+    rf_fairness = compute_real_fairness(rf_model)
+    rf_drift = compute_real_drift(rf_model)
+    rf_compliance = compute_real_compliance(
+        rf_model,
+        rf_explain,
+        rf_fairness,
+        rf_drift,
+        model_id=rf_adapter.model_id,
+        assurance_run_id="rf-run-1",
+    )
+    rf_records = build_evidence_records(
+        rf_model,
+        rf_explain,
+        method="shap",
+        model_id=rf_adapter.model_id,
+    )
+    lr_report = generate_report(
+        **pipeline,
+        llm_client=FakeGroqClient(),
+        model_id="german-credit-logistic-regression",
+    )
+    rf_report = generate_report(
+        model=rf_model,
+        explainability=rf_explain,
+        fairness=rf_fairness,
+        drift=rf_drift,
+        compliance=rf_compliance,
+        evidence_records=rf_records,
+        llm_client=FakeGroqClient(),
+        model_id=rf_adapter.model_id,
+    )
+    lr_finding = _section(lr_report, "Fairness Evaluation")["technical_finding"]
+    rf_finding = _section(rf_report, "Fairness Evaluation")["technical_finding"]
+    assert lr_finding["model_id"] == "german-credit-logistic-regression"
+    assert rf_finding["model_id"] == "german-credit-random-forest"
+    # RAG citations retrieved independently per report, never mixed
+    lr_compliance_section = _section(lr_report, "RBI Compliance Rules Mapping")
+    rf_compliance_section = _section(rf_report, "RBI Compliance Rules Mapping")
+    if lr_compliance_section["retrieved_evidence"]["evidence_status"] == "RETRIEVED":
+        assert (
+            lr_compliance_section["retrieved_evidence"]["citations"]
+            == rf_compliance_section["retrieved_evidence"]["citations"]
+        ), (
+            "same query, same corpus -- must retrieve the same evidence "
+            "for both models, proving no per-model RAG state exists"
+        )
+    # Layer 2 supporting_evidence stays attributable per model
+    rf_supporting = _section(rf_report, "Fairness Evaluation")[
+        "supporting_evidence"
+    ]
+    assert all(
+        r.get("model_id") == rf_adapter.model_id
+        for r in rf_supporting
+        if r.get("evidence_type") in ("fairness_group", "fairness_summary")
+    )
+
+

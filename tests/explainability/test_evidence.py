@@ -465,3 +465,52 @@ def test_building_evidence_does_not_mutate_its_inputs(
     assert evidence[1]["provenance"]["method"] == "shap", (
         "records must not share one mutable provenance object"
     )
+
+
+def test_build_instance_evidence_with_model_id_in_provenance(
+    shap_explanation, prediction_records
+):
+    evidence = build_instance_evidence(
+        shap_explanation,
+        prediction_records,
+        model_version=MODEL_VERSION,
+        model_id="german-credit-random-forest",
+    )
+    assert all(
+        r["provenance"]["model_id"] == "german-credit-random-forest" for r in evidence
+    )
+    # Top-level shape is unaffected -- model_id lives in provenance only.
+    assert all(
+        set(r)
+        == {
+            "evidence_type",
+            "instance_id",
+            "feature",
+            "importance",
+            "prediction",
+            "probability",
+            "provenance",
+        }
+        for r in evidence
+    )
+
+
+def test_build_global_evidence_with_model_id_in_provenance(shap_explanation):
+    evidence = build_global_evidence(
+        shap_explanation,
+        model_version=MODEL_VERSION,
+        model_id="german-credit-random-forest",
+    )
+    assert all(
+        r["provenance"]["model_id"] == "german-credit-random-forest" for r in evidence
+    )
+
+
+def test_provenance_omits_identity_when_not_given(
+    shap_explanation, prediction_records
+):
+    evidence = build_instance_evidence(
+        shap_explanation, prediction_records, model_version=MODEL_VERSION
+    )
+    assert all("model_id" not in r["provenance"] for r in evidence)
+

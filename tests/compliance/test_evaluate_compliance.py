@@ -76,3 +76,33 @@ def test_none_input_gives_all_not_evaluated():
 def test_non_dict_input_is_handled():
     result = evaluate_compliance("not a dict")
     assert all(f["status"] == "PENDING" for f in result["findings"])
+
+
+def test_evaluate_compliance_with_model_id_stamps_every_finding():
+    result = evaluate_compliance(MOCK_TECHNICAL_FINDINGS, model_id="german-credit-random-forest")
+    assert result["model_id"] == "german-credit-random-forest"
+    assert "assurance_run_id" not in result
+    for finding in result["findings"]:
+        assert finding["model_id"] == "german-credit-random-forest"
+        assert "assurance_run_id" not in finding
+
+
+def test_evaluate_compliance_with_both_identity_kwargs():
+    result = evaluate_compliance(
+        MOCK_TECHNICAL_FINDINGS,
+        model_id="german-credit-random-forest",
+        assurance_run_id="run-xyz",
+    )
+    assert set(result) == {"findings", "is_mock", "model_id", "assurance_run_id"}
+    for finding in result["findings"]:
+        assert set(finding) == APPROVED_FINDING_KEYS | {"model_id", "assurance_run_id"}
+        assert finding["model_id"] == "german-credit-random-forest"
+        assert finding["assurance_run_id"] == "run-xyz"
+
+
+def test_evaluate_compliance_omitting_identity_matches_existing_baseline():
+    # Regression guard, separate from (and in addition to) the existing
+    # test_output_matches_approved_shape -- explicit belt-and-braces.
+    result = evaluate_compliance(MOCK_TECHNICAL_FINDINGS)
+    assert set(result) == {"findings", "is_mock"}
+    assert all(set(f) == APPROVED_FINDING_KEYS for f in result["findings"])

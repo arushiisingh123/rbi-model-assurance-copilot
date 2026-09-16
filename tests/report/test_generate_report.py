@@ -527,3 +527,28 @@ def test_generate_report_default_provider_label(sample_inputs):
     assert expected_disclaimer in parsed.disclaimers
     assert "produced via Groq (openai/gpt-oss-120b)" in expected_disclaimer
 
+
+def test_generate_report_threads_model_id_into_every_section(sample_inputs):
+    fake_client = FakeGroqClient()
+    result = generate_report(
+        **sample_inputs,
+        model_id="german-credit-random-forest",
+        llm_client=fake_client,
+        retrieval_fn=fake_retrieval_mixed,
+    )
+    parsed = ReportResult(**result)
+    assert len(parsed.sections) == 5
+    for section in parsed.sections:
+        assert section.technical_finding.model_id == "german-credit-random-forest"
+
+
+def test_generate_report_omitting_model_id_matches_existing_baseline(sample_inputs):
+    fake_client = FakeGroqClient()
+    result = generate_report(
+        **sample_inputs,
+        llm_client=fake_client,
+        retrieval_fn=fake_retrieval_mixed,
+    )
+    parsed = ReportResult(**result)
+    assert all(section.technical_finding.model_id is None for section in parsed.sections)
+

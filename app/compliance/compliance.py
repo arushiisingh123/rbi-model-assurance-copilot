@@ -26,6 +26,8 @@ but the rules are illustrative sample rules with placeholder thresholds
 and no verified RBI clause mapping (app/rbi/metadata.py). The result
 must not be read as real regulatory evidence (CLAUDE.md sections 6, 12).
 """
+from typing import Optional
+
 from app.compliance.engine import evaluate_rule, map_findings_to_rules
 from app.rbi.rules import load_rules
 
@@ -33,15 +35,31 @@ from app.rbi.rules import load_rules
 __all__ = ["evaluate_compliance", "map_findings_to_rules"]
 
 
-def evaluate_compliance(technical_findings: dict | None = None) -> dict:
+def evaluate_compliance(
+    technical_findings: dict | None = None,
+    *,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
+) -> dict:
     """Evaluate every RBI rule against ``technical_findings``.
 
-    ``technical_findings`` is the combined per-module findings dict
-    (see app/compliance/mock_findings.py for the assumed shape). If it
-    is None or not a dict, every rule returns "PENDING".
+    ``model_id`` / ``assurance_run_id`` are additive, optional (Phase
+    5D): omitted, output is byte-identical to before this parameter
+    existed -- the keys are absent from every finding and from the
+    top-level result, not present-with-None. This preserves
+    test_output_matches_approved_shape's exact key-set assertion.
+    Passed, they are stamped onto every finding AND echoed at the top
+    level, so two models' compliance results can be told apart the
+    moment a caller holds both.
     """
     if not isinstance(technical_findings, dict):
         technical_findings = {}
+
+    identity = {
+        k: v
+        for k, v in {"model_id": model_id, "assurance_run_id": assurance_run_id}.items()
+        if v is not None
+    }
 
     findings = [
         {
@@ -50,8 +68,9 @@ def evaluate_compliance(technical_findings: dict | None = None) -> dict:
             "technical_finding_ref": rule["technical_finding_ref"],
             "status": evaluate_rule(rule, technical_findings),
             "evidence_chunks": [],
+            **identity,
         }
         for rule in load_rules()
     ]
 
-    return {"findings": findings, "is_mock": True}
+    return {"findings": findings, "is_mock": True, **identity}

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.orchestration import (
     build_assurance_result,
+    build_drift_comparison,
     build_evidence_records,
     build_drift_assurance_envelope,
     build_fairness_assurance_envelope,
@@ -28,6 +29,7 @@ from app.api.schemas import (
     AssuranceResult,
     ComplianceResult,
     DriftAssuranceEnvelope,
+    DriftComparisonResult,
     ExplainabilityResult,
     FairnessAssuranceEnvelope,
     FairnessDriftResult,
@@ -103,6 +105,22 @@ def get_drift_assurance() -> dict:
     model_version = raw_model.get("model_metadata", {}).get("version", "0.1.0")
     try:
         return build_drift_assurance_envelope(drift_res, model_version=model_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/drift-comparison", response_model=DriftComparisonResult)
+def get_drift_comparison() -> dict:
+    """Compare drift between the default Logistic Regression and
+    Random Forest models.
+
+    Always returns HTTP 200. COMPARABLE vs NOT_COMPARABLE is the
+    response payload, not an HTTP status code -- this mirrors
+    app/drift/comparability.py's own design rationale ("not an
+    HTTP error code -- gives the dashboard nothing to render").
+    """
+    try:
+        return build_drift_comparison()
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 

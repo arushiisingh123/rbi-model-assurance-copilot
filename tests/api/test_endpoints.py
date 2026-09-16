@@ -7,6 +7,7 @@ from app.api.schemas import (
     AssuranceResult,
     ComplianceResult,
     DriftAssuranceEnvelope,
+    DriftComparisonResult,
     ExplainabilityResult,
     FairnessAssuranceEnvelope,
     FairnessDriftResult,
@@ -221,5 +222,18 @@ def test_drift_assurance_endpoint():
     assert len(parsed.feature_space) == 16
     assert parsed.result.is_mock is False
     assert len(parsed.result.features_evaluated) > 0
+
+
+def test_drift_comparison_endpoint():
+    response = client.get("/drift-comparison")
+    assert response.status_code == 200
+    body = response.json()
+    parsed = DriftComparisonResult(**body)
+    assert parsed.comparability == "COMPARABLE"
+    assert parsed.drift_a.context.model_id == "german-credit-logistic-regression"
+    assert parsed.drift_b.context.model_id == "german-credit-random-forest"
+    assert parsed.drift_a.context.model_id != parsed.drift_b.context.model_id
+    assert parsed.reason is not None
+
 
 

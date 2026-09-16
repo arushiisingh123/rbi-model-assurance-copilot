@@ -11,6 +11,7 @@ import pandas as pd
 
 from app.api.schemas import AssuranceRunContext
 from app.compliance.compliance import evaluate_compliance
+from app.drift import compare_drift_envelopes
 from app.drift.drift import drift_report
 from app.explainability.evidence import (
     build_global_evidence,
@@ -19,7 +20,12 @@ from app.explainability.evidence import (
 from app.explainability.explain import explain
 from app.fairness.evidence import fairness_evidence
 from app.fairness.fairness import fairness_report
-from app.models.model import MODEL_ID, predict_batch
+from app.models.model import (
+    MODEL_ID,
+    MODEL_VERSION,
+    RandomForestAdapter,
+    predict_batch,
+)
 from app.models.preprocessing import DEFAULT_DATASET_PATH
 
 # LIME is materially more expensive per row than SHAP, so the explained frame
@@ -36,9 +42,14 @@ ASSURANCE_NOTE = (
 )
 
 
-def compute_real_model() -> Dict[str, Any]:
-    """Run real model batch prediction (feature_matrix returned as DataFrame)."""
-    return predict_batch()
+def compute_real_model(adapter: Optional[Any] = None) -> Dict[str, Any]:
+    """Run real model batch prediction (feature_matrix returned as DataFrame).
+
+    ``adapter`` is optional and additive (Phase 5D): omitted, this is
+    byte-identical to the pre-Phase-5D default LR path. Passed, delegates
+    prediction to that adapter (e.g. RandomForestAdapter.load_default()).
+    """
+    return predict_batch(adapter=adapter)
 
 
 def compute_real_model_metrics() -> Dict[str, Any]:
@@ -311,15 +322,20 @@ def _derive_feature_space(features_evaluated: list[str]) -> str:
 def build_assurance_run_context(
     assurance_run_id: str,
     *,
+    model_id: Optional[str] = None,
     model_version: str = "0.1.0",
     adapter_id: Optional[str] = None,
 ) -> AssuranceRunContext:
-    """Demonstration helper constructing an AssuranceRunContext for testing/integration.
+    """Combine the minted assurance_run_id with model identity.
 
-    Combines the minted assurance_run_id with _current_model_id() and model_version.
+    ``model_id`` is an explicit override -- e.g. an adapter's real
+    ``model_id`` -- for callers that know which model actually
+    produced the result being wrapped. When omitted, falls back to
+    ``_current_model_id()`` (the LR default), preserving every
+    existing caller's behavior unchanged.
     """
     return AssuranceRunContext(
-        model_id=_current_model_id(),
+        model_id=model_id if model_id is not None else _current_model_id(),
         model_version=model_version,
         assurance_run_id=assurance_run_id,
         adapter_id=adapter_id,
@@ -330,6 +346,7 @@ def build_fairness_assurance_envelope(
     fairness_dict: Dict[str, Any],
     *,
     model_version: str,
+    model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Wrap a real FairnessResult in a Phase 5A identity envelope.
 
@@ -338,7 +355,7 @@ def build_fairness_assurance_envelope(
     """
     assurance_run_id = mint_assurance_run_id()
     context = build_assurance_run_context(
-        assurance_run_id, model_version=model_version
+        assurance_run_id, model_id=model_id, model_version=model_version
     )
     return {
         "context": context.model_dump(),
@@ -361,6 +378,7 @@ def build_drift_assurance_envelope(
     drift_dict: Dict[str, Any],
     *,
     model_version: str,
+    model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Wrap a real DriftResult in a Phase 5A identity envelope.
 
@@ -371,7 +389,7 @@ def build_drift_assurance_envelope(
     """
     assurance_run_id = mint_assurance_run_id()
     context = build_assurance_run_context(
-        assurance_run_id, model_version=model_version
+        assurance_run_id, model_id=model_id, model_version=model_version
     )
     feature_space = _derive_feature_space(drift_dict["features_evaluated"])
     return {
@@ -381,6 +399,37 @@ def build_drift_assurance_envelope(
         "feature_space": feature_space,
         "result": drift_dict,
     }
+
+
+def build_drift_comparison() -> Dict[str, Any]:
+    """Compare drift between the default Logistic Regression and
+    Random Forest assurance runs.
+
+    Builds one DriftAssuranceEnvelope per model from real,
+    independently-computed drift results -- LR via the existing
+    default path, RF via RandomForestAdapter.load_default() -- each
+    correctly labelled with its own model_id via Step 3's fix. The
+    COMPARABLE / NOT_COMPARABLE decision is made entirely by
+    compare_drift_envelopes(); nothing about comparability is
+    decided here.
+    """
+    lr_model = compute_real_model()
+    rf_adapter = RandomForestAdapter.load_default()
+    rf_model = compute_real_model(adapter=rf_adapter)
+
+    lr_envelope = build_drift_assurance_envelope(
+        compute_real_drift(lr_model),
+        model_id=MODEL_ID,
+        model_version=MODEL_VERSION,
+    )
+    rf_envelope = build_drift_assurance_envelope(
+        compute_real_drift(rf_model),
+        model_id=rf_adapter.model_id,
+        model_version=rf_adapter.model_version,
+    )
+
+    return compare_drift_envelopes(lr_envelope, rf_envelope)
+
 
 
 def build_assurance_result() -> Dict[str, Any]:

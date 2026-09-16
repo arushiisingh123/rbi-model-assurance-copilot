@@ -222,3 +222,108 @@ def test_dashboard_app_renders_health_banner(monkeypatch):
         f"Expected connected success banner, found: {success_texts}"
     )
 
+
+def test_dashboard_app_builds_six_tabs():
+    """Verify dashboard builds exactly 6 tabs including Model Comparison."""
+    from streamlit.testing.v1 import AppTest
+
+    app_path = str(DASHBOARD_DIR / "dashboard_app.py")
+    at = AppTest.from_file(app_path)
+    at.run(timeout=30)
+    assert not at.exception, f"Dashboard raised unexpected exception: {at.exception}"
+    tab_labels = [t.label for t in at.tabs]
+    assert len(tab_labels) == 6
+    assert tab_labels == [
+        "Model",
+        "Explainability",
+        "Fairness & Drift",
+        "Compliance",
+        "Report",
+        "Model Comparison",
+    ]
+
+
+def test_model_comparison_tab_unavailable_fallback_isolates_failure(monkeypatch):
+    """When get_drift_comparison() reports unavailable, tab shows warning and doesn't crash."""
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(
+        "dashboard.api_client.get_drift_comparison",
+        lambda: (None, "unavailable"),
+    )
+
+    app_path = str(DASHBOARD_DIR / "dashboard_app.py")
+    at = AppTest.from_file(app_path)
+    at.run(timeout=30)
+    assert not at.exception, (
+        f"Unexpected exception when comparison unavailable: {at.exception}"
+    )
+
+    # Warning for live API requirement is present
+    warning_texts = [w.value for w in at.warning]
+    assert any("Model comparison requires the live API" in w for w in warning_texts), (
+        f"Expected live API required warning, found: {warning_texts}"
+    )
+
+    # All 6 tabs still rendered without crashing
+    tab_labels = [t.label for t in at.tabs]
+    assert len(tab_labels) == 6
+    assert "Model Comparison" in tab_labels
+
+
+def test_model_comparison_tab_renders_live_comparison(monkeypatch):
+    """When get_drift_comparison() returns comparison data, renders metrics and comparability."""
+    from streamlit.testing.v1 import AppTest
+
+    mock_comparison = {
+        "comparability": "COMPARABLE",
+        "reason": "feature spaces and datasets match.",
+        "drift_a": {
+            "context": {
+                "model_id": "german-credit-logistic-regression",
+                "model_version": "0.1.0",
+                "assurance_run_id": "run-a-12345678",
+                "adapter_id": None,
+            },
+            "result": {
+                "status": "PASS",
+                "psi": 0.0725,
+                "ks_statistic": 0.0737,
+            },
+        },
+        "drift_b": {
+            "context": {
+                "model_id": "german-credit-random-forest",
+                "model_version": "0.1.0",
+                "assurance_run_id": "run-b-12345678",
+                "adapter_id": None,
+            },
+            "result": {
+                "status": "PASS",
+                "psi": 0.0725,
+                "ks_statistic": 0.0737,
+            },
+        },
+    }
+
+    monkeypatch.setattr(
+        "dashboard.api_client.get_drift_comparison",
+        lambda: (mock_comparison, "api"),
+    )
+
+    app_path = str(DASHBOARD_DIR / "dashboard_app.py")
+    at = AppTest.from_file(app_path)
+    at.run(timeout=30)
+    assert not at.exception, f"Unexpected exception in live comparison: {at.exception}"
+
+    success_texts = [s.value for s in at.success]
+    assert any("COMPARABLE" in s for s in success_texts), success_texts
+
+    subheaders = [s.value for s in at.subheader]
+    assert any("Cross-Model Drift Comparison" in s for s in subheaders), subheaders
+
+    markdowns = [m.value for m in at.markdown]
+    assert any("german-credit-logistic-regression" in m for m in markdowns)
+    assert any("german-credit-random-forest" in m for m in markdowns)
+
+

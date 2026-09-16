@@ -25,7 +25,38 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="PATH",
         help="Optional path to export full assurance result as JSON.",
     )
+    parser.add_argument(
+        "--compare-models",
+        action="store_true",
+        help="Run a live LR-vs-RF drift comparison and print both models' results.",
+    )
     args = parser.parse_args(argv)
+
+    if args.compare_models:
+        from app.api.orchestration import build_drift_comparison
+
+        print("=" * 60)
+        print("AI Model Risk & Assurance Copilot - Cross-Model Drift Comparison")
+        print("=" * 60)
+        try:
+            comparison = build_drift_comparison()
+            print(f"\nComparability: {comparison['comparability']}")
+            if comparison.get("reason"):
+                print(f"Reason: {comparison['reason']}")
+            for label, envelope in (
+                ("Model A", comparison["drift_a"]),
+                ("Model B", comparison["drift_b"]),
+            ):
+                ctx = envelope["context"]
+                result = envelope["result"]
+                print(f"\n{label}: {ctx['model_id']} (v{ctx['model_version']})")
+                print(f"  Status: {result['status']}")
+                print(f"  PSI: {result['psi']:.4f}  KS: {result['ks_statistic']:.4f}")
+            print("=" * 60)
+            return 0
+        except Exception as exc:
+            print(f"[ERROR] Drift comparison failed: {exc}", file=sys.stderr)
+            return 1
 
     print("=" * 60)
     print("AI Model Risk & Assurance Copilot - Assurance Report")

@@ -20,6 +20,7 @@ import streamlit as st
 
 from dashboard.api_client import (
     get_compliance,
+    get_drift_comparison,
     get_explainability,
     get_fairness_drift,
     get_health,
@@ -47,8 +48,8 @@ if health_source == "api" and health_data.get("status") == "ok":
 else:
     st.warning("API Backend: Unreachable — Operating in offline mock/fallback mode")
 
-tab_model, tab_explain, tab_fair_drift, tab_compliance, tab_report = st.tabs(
-    ["Model", "Explainability", "Fairness & Drift", "Compliance", "Report"]
+tab_model, tab_explain, tab_fair_drift, tab_compliance, tab_report, tab_compare = st.tabs(
+    ["Model", "Explainability", "Fairness & Drift", "Compliance", "Report", "Model Comparison"]
 )
 
 
@@ -120,10 +121,45 @@ with tab_report:
 
     _safe_render("Report", _render_report_tab)
 
+# -----------------------------------------------------------------------------
+# 6. Model Comparison Tab (Phase 5D)
+# -----------------------------------------------------------------------------
+with tab_compare:
+    def _render_model_comparison_tab() -> None:
+        data, source = get_drift_comparison()
+        if source == "unavailable" or data is None:
+            st.warning(
+                "Model comparison requires the live API (two real "
+                "trained models). Start the API backend to see this."
+            )
+            return
+        comparability = data["comparability"]
+        reason = data.get("reason")
+        drift_a, drift_b = data["drift_a"], data["drift_b"]
+        st.subheader("Cross-Model Drift Comparison (Phase 5D)")
+        if comparability == "COMPARABLE":
+            st.success(f"COMPARABLE — {reason or 'feature spaces and datasets match.'}")
+        else:
+            st.warning(f"NOT_COMPARABLE — {reason}")
+        col_a, col_b = st.columns(2)
+        for col, envelope in ((col_a, drift_a), (col_b, drift_b)):
+            with col:
+                ctx = envelope["context"]
+                st.markdown(f"**Model:** `{ctx['model_id']}`")
+                st.caption(f"version {ctx['model_version']} · run {ctx['assurance_run_id'][:8]}")
+                result = envelope["result"]
+                st.metric("Drift Status", result["status"])
+                st.metric("PSI", f"{result['psi']:.4f}")
+                st.metric("KS Statistic", f"{result['ks_statistic']:.4f}")
+
+    _safe_render("Model Comparison", _render_model_comparison_tab)
+
 st.divider()
 st.caption(
     "AI Model Risk & Assurance Copilot — Phase 4. Each tab displays results "
     "exactly as its owning analytical module produced them; no value is "
     "recalculated, overridden, or fabricated in the dashboard. Data source "
-    "and mock/fallback status are shown at the top of each tab."
+    "and mock/fallback status are shown at the top of each tab. "
+    "The Model Comparison tab presents cross-model drift comparison results "
+    "across both evaluated models when the live API is running."
 )

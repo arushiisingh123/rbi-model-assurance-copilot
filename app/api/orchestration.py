@@ -260,15 +260,26 @@ def compute_real_compliance(
     explain_dict: Dict[str, Any],
     fairness_dict: Dict[str, Any],
     drift_dict: Dict[str, Any],
+    *,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Run real compliance evaluation against flat technical findings."""
+    """Run real compliance evaluation against flat technical findings.
+
+    model_id / assurance_run_id are additive and optional: omitted,
+    behavior is byte-identical to before this parameter existed (both
+    existing callers -- get_compliance() and get_report() in main.py --
+    omit them and are therefore unaffected).
+    """
     technical_findings = {
         "model": model_dict,
         "explainability": explain_dict,
         "fairness": fairness_dict,
         "drift": drift_dict,
     }
-    return evaluate_compliance(technical_findings)
+    return evaluate_compliance(
+        technical_findings, model_id=model_id, assurance_run_id=assurance_run_id,
+    )
 
 
 # Underscore aliases matching previous private names in app/api/main.py

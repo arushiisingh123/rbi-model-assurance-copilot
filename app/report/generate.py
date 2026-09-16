@@ -195,7 +195,9 @@ def _is_retrieved_text_grounded_in_citation(
     return True, ""
 
 
-def _extract_model_finding(model: Dict[str, Any]) -> TechnicalFinding:
+def _extract_model_finding(
+    model: Dict[str, Any], *, model_id: Optional[str] = None
+) -> TechnicalFinding:
     """Extract Layer 1 technical finding for model evaluation."""
     meta = model.get("model_metadata", {})
     val = {
@@ -210,10 +212,13 @@ def _extract_model_finding(model: Dict[str, Any]) -> TechnicalFinding:
         status="PASS",
         source_module="app.models",
         provenance="mock" if model.get("is_mock", False) else "observed",
+        model_id=model_id,
     )
 
 
-def _extract_explainability_finding(explainability: Dict[str, Any]) -> TechnicalFinding:
+def _extract_explainability_finding(
+    explainability: Dict[str, Any], *, model_id: Optional[str] = None
+) -> TechnicalFinding:
     """Extract Layer 1 technical finding for feature explainability."""
     exp_method = explainability.get("method", "shap")
     top_feature = None
@@ -234,10 +239,13 @@ def _extract_explainability_finding(explainability: Dict[str, Any]) -> Technical
         status="PASS",
         source_module="app.explainability",
         provenance="mock" if explainability.get("is_mock", False) else "observed",
+        model_id=model_id,
     )
 
 
-def _extract_fairness_finding(fairness: Dict[str, Any]) -> TechnicalFinding:
+def _extract_fairness_finding(
+    fairness: Dict[str, Any], *, model_id: Optional[str] = None
+) -> TechnicalFinding:
     """Extract Layer 1 technical finding for fairness evaluation."""
     val = {
         "protected_attribute": fairness.get("protected_attribute", "personal_status_and_sex"),
@@ -250,10 +258,13 @@ def _extract_fairness_finding(fairness: Dict[str, Any]) -> TechnicalFinding:
         status=fairness.get("status", "PASS"),
         source_module="app.fairness",
         provenance="mock" if fairness.get("is_mock", False) else "observed",
+        model_id=model_id,
     )
 
 
-def _extract_drift_finding(drift: Dict[str, Any]) -> TechnicalFinding:
+def _extract_drift_finding(
+    drift: Dict[str, Any], *, model_id: Optional[str] = None
+) -> TechnicalFinding:
     """Extract Layer 1 technical finding for drift detection."""
     val = {
         "psi": drift.get("psi"),
@@ -266,10 +277,13 @@ def _extract_drift_finding(drift: Dict[str, Any]) -> TechnicalFinding:
         status=drift.get("status", "PASS"),
         source_module="app.drift",
         provenance="mock" if drift.get("is_mock", False) else "observed",
+        model_id=model_id,
     )
 
 
-def _extract_compliance_finding(compliance: Dict[str, Any]) -> TechnicalFinding:
+def _extract_compliance_finding(
+    compliance: Dict[str, Any], *, model_id: Optional[str] = None
+) -> TechnicalFinding:
     """Extract Layer 1 technical finding for compliance mapping."""
     findings = compliance.get("findings", [])
     evaluated_statuses = sorted(list(set(f.get("status") for f in findings if f.get("status"))))
@@ -288,6 +302,7 @@ def _extract_compliance_finding(compliance: Dict[str, Any]) -> TechnicalFinding:
         status=overall_status,
         source_module="app.compliance",
         provenance="mock" if compliance.get("is_mock", False) else "observed",
+        model_id=model_id,
     )
 
 
@@ -547,6 +562,7 @@ def generate_report(
     drift: Dict[str, Any],
     compliance: Dict[str, Any],
     evidence_records: Optional[List[Dict[str, Any]]] = None,
+    model_id: Optional[str] = None,
     llm_client: Optional[Any] = None,
     retrieval_fn: Optional[Any] = None,
     skip_live: bool = False,
@@ -568,6 +584,11 @@ def generate_report(
         Compliance evaluation dictionary from evaluate_compliance().
     evidence_records : Optional[List[Dict[str, Any]]], optional
         Optional evidence records from Phase 3 modules (e.g. fairness_evidence).
+    model_id : Optional[str], optional
+        Additive (Phase 5D). When given, stamped onto every section's
+        TechnicalFinding so a report generated for a non-default model
+        is traceable. Omitted, every TechnicalFinding.model_id is None
+        -- byte-identical to before this parameter existed.
     llm_client : Optional[Any], optional
         Injectable Groq client or test double. If None, builds Groq client using GROQ_API_KEY.
     retrieval_fn : Optional[Any], optional
@@ -607,14 +628,15 @@ def generate_report(
         explainability=explainability,
         fairness=fairness,
         drift=drift,
+        model_id=model_id,
     )
 
     findings: Dict[str, TechnicalFinding] = {
-        "model": _extract_model_finding(model),
-        "explainability": _extract_explainability_finding(explainability),
-        "fairness": _extract_fairness_finding(fairness),
-        "drift": _extract_drift_finding(drift),
-        "compliance": _extract_compliance_finding(compliance),
+        "model": _extract_model_finding(model, model_id=model_id),
+        "explainability": _extract_explainability_finding(explainability, model_id=model_id),
+        "fairness": _extract_fairness_finding(fairness, model_id=model_id),
+        "drift": _extract_drift_finding(drift, model_id=model_id),
+        "compliance": _extract_compliance_finding(compliance, model_id=model_id),
     }
 
     # 2. RETRIEVE: RAG retrieval per section (Layer 2) through the Phase 3 RAG

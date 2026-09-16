@@ -853,5 +853,33 @@ def test_drift_comparison_result_validation():
         )
 
 
+def test_technical_finding_model_id_is_optional_and_defaults_none():
+    tf = TechnicalFinding(ref="x", value=1, status="PASS", source_module="app.x", provenance="observed")
+    assert tf.model_id is None
+    tf2 = TechnicalFinding(
+        ref="x",
+        value=1,
+        status="PASS",
+        source_module="app.x",
+        provenance="observed",
+        model_id="german-credit-random-forest",
+    )
+    assert tf2.model_id == "german-credit-random-forest"
+
+
+def test_compliance_finding_and_result_accept_identity_fields():
+    cf = ComplianceFinding(
+        rule_id="RBI-FAIR-01",
+        rule_description="d",
+        technical_finding_ref="fairness.x",
+        status="PASS",
+        model_id="german-credit-random-forest",
+        assurance_run_id="run-1",
+    )
+    assert cf.model_id == "german-credit-random-forest"
+    cr = ComplianceResult(findings=[cf], is_mock=True)
+    assert cr.model_id is None  # top-level field independent of per-finding fields
+
+
 
 

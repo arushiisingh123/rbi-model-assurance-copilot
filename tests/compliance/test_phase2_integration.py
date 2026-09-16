@@ -339,3 +339,43 @@ def test_illustrative_rule_disclaimer_is_preserved(real_compliance_result):
     for rule in load_rules():
         assert rule["clause_reference"] is None
         assert "ILLUSTRATIVE" in rule["rbi_source"]
+
+
+def test_build_technical_findings_includes_model_id_when_given(real_fairness_output):
+    findings = build_technical_findings(fairness=real_fairness_output, model_id="german-credit-random-forest")
+    assert set(findings) == {"fairness", "model_id"}
+    assert findings["model_id"] == "german-credit-random-forest"
+
+
+def test_run_compliance_threads_identity_to_every_finding(real_model_output):
+    result = run_compliance(model=real_model_output, model_id="german-credit-random-forest", assurance_run_id="run-1")
+    assert result["model_id"] == "german-credit-random-forest"
+    assert result["assurance_run_id"] == "run-1"
+    assert result["findings"]
+    for finding in result["findings"]:
+        assert finding["model_id"] == "german-credit-random-forest"
+        assert finding["assurance_run_id"] == "run-1"
+
+
+def test_two_models_compliance_findings_are_now_distinguishable(
+    real_model_output, real_fairness_output, real_drift_output
+):
+    """The actual gap this task closes: pool two models' findings and
+    prove model_id alone can now separate them (mirrors the shape of
+    tests/integration/test_cross_model_evidence_isolation.py's
+    known-limitation tests, but as a positive proof for compliance)."""
+    lr_result = run_compliance(
+        model=real_model_output,
+        fairness=real_fairness_output,
+        drift=real_drift_output,
+        model_id="german-credit-logistic-regression",
+    )
+    rf_result = run_compliance(
+        model=real_model_output,
+        fairness=real_fairness_output,
+        drift=real_drift_output,
+        model_id="german-credit-random-forest",
+    )
+    pooled = lr_result["findings"] + rf_result["findings"]
+    model_ids_present = {f["model_id"] for f in pooled}
+    assert model_ids_present == {"german-credit-logistic-regression", "german-credit-random-forest"}

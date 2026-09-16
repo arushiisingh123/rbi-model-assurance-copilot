@@ -28,6 +28,8 @@ into the missing section, rather than raising
 ``is_mock: True`` in Phase 2 -- evidence retrieval (RAG) and any verified
 rule-to-clause mapping are Phase 3 work.
 """
+from typing import Optional
+
 from app.compliance.compliance import evaluate_compliance
 
 __all__ = ["build_technical_findings", "run_compliance"]
@@ -39,31 +41,29 @@ def build_technical_findings(
     explainability: dict | None = None,
     fairness: dict | None = None,
     drift: dict | None = None,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
 ) -> dict:
     """Combine the four analytical module outputs into one technical-findings dict.
 
-    Each argument is the dict returned by the corresponding module's public
-    entry point:
-
-    - ``model``          -> ``app.models.model.predict_batch()``
-    - ``explainability`` -> ``app.explainability.explain()``
-    - ``fairness``       -> ``app.fairness.fairness_report()``
-    - ``drift``          -> ``app.drift.drift_report()``
-
-    Pass ``None`` (or omit) for a section that is not available: its key is
-    left out and every rule that references it resolves to ``PENDING``.
-
-    Values are stored exactly as given. This function never recomputes,
-    reclassifies, or unwraps them -- in particular it does not derive a
-    fairness/drift status (that is the owning module's job) and it does not
-    unwrap Khushi's API ``fairness_drift`` container (that is the API
-    layer's job).
+    model_id / assurance_run_id are additive (Phase 5D): included in
+    the returned dict only when provided, using the exact same
+    None-filtering this function already applies to model/
+    explainability/fairness/drift -- omitting them reproduces the
+    pre-existing behavior exactly (test_build_technical_findings_omits_none_sections
+    pins this). This is a traceability convenience for a caller
+    bundling identity alongside the four domain dicts; it does not by
+    itself change what evaluate_compliance() reads (see run_compliance()
+    below -- evaluate_compliance() receives model_id/assurance_run_id
+    as its own explicit arguments, never inferred out of this dict).
     """
     provided = {
         "model": model,
         "explainability": explainability,
         "fairness": fairness,
         "drift": drift,
+        "model_id": model_id,
+        "assurance_run_id": assurance_run_id,
     }
     return {name: value for name, value in provided.items() if value is not None}
 
@@ -74,18 +74,16 @@ def run_compliance(
     explainability: dict | None = None,
     fairness: dict | None = None,
     drift: dict | None = None,
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
 ) -> dict:
     """Assemble the four module outputs and evaluate every RBI rule.
 
-    Convenience wrapper equivalent to::
-
-        evaluate_compliance(build_technical_findings(model=..., ...))
-
-    Returns the team-approved compliance output shape
-    (``{"findings": [...], "is_mock": True}``) -- see
-    ``app/compliance/compliance.py``. ``evidence_chunks`` is empty for
-    every finding (RAG is Phase 3) and ``is_mock`` is ``True`` because the
-    RBI rules are illustrative sample rules (``app/rbi/metadata.py``).
+    model_id / assurance_run_id, when given, are threaded to BOTH
+    build_technical_findings() (so the assembled input bundle is
+    self-documenting) and evaluate_compliance() (so the output
+    findings actually carry it -- that's the one that matters for
+    telling two models' results apart).
     """
     return evaluate_compliance(
         build_technical_findings(
@@ -93,5 +91,9 @@ def run_compliance(
             explainability=explainability,
             fairness=fairness,
             drift=drift,
-        )
+            model_id=model_id,
+            assurance_run_id=assurance_run_id,
+        ),
+        model_id=model_id,
+        assurance_run_id=assurance_run_id,
     )

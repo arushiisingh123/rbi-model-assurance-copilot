@@ -117,12 +117,16 @@ class ComplianceFinding(BaseModel):
     technical_finding_ref: str
     status: Status
     evidence_chunks: list[str] = Field(default_factory=list)
+    model_id: Optional[str] = None
+    assurance_run_id: Optional[str] = None
 
 
 class ComplianceResult(BaseModel):
     """Output payload from the Compliance/Rule Engine module."""
     findings: list[ComplianceFinding]
     is_mock: bool
+    model_id: Optional[str] = None
+    assurance_run_id: Optional[str] = None
 
 
 class AssuranceResult(BaseModel):
@@ -177,6 +181,7 @@ class TechnicalFinding(BaseModel):
     status: str
     source_module: str
     provenance: Literal["observed", "mock", "synthetic_fixture"]
+    model_id: Optional[str] = None
 
 
 class Citation(BaseModel):

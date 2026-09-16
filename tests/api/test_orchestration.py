@@ -21,7 +21,9 @@ from app.api.orchestration import (
     build_drift_assurance_envelope,
     build_drift_comparison,
     build_fairness_assurance_envelope,
+    compute_real_compliance,
     compute_real_drift,
+    compute_real_explainability,
     compute_real_fairness,
     compute_real_model,
     compute_real_model_metrics,
@@ -450,6 +452,29 @@ def test_build_drift_comparison_returns_comparable_with_correct_identities():
     # Validate both envelopes parse as DriftAssuranceEnvelope
     DriftAssuranceEnvelope(**result["drift_a"])
     DriftAssuranceEnvelope(**result["drift_b"])
+
+
+def test_compute_real_compliance_threads_model_id():
+    """compute_real_compliance stamps model_id and assurance_run_id when provided."""
+    raw_model = compute_real_model()
+    raw_explain = compute_real_explainability(raw_model)
+    raw_fairness = compute_real_fairness(raw_model)
+    raw_drift = compute_real_drift(raw_model)
+    res = compute_real_compliance(
+        raw_model,
+        raw_explain,
+        raw_fairness,
+        raw_drift,
+        model_id="german-credit-random-forest",
+        assurance_run_id="run-compliance-1",
+    )
+    assert res["model_id"] == "german-credit-random-forest"
+    assert res["assurance_run_id"] == "run-compliance-1"
+    assert res["findings"]
+    for finding in res["findings"]:
+        assert finding["model_id"] == "german-credit-random-forest"
+        assert finding["assurance_run_id"] == "run-compliance-1"
+
 
 
 

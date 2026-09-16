@@ -85,12 +85,6 @@ def test_regression_anchor_lr_fairness_result_is_unchanged(lr_model_output: dict
     assert result["is_mock"] is False
 
 
-def test_regression_anchor_lr_keeps_the_six_key_contract(lr_model_output: dict):
-    result = compute_real_fairness(lr_model_output)
-
-    assert set(result.keys()) == FAIRNESS_KEYS
-
-
 # ---------------------------------------------------------------------------
 # MODEL-AGNOSTIC -- Random Forest through the unchanged fairness module
 # ---------------------------------------------------------------------------

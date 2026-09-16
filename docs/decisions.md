@@ -2349,3 +2349,140 @@ this explicit approval.
 
 **Recorded by:** Khushi. If Arushi's understanding differs from what's
 written here, raise it and this entry will be corrected.
+
+---
+
+### 2026-09-14 — PR #41: Phase 5 model adapter foundation (Namitha)
+
+**Status:** Merged (backfilled record).
+
+Adds `ModelAdapter` (abstract base) and `LogisticRegressionAdapter` to
+`app/models/model.py`, wrapping the existing LR pipeline behind a
+uniform `predict`/`predict_proba`/`model_id`/`model_version` interface
+with no change to LR's own behavior. Exported from
+`app/models/__init__.py`. `tests/models/test_model_adapter.py` added
+(227 lines). 3 files changed, 378 insertions, 7 deletions.
+
+---
+
+### 2026-09-15 — PR #42: AssuranceRunContext + envelope schemas (Khushi)
+
+**Status:** Merged (backfilled record).
+
+Adds `AssuranceRunContext`, `FairnessAssuranceEnvelope`,
+`DriftAssuranceEnvelope`, `DriftComparisonResult`, and
+`ModelMetrics.roc_auc_status` to `app/api/schemas.py` — additive, no
+existing field renamed or removed. Adds the identity/derivation
+helpers to `app/api/orchestration.py`: `mint_assurance_run_id()`,
+`_current_model_id()` (a hardcoded stub at this point, pending PR #41
+landing), `_derive_feature_space()`, `build_assurance_run_context()`.
+Wires a new `GET /fairness-assurance` route returning a real
+`compute_real_fairness()` result in a Phase 5A envelope; does not
+touch `GET /assurance-result`. Per the commit message: verified live,
+full suite 889 passed, 0 failed, 1 skipped (GROQ-gated, unrelated).
+
+---
+
+### 2026-09-15 — PR #43: Random Forest model adapter, Phase 5C (Namitha)
+
+**Status:** Merged (backfilled record).
+
+Adds `RandomForestAdapter` to `app/models/model.py` — same
+`ModelAdapter` interface as the LR adapter, wrapping a fitted RF
+pipeline trained on the same dataset and deterministic 80/20 split.
+`tests/models/test_random_forest_adapter.py` added (211 lines).
+
+---
+
+### 2026-09-15 — PR #44: 5A/5B completion — real model_id, roc_auc_status, drift envelope (Khushi)
+
+**Status:** Merged (backfilled record).
+
+Two commits. (1) A narrowly-scoped fix to `app/models/model.py`'s
+`evaluate()`, authorized by Namitha for this change only: hard-label
+metrics (accuracy/precision/recall/f1) are computed before the
+probability-dependent step, which now catches
+`ProbabilityCapabilityUnavailable` and reports `roc_auc=None` instead
+of aborting the whole function. (2) `_current_model_id()` now reads
+the real `MODEL_ID` constant from PR #41 instead of the PR #42 stub;
+`compute_real_model_metrics()` maps `roc_auc=None` to
+`roc_auc_status="unavailable_no_probabilities"`; adds
+`_current_dataset_id()` and `build_drift_assurance_envelope()`, wired
+into a new `GET /drift-assurance` route (409, not 500, on a PENDING
+drift result). `docs/phase5-5a5b-khushi-draft.md` B4/B5 updated to
+describe what shipped. Per the commit message, B6 (comparability
+logic) and B7 (evidence routing/dashboard) were explicitly left as
+5D/5F work, not reopened by this PR. Full suite 927 passed, 0 failed,
+1 skipped (GROQ-gated, unrelated).
+
+---
+
+### 2026-09-15 — PR #45: Drift comparability enforcement, B6 (Arushi)
+
+**Status:** Merged (backfilled record).
+
+Adds `app/drift/comparability.py::compare_drift_envelopes()` (308
+lines): compares two `DriftAssuranceEnvelope`-shaped dicts and returns
+a structured `COMPARABLE`/`NOT_COMPARABLE` result with a
+stable-prefixed reason, refusing pairs with mismatched `dataset_id`,
+`dataset_version`, evaluated feature set, feature order, or
+`feature_space` — the fix for the MAX-aggregation comparability trap.
+Exported from `app/drift/__init__.py`.
+`tests/drift/test_comparability.py` added (647 lines, 29 tests). Not
+wired into any API route or orchestration function by this PR — the
+comparison function itself only.
+
+---
+
+### 2026-09-16 — PR #47: Model-identity tripwire tests (Arushi)
+
+**Status:** Merged (backfilled record).
+
+Test-only PR, two commits. Adds
+`tests/drift/test_drift_model_identity.py` (7 tests: proves drift is
+model-agnostic across the LR/RF adapters and that
+`compare_drift_envelopes()` works correctly on real envelopes with
+manually-set identity, since orchestration did not yet set it
+correctly). Adds `tests/fairness/test_fairness_model_identity.py`,
+including one `xfail(strict=True)` test pinning that an RF fairness
+envelope was, at this point, still mislabeled with the LR `model_id`.
+Adds `tests/integration/test_cross_model_evidence_isolation.py`: known
+-limitation tripwires proving fairness evidence records carried no
+model/run identity and that `app/report/generate.py`'s
+`EVIDENCE_SECTION_BY_TYPE` routed by `evidence_type` alone — both
+explicitly flagged in the tests' own docstrings as pre-5D/B7 gaps, not
+fixed by this PR. Also removes one redundant fairness contract test.
+No production code changed.
+
+---
+
+### 2026-09-16 — PR #48: Tier 0/1 — model-identity threading + drift-comparison wiring (Khushi)
+
+**Status:** Merged (backfilled record).
+
+Closes the specific gap PR #47 pinned. `build_assurance_run_context()`
+(and both `build_fairness_assurance_envelope()` /
+`build_drift_assurance_envelope()`) gain an additive, optional
+`model_id` override parameter, defaulting to the pre-existing
+`_current_model_id()` fallback so every prior caller is unaffected;
+`compute_real_model()` gains an optional `adapter` parameter.
+`compute_real_fairness()`/`compute_real_drift()` were deliberately left
+unchanged (already adapter-agnostic, per PR #47's own tests). Adds
+`build_drift_comparison()` and a new `GET /drift-comparison` route
+returning a real `DriftComparisonResult` between the default LR and RF
+models. Updates PR #47's `xfail` fairness test to genuinely pass
+(removes the strict-xfail marker, adds
+`model_id=rf_adapter.model_id` to its call) and deletes its
+now-superseded known-limitation sibling test. 5 files changed, 159
+insertions, 47 deletions.
+
+---
+
+### 2026-09-16 — 5E (local LLM) deferred, no code change
+
+**Status:** Noted, not a design reversal.
+
+Given the team deadline, 5E is deferred; see
+`docs/phase5-allocation.md` §I for the full note. The current
+Groq-based provider remains the working implementation and is
+unaffected.

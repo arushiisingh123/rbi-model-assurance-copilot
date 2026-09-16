@@ -20,6 +20,7 @@ from app.api.orchestration import (
     build_assurance_run_context,
     build_drift_assurance_envelope,
     build_drift_comparison,
+    build_evidence_records,
     build_fairness_assurance_envelope,
     compute_real_compliance,
     compute_real_drift,
@@ -474,6 +475,48 @@ def test_compute_real_compliance_threads_model_id():
     for finding in res["findings"]:
         assert finding["model_id"] == "german-credit-random-forest"
         assert finding["assurance_run_id"] == "run-compliance-1"
+
+
+def test_build_evidence_records_threads_model_id():
+    """build_evidence_records threads model_id and assurance_run_id to all producers,
+    and omitting them reproduces existing key sets without identity fields."""
+    raw_model = compute_real_model()
+    raw_explain = compute_real_explainability(raw_model, method="shap")
+
+    # With model_id and assurance_run_id passed
+    records_with_id = build_evidence_records(
+        raw_model,
+        raw_explain,
+        method="shap",
+        model_id="german-credit-random-forest",
+        assurance_run_id="run-evidence-1",
+    )
+    assert records_with_id
+    for r in records_with_id:
+        etype = r.get("evidence_type")
+        if etype in ("fairness_group", "fairness_summary"):
+            assert r["model_id"] == "german-credit-random-forest"
+            assert r["assurance_run_id"] == "run-evidence-1"
+        elif etype in ("instance_contribution", "global_importance"):
+            assert "model_id" not in r
+            assert "assurance_run_id" not in r
+            assert r["provenance"]["model_id"] == "german-credit-random-forest"
+            assert r["provenance"]["assurance_run_id"] == "run-evidence-1"
+
+    # With model_id and assurance_run_id omitted (default)
+    records_default = build_evidence_records(
+        raw_model,
+        raw_explain,
+        method="shap",
+    )
+    assert records_default
+    for r in records_default:
+        assert "model_id" not in r
+        assert "assurance_run_id" not in r
+        if "provenance" in r:
+            assert "model_id" not in r["provenance"]
+            assert "assurance_run_id" not in r["provenance"]
+
 
 
 

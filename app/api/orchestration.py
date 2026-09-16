@@ -197,6 +197,8 @@ def build_evidence_records(
     explain_dict: Dict[str, Any],
     *,
     method: str = "shap",
+    model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Assemble the Phase 3 evidence records for one assurance run.
 
@@ -213,6 +215,12 @@ def build_evidence_records(
 
     Drift evidence is deliberately absent: no drift evidence builder exists,
     and inventing one is explicitly out of C3 scope.
+
+    model_id / assurance_run_id are additive (Phase 5D): threaded
+    to all three evidence producers below. Omitted, every producer
+    call is byte-identical to before this parameter existed --
+    main.py's /report route (the only current live caller) omits
+    them and is therefore unaffected.
     """
     model_version = model_dict.get("model_metadata", {}).get("version")
     prediction_records = build_prediction_records(model_dict, method=method)
@@ -220,10 +228,21 @@ def build_evidence_records(
     records: List[Dict[str, Any]] = []
     records.extend(
         build_instance_evidence(
-            explain_dict, prediction_records, model_version=model_version
+            explain_dict,
+            prediction_records,
+            model_version=model_version,
+            model_id=model_id,
+            assurance_run_id=assurance_run_id,
         )
     )
-    records.extend(build_global_evidence(explain_dict, model_version=model_version))
+    records.extend(
+        build_global_evidence(
+            explain_dict,
+            model_version=model_version,
+            model_id=model_id,
+            assurance_run_id=assurance_run_id,
+        )
+    )
 
     predictions, sens_feature, favorable_label = _fairness_inputs(model_dict)
     records.extend(
@@ -231,6 +250,8 @@ def build_evidence_records(
             predictions=predictions,
             sensitive_feature=sens_feature,
             favorable_label=favorable_label,
+            model_id=model_id,
+            assurance_run_id=assurance_run_id,
         )
     )
     return records

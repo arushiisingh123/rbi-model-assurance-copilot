@@ -2486,3 +2486,48 @@ Given the team deadline, 5E is deferred; see
 `docs/phase5-allocation.md` §I for the full note. The current
 Groq-based provider remains the working implementation and is
 unaffected.
+
+---
+
+### 2026-09-16 — Phase 5D: Compliance + RAG evidence isolation verified
+
+**Status:** Verified by inspection and a new proof suite, not a new
+architectural decision. No production code changed in
+app/compliance/, app/rag/, or app/rbi/ as part of this entry.
+
+**Finding:** Compliance-level model/run isolation was already
+functionally complete via PR #49 (evaluate_compliance(),
+build_technical_findings(), run_compliance(), and
+compute_real_compliance() all carry additive, optional
+model_id/assurance_run_id). RAG (app/rag/) needs no model
+identity at all: it retrieves regulatory text keyed by query, not
+by model, and is always consumed alongside a TechnicalFinding that
+already carries model_id within one ReportSection — confirmed
+no shared/cached state exists anywhere in the retrieval path that
+could leak between two models' report generations.
+tests/compliance/test_compliance_model_isolation.py,
+tests/rag/test_rag_model_agnostic_isolation.py, and one new
+end-to-end test in tests/report/test_evidence_consumption.py now
+assert this explicitly, where previously it was only implied by
+single-model tests.
+
+**Explicitly out of scope, recorded so it is not silently
+rediscovered:**
+- ComplianceFinding.evidence_chunks remains hardcoded to []
+  everywhere — no RAG-evidence-to-rule producer exists. This
+  predates Phase 5 (see docs/module-interfaces.md's Phase 3
+  note) and is a missing feature, not a multi-model isolation
+  defect; there is no evidence at that layer to cross-contaminate
+  yet.
+- Compliance has no AssuranceRunContext-style envelope, unlike
+  fairness (FairnessAssuranceEnvelope) and drift
+  (DriftAssuranceEnvelope) — PR #49 used direct dict-level
+  identity fields instead. This is a real architectural asymmetry.
+  A ComplianceAssuranceEnvelope would resolve it for consistency,
+  but is not required for correctness and was deliberately not
+  built here — an open option for the team, not a decision made in
+  this entry.
+
+**Recorded by:** Nidhi (Phase 5D — Compliance/RAG scope), per the
+same honesty standard as other entries this session.
+

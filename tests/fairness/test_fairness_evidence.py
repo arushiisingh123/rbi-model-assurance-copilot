@@ -496,3 +496,24 @@ def test_real_attribute_9_shape_end_to_end():
     assert sum(g["group_count"] for g in groups) == len(preds)
     assert _summary(records)["status"] in VALID_STATUSES
     assert _summary(records)["protected_attribute"] == "personal_status_and_sex"
+
+
+def test_fairness_evidence_with_identity_kwargs():
+    records = fairness_evidence(
+        [1, 0, 1, 0],
+        ["A", "A", "B", "B"],
+        favorable_label=1,
+        model_id="german-credit-random-forest",
+        assurance_run_id="run-1",
+    )
+    for record in records:
+        assert record["model_id"] == "german-credit-random-forest"
+        assert record["assurance_run_id"] == "run-1"
+
+
+def test_fairness_evidence_omitting_identity_matches_existing_baseline():
+    records = fairness_evidence([1, 0, 1, 0], ["A", "A", "B", "B"], favorable_label=1)
+    for record in records:
+        assert "model_id" not in record
+        assert "assurance_run_id" not in record
+

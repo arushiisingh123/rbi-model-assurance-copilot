@@ -394,31 +394,37 @@ _PROMPT_EXCLUDED_EVIDENCE_TYPES = frozenset({"instance_contribution"})
 
 def _route_evidence_records(
     evidence_records: Optional[List[Dict[str, Any]]],
-) -> Dict[str, List[Dict[str, Any]]]:
-    """Group evidence records by the section each belongs to.
+) -> Dict[Tuple[str, Optional[str]], List[Dict[str, Any]]]:
+    """Group evidence records by (section, model_id).
 
-    Records are copied through verbatim -- no field is added, renamed, rounded,
-    or reinterpreted.
+    Records are copied through verbatim -- no field is added,
+    renamed, rounded, or reinterpreted (this function only READS
+    each record's own "model_id" key to decide its bucket; it never
+    writes one).
 
-    An ``evidence_type`` with no entry in ``EVIDENCE_SECTION_BY_TYPE`` raises
-    rather than being dropped. Silently discarding it would leave the section
-    reporting ``supporting_evidence: []`` -- indistinguishable from "no such
-    evidence exists" -- which is how evidence goes missing from a compliance
-    report unnoticed. Refusing instead matches how every other evidence layer
-    here treats an unrecognised value (``app/rag/evidence.py`` raises
-    ``EvidenceError`` on an unknown ``evidence_status``;
-    ``app/explainability/evidence.py`` refuses an unknown method rather than
-    guessing its scale).
+    An ``evidence_type`` with no entry in ``EVIDENCE_SECTION_BY_TYPE``
+    raises rather than being dropped -- unchanged from before.
 
-    The practical effect: adding a new producer -- drift evidence is deferred,
-    not cancelled -- must extend the map deliberately, and cannot be forgotten
-    quietly.
+    CHANGED (Phase 5D/B7): the grouping key is (section, model_id),
+    not section alone. model_id is read from each record's own
+    "model_id" field (added by fairness_evidence() /
+    build_instance_evidence() / build_global_evidence() -- see those
+    modules), defaulting to None for a record that carries none
+    (legacy callers, or a caller that genuinely does not know the
+    identity). This is what makes it possible to hold two models'
+    evidence in one evidence_records list without them becoming
+    indistinguishable once routed into one report section --
+    EVIDENCE_SECTION_BY_TYPE itself intentionally stays
+    evidence_type-only (see the module-level comment above it): a
+    record's SECTION never depends on which model produced it, only
+    whether two same-section records can still be told apart once
+    pooled does.
 
     Raises:
-        ValueError: if a record carries an ``evidence_type`` the routing map
-            does not cover.
+        ValueError: if a record carries an ``evidence_type`` the
+            routing map does not cover. Message text unchanged.
     """
-    routed: Dict[str, List[Dict[str, Any]]] = {}
+    routed: Dict[Tuple[str, Optional[str]], List[Dict[str, Any]]] = {}
     if not evidence_records:
         return routed
 
@@ -437,8 +443,30 @@ def _route_evidence_records(
                 "EVIDENCE_SECTION_BY_TYPE rather than letting the evidence be "
                 "dropped from the report."
             )
-        routed.setdefault(section, []).append(record)
+        model_id = record.get("model_id")
+        routed.setdefault((section, model_id), []).append(record)
     return routed
+
+
+def _records_for_section(
+    routed_evidence: Dict[Tuple[str, Optional[str]], List[Dict[str, Any]]],
+    section: str,
+) -> List[Dict[str, Any]]:
+    """Flatten every model's records for one report section into one list.
+
+    A ReportSection describes one section, not one model, so this
+    collapses the (section, model_id) buckets back to the flat shape
+    ReportSection.supporting_evidence and _build_llm_prompt already
+    expect. When only one model's evidence was ever passed in (every
+    caller today), this reproduces exactly what
+    routed_evidence.get(section, []) used to return.
+    """
+    result: List[Dict[str, Any]] = []
+    for (sec, _model_id), records in routed_evidence.items():
+        if sec == section:
+            result.extend(records)
+    return result
+
 
 
 def _build_llm_prompt(
@@ -677,7 +705,14 @@ def generate_report(
     routed_evidence = _route_evidence_records(evidence_records)
 
     # 3. CALL THE LLM ONCE: single Groq call
-    prompt = _build_llm_prompt(findings, evidence, supporting_evidence=routed_evidence)
+    prompt = _build_llm_prompt(
+        findings,
+        evidence,
+        supporting_evidence={
+            key: _records_for_section(routed_evidence, key)
+            for key in ["model", "explainability", "fairness", "drift", "compliance"]
+        },
+    )
     llm_texts = _call_groq_llm(prompt, llm_client=llm_client)
 
     # 4. ENFORCE SAFETY IN PYTHON (Critical, non-negotiable)
@@ -755,7 +790,7 @@ def generate_report(
                 technical_finding=tf,
                 retrieved_evidence=ev,
                 llm_interpretation=interpretation,
-                supporting_evidence=routed_evidence.get(key, []),
+                supporting_evidence=_records_for_section(routed_evidence, key),
             )
         )
 

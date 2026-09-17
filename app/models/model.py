@@ -367,7 +367,7 @@ def evaluate(
 
 
 
-def evaluate_current_model() -> Dict[str, Any]:
+def evaluate_current_model(adapter: Optional[Any] = None) -> Dict[str, Any]:
     """Held-out evaluation metrics for the current persisted default model.
 
     Additive Phase 4 (D1(a)) helper. Exposes the same metrics ``evaluate()``
@@ -385,17 +385,36 @@ def evaluate_current_model() -> Dict[str, Any]:
     approved dataset), so the numbers it returns describe the model's
     held-out performance -- never a prediction batch's.
 
+    Parameters
+    ----------
+    adapter : Optional[Any]
+        Phase 5D, additive. Omitted (the default), byte-identical to the
+        pre-existing default Logistic Regression path. Supplied (a
+        ``ModelAdapter`` instance, e.g. ``RandomForestAdapter``), the
+        held-out metrics are computed for that adapter's own fitted model
+        (``adapter.load_fitted_model()``) over the same deterministic
+        German Credit split, using ``adapter.feature_names`` for column
+        selection/order -- so metrics can never silently describe a
+        different model than the one the adapter wraps. No new metric
+        calculation is introduced; both paths delegate to the same
+        ``evaluate()``.
+
     Returns
     -------
     Dict[str, Any]
         Exactly ``evaluate()``'s return shape: accuracy, precision, recall,
         f1, roc_auc, n_test_samples, is_mock.
     """
-    model = _get_or_train_default_model()
     df = load_dataset(DEFAULT_DATASET_PATH)
     X, y, _, _ = preprocess(df)
     _, X_test, _, y_test = split_data(X, y, test_size=0.2, random_state=42)
-    return evaluate(model, X_test, y_test)
+
+    if adapter is None:
+        model = _get_or_train_default_model()
+        return evaluate(model, X_test, y_test)
+
+    model = adapter.load_fitted_model()
+    return evaluate(model, X_test[list(adapter.feature_names)], y_test)
 
 
 def save(

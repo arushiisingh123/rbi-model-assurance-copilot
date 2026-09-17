@@ -32,6 +32,11 @@ from app.synthetic_bank.data_generator import (
 MODEL_ID = "synthetic-bank-credit-v1"
 MODEL_VERSION = "1.0.0"
 MODEL_TYPE = "xgboost"
+# Truthful provenance: this model is trained on the deterministic Synthetic
+# Bank generator (app.synthetic_bank.data_generator.generate_customers),
+# never on the German Credit dataset -- unlike app/models/model.py's LR/RF
+# adapters, whose trained_on is the German Credit CSV path.
+TRAINED_ON = "app.synthetic_bank.data_generator.generate_customers(n=1000, random_state=42)"
 
 DEFAULT_ARTIFACT_PATH = "app/synthetic_bank/artifacts/model.joblib"
 

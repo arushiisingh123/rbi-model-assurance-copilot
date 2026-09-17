@@ -819,7 +819,12 @@ def predict_batch(
         returned dict's top-level keys and ``model_metadata`` key shape are
         identical either way -- the adapter's ``model_id`` is never added to
         ``model_metadata`` (it stays available as a property on the adapter
-        itself for orchestration to read separately).
+        itself for orchestration to read separately). If the adapter exposes
+        a ``trained_on`` attribute, that value is used for
+        ``model_metadata["trained_on"]`` instead of the German Credit default
+        -- an adapter trained on other data (e.g. a REST-backed model) should
+        not be reported as trained on German Credit. Adapters without a
+        ``trained_on`` attribute are unaffected.
 
     Returns
     -------
@@ -905,6 +910,18 @@ def predict_batch(
     predictions: List[int] = [int(p) for p in raw_preds]
     probabilities: List[float] = [float(p) for p in raw_probs]
 
+    # An adapter trained on data other than German Credit (e.g. a REST-backed
+    # model) may expose its own `trained_on` provenance string; fall back to
+    # the German Credit default otherwise. `trained_on` is intentionally NOT
+    # part of the abstract ModelAdapter contract -- adapters that don't
+    # define it (LR, RF, and any adapter written before this existed) are
+    # unaffected and keep reporting DEFAULT_DATASET_PATH exactly as before.
+    meta_trained_on = (
+        getattr(adapter, "trained_on", DEFAULT_DATASET_PATH)
+        if adapter is not None
+        else DEFAULT_DATASET_PATH
+    )
+
     return {
         "predictions": predictions,
         "probabilities": probabilities,
@@ -913,7 +930,7 @@ def predict_batch(
         "model_metadata": {
             "model_type": meta_model_type,
             "version": meta_model_version,
-            "trained_on": DEFAULT_DATASET_PATH,
+            "trained_on": meta_trained_on,
             "feature_names": list(scored_features.columns),
             "label_semantics": LABEL_SEMANTICS,
         },

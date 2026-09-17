@@ -23,6 +23,8 @@ from dashboard.panels.explainability_presentation import (
     global_importance_rows,
     instance_contribution_rows,
     instance_options,
+    explanation_scale_caption,
+    explanation_scale_label,
     scale_caption,
     scale_label,
 )
@@ -379,3 +381,67 @@ def test_numbers_are_builtin_floats_not_numpy(shap_explanation):
     for row in instance_contribution_rows(shap_explanation, 0):
         assert type(row["contribution"]) is float
         assert type(row["abs_contribution"]) is float
+
+
+# ===========================================================================
+# Explanation-aware scale labelling (Phase 12)
+#
+# An axis caption is a claim about the units of the numbers under it. Deriving
+# it from the method name alone is wrong for two of the three SHAP explainers,
+# and the resulting chart looks completely normal.
+# ===========================================================================
+
+
+def test_explanation_scale_label_prefers_the_explanations_own_scale():
+    """A tree-SHAP explanation is probability-scale even though method='shap'."""
+    explanation = {
+        "method": "shap",
+        "scale": "probability",
+        "per_instance": [],
+        "global_importance": {},
+        "is_mock": False,
+    }
+
+    assert explanation_scale_label(explanation) == "probability"
+    # The method-keyed lookup would have said the opposite.
+    assert scale_label("shap") == "log_odds"
+    assert explanation_scale_label(explanation) != scale_label("shap")
+
+
+def test_explanation_scale_label_falls_back_for_legacy_explanations():
+    """A legacy explanation states no scale; the method fallback is correct.
+
+    That path only ever serves the German Credit LINEAR pipeline, where SHAP
+    genuinely is log-odds.
+    """
+    legacy = {
+        "method": "shap",
+        "per_instance": [],
+        "global_importance": {},
+        "is_mock": False,
+    }
+
+    assert explanation_scale_label(legacy) == "log_odds"
+
+
+def test_explanation_scale_caption_names_the_real_unit():
+    tree = {"method": "shap", "scale": "probability", "is_mock": False}
+    linear = {"method": "shap", "scale": "log_odds", "is_mock": False}
+
+    assert "probability" in explanation_scale_caption(tree)
+    assert "log_odds" in explanation_scale_caption(linear)
+    assert explanation_scale_caption(tree) != explanation_scale_caption(linear)
+
+
+def test_two_shap_explanations_can_carry_different_captions():
+    """The pair a dashboard could otherwise co-plot under one label."""
+    tree = {"method": "shap", "scale": "probability", "is_mock": False}
+    linear = {"method": "shap", "scale": "log_odds", "is_mock": False}
+
+    assert tree["method"] == linear["method"]
+    assert explanation_scale_label(tree) != explanation_scale_label(linear)
+
+
+def test_unknown_method_without_a_declared_scale_still_refuses_to_guess():
+    with pytest.raises(ValueError, match="Unknown explainability method"):
+        explanation_scale_label({"method": "magic", "is_mock": False})

@@ -8,6 +8,7 @@ builder requires the caller to supply it rather than inventing one.
 
 import json
 
+import pandas as pd
 import pytest
 
 from app.explainability.evidence import (
@@ -420,12 +421,31 @@ def test_real_german_credit_evidence(shap_explanation, prediction_records):
     assert isinstance(record["importance"], float)
     assert record["prediction"] in (0, 1)
     assert 0.0 <= record["probability"] <= 1.0
+
+    # Provenance for a LEGACY (no-adapter) explanation. The values it can
+    # state are stated; the ones such an explanation genuinely does not carry
+    # are None, not invented. log_odds here is correct and comes from the
+    # SCALE_BY_METHOD fallback -- this path only ever serves the German Credit
+    # LINEAR pipeline, where SHAP really is log-odds.
     assert record["provenance"] == {
         "method": "shap",
         "scale": "log_odds",
+        "explainer": None,
+        "fidelity": None,
         "model_version": MODEL_VERSION,
+        "model_type": None,
+        "integration_type": None,
+        "feature_space": [],
+        "n_background": None,
+        "n_samples": None,
+        "random_seed": None,
+        "n_rows_explained": len(shap_explanation["per_instance"]),
+        "limitations": [],
         "is_mock": False,
     }
+    # No identity was supplied, so none is claimed at either level.
+    assert "model_id" not in record
+    assert "model_id" not in record["provenance"]
 
 
 def test_explain_contract_is_unchanged(real_model_output, shap_explanation):
@@ -479,11 +499,15 @@ def test_build_instance_evidence_with_model_id_in_provenance(
     assert all(
         r["provenance"]["model_id"] == "german-credit-random-forest" for r in evidence
     )
-    # Top-level shape is unaffected -- model_id lives in provenance only.
+    # CHANGED (Phase 5): identity is now ALSO top-level, because
+    # app/report/generate.py::_route_evidence_records() buckets on
+    # record.get("model_id") at the top level. Nested-only identity routed
+    # every model's explanation evidence into one unattributable bucket.
     assert all(
         set(r)
         == {
             "evidence_type",
+            "model_id",
             "instance_id",
             "feature",
             "importance",
@@ -493,6 +517,7 @@ def test_build_instance_evidence_with_model_id_in_provenance(
         }
         for r in evidence
     )
+    assert all(r["model_id"] == "german-credit-random-forest" for r in evidence)
 
 
 def test_build_global_evidence_with_model_id_in_provenance(shap_explanation):
@@ -514,3 +539,237 @@ def test_provenance_omits_identity_when_not_given(
     )
     assert all("model_id" not in r["provenance"] for r in evidence)
 
+
+# ===========================================================================
+# Adapter-aware provenance and identity (Phase 5)
+#
+# An evidence record must be readable in isolation: which model, which
+# explainer, which scale, which fidelity. Getting the SCALE wrong is the
+# quietest failure of the set -- the numbers stay internally consistent and
+# simply describe the wrong units.
+# ===========================================================================
+
+
+@pytest.fixture(scope="module")
+def _registry():
+    from app.models.registry import get_default_registry
+
+    return get_default_registry()
+
+
+@pytest.fixture(scope="module")
+def rf_adapter_explanation(_registry):
+    """A real adapter-aware TREE explanation -- probability scale."""
+    from app.models.model import RF_MODEL_ID
+
+    adapter = _registry.get(RF_MODEL_ID)
+    return adapter, explain(
+        model_output={"feature_matrix": adapter.background_data().head(2)},
+        method="shap",
+        adapter=adapter,
+    )
+
+
+@pytest.fixture(scope="module")
+def lr_adapter_explanation(_registry):
+    """A real adapter-aware LINEAR explanation -- log-odds scale."""
+    from app.models.model import MODEL_ID as LR_ID
+
+    adapter = _registry.get(LR_ID)
+    return adapter, explain(
+        model_output={"feature_matrix": adapter.background_data().head(2)},
+        method="shap",
+        adapter=adapter,
+    )
+
+
+def _records_for(adapter, explanation):
+    prediction_records = [
+        {"instance_id": f"row-{i}", "prediction": 0, "probability": 0.25}
+        for i in range(len(explanation["per_instance"]))
+    ]
+    return build_instance_evidence(
+        explanation, prediction_records, model_version=adapter.model_version
+    )
+
+
+def test_tree_explanation_evidence_carries_the_probability_scale(
+    rf_adapter_explanation,
+):
+    """The defect this change exists to prevent.
+
+    A method-keyed lookup would stamp 'log_odds' on these records because the
+    method is 'shap'. Tree SHAP is additive to predict_proba, so the honest
+    scale is 'probability' -- and the explanation says so itself.
+    """
+    adapter, explanation = rf_adapter_explanation
+    assert explanation["scale"] == "probability"
+
+    records = _records_for(adapter, explanation)
+    assert records
+
+    for record in records:
+        assert record["provenance"]["scale"] == "probability"
+        assert record["provenance"]["scale"] != SCALE_BY_METHOD["shap"]
+
+
+def test_linear_and_tree_evidence_disagree_about_scale(
+    lr_adapter_explanation, rf_adapter_explanation
+):
+    """Two 'shap' explanations, two different units, both recorded correctly.
+
+    This is exactly the pair a report could otherwise co-plot on one axis.
+    """
+    lr_records = _records_for(*lr_adapter_explanation)
+    rf_records = _records_for(*rf_adapter_explanation)
+
+    assert lr_records[0]["provenance"]["scale"] == "log_odds"
+    assert rf_records[0]["provenance"]["scale"] == "probability"
+    assert lr_records[0]["provenance"]["method"] == rf_records[0]["provenance"]["method"]
+
+
+def test_adapter_evidence_carries_explainer_and_fidelity(rf_adapter_explanation):
+    """exact / approximate / surrogate are different claims about the numbers."""
+    records = _records_for(*rf_adapter_explanation)
+
+    for record in records:
+        assert record["provenance"]["explainer"] == "TreeExplainer"
+        assert record["provenance"]["fidelity"] == "exact"
+        assert record["provenance"]["model_type"] == "random_forest"
+        assert record["provenance"]["integration_type"] == "in_process"
+
+
+def test_adapter_evidence_carries_execution_provenance(rf_adapter_explanation):
+    adapter, explanation = rf_adapter_explanation
+    records = _records_for(adapter, explanation)
+    provenance = records[0]["provenance"]
+
+    assert provenance["n_background"] == explanation["n_background"]
+    assert provenance["n_rows_explained"] == len(explanation["per_instance"])
+    assert provenance["feature_space"] == explanation["feature_space"]
+    assert provenance["limitations"] == explanation["limitations"]
+    # Exact explainers sample nothing, so they report no sample count or seed.
+    assert provenance["n_samples"] is None
+    assert provenance["random_seed"] is None
+
+
+def test_adapter_evidence_identity_is_derived_without_being_asked(
+    rf_adapter_explanation,
+):
+    """model_id need not be passed: the explanation already knows it."""
+    adapter, explanation = rf_adapter_explanation
+    records = _records_for(adapter, explanation)
+
+    for record in records:
+        assert record["model_id"] == "german-credit-random-forest"
+        assert record["provenance"]["model_id"] == "german-credit-random-forest"
+
+
+def test_global_evidence_identity_is_derived_too(rf_adapter_explanation):
+    adapter, explanation = rf_adapter_explanation
+    records = build_global_evidence(explanation, model_version=adapter.model_version)
+
+    assert records
+    for record in records:
+        assert record["model_id"] == "german-credit-random-forest"
+
+
+@pytest.mark.parametrize(
+    "builder", ["instance", "global"], ids=["instance", "global"]
+)
+def test_conflicting_model_id_raises_rather_than_relabelling(
+    rf_adapter_explanation, builder
+):
+    """Requirement 24. Silently preferring either side would be worse.
+
+    Preferring the caller's would relabel one model's attributions as
+    another's; preferring the explanation's would leave the caller believing
+    its own label was recorded when it was not.
+    """
+    adapter, explanation = rf_adapter_explanation
+    prediction_records = [
+        {"instance_id": f"row-{i}", "prediction": 0, "probability": 0.25}
+        for i in range(len(explanation["per_instance"]))
+    ]
+
+    with pytest.raises(ValueError, match="Conflicting model_id"):
+        if builder == "instance":
+            build_instance_evidence(
+                explanation,
+                prediction_records,
+                model_version=adapter.model_version,
+                model_id="german-credit-logistic-regression",
+            )
+        else:
+            build_global_evidence(
+                explanation,
+                model_version=adapter.model_version,
+                model_id="german-credit-logistic-regression",
+            )
+
+
+def test_matching_model_id_is_accepted(rf_adapter_explanation):
+    adapter, explanation = rf_adapter_explanation
+    records = build_global_evidence(
+        explanation,
+        model_version=adapter.model_version,
+        model_id="german-credit-random-forest",
+    )
+
+    assert all(r["model_id"] == "german-credit-random-forest" for r in records)
+
+
+def test_legacy_explanation_still_produces_evidence(shap_explanation):
+    """Backward compatibility: a no-adapter explanation carries no labelling.
+
+    Its provenance reports None for what it genuinely does not know, rather
+    than inventing an explainer, and falls back to the method-keyed scale --
+    correct here, because this path only ever serves the LINEAR pipeline.
+    """
+    records = build_global_evidence(shap_explanation, model_version=MODEL_VERSION)
+
+    assert records
+    for record in records:
+        assert record["provenance"]["scale"] == "log_odds"
+        assert record["provenance"]["explainer"] is None
+        assert record["provenance"]["fidelity"] is None
+        assert "model_id" not in record
+
+
+def test_unavailable_explanation_yields_no_evidence_rows(_registry):
+    """An unavailable explanation must not become zero-valued evidence."""
+    from app.models.model import ModelAdapter
+
+    class NoProbabilityAdapter(ModelAdapter):
+        model_id = "labels-only-model"
+        model_version = "0.1.0"
+        model_type = "unknown"
+
+        def __init__(self):
+            self.feature_names = ["a", "b"]
+
+        @property
+        def supports_probability(self):
+            return False
+
+        def predict(self, X):
+            raise NotImplementedError
+
+        def predict_proba(self, X):
+            raise NotImplementedError
+
+        def load_fitted_model(self):
+            raise NotImplementedError
+
+        def background_data(self):
+            return pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+
+    adapter = NoProbabilityAdapter()
+    explanation = explain(adapter=adapter, method="shap")
+    assert explanation["available"] is False
+
+    # No rows to flatten, so no evidence -- and crucially no fabricated zeros.
+    assert build_global_evidence(explanation, model_version="0.1.0") == []
+    assert (
+        build_instance_evidence(explanation, [], model_version="0.1.0") == []
+    )

@@ -67,8 +67,103 @@ class RESTAdapter(ModelAdapter):
         """Capability flags provided explicitly at construction."""
         return self._capabilities
 
+    @property
+    def supports_batch_scoring(self) -> bool:
+        """Whether the remote service exposes POST /score-batch.
+
+        Read from the declared ``batch_scoring`` capability, defaulting to
+        False. The default matters: this adapter's fallback path issues ONE
+        HTTP request PER ROW, so an unbatched adapter scored by a
+        perturbation explainer would emit thousands of requests per explained
+        row. ``app/explainability/capability.py`` reads this same flag to
+        refuse black-box explanation in that case.
+
+        Note the deliberate distinction from the pre-existing ``batch`` flag,
+        which every adapter declares True and which only means "accepts a
+        multi-row DataFrame" -- true here even though it is served by a
+        per-row loop. ``batch_scoring`` is the stronger claim: one CALL for
+        the whole batch. Only declare it where /score-batch genuinely exists.
+        """
+        return bool(self._capabilities.get("batch_scoring", False))
+
+    def _score_batch(self, X: pd.DataFrame) -> Dict[str, List[Any]]:
+        """One POST to /score-batch for the whole frame, order preserved.
+
+        Returns the parsed ``{"predictions": [...], "probabilities": [...]}``
+        payload. Both lists are verified to have exactly one entry per input
+        row before being returned -- a short or overlong response would
+        silently shift every subsequent applicant's score by one position,
+        so it is refused rather than truncated or padded.
+        """
+        records = X.to_dict("records")
+        try:
+            resp = requests.post(
+                f"{self.endpoint_url}/score-batch",
+                json={"instances": records},
+                timeout=self.timeout,
+            )
+            if not (200 <= resp.status_code < 300):
+                raise RESTAdapterError(
+                    f"Batch scoring failed for {len(records)} row(s) with HTTP "
+                    f"status {resp.status_code}: {resp.text}"
+                )
+            data = resp.json()
+        except requests.RequestException as exc:
+            raise RESTAdapterError(
+                f"HTTP request error batch-scoring {len(records)} row(s) at "
+                f"{self.endpoint_url}/score-batch: {exc}"
+            ) from exc
+        except (ValueError, TypeError) as exc:
+            if isinstance(exc, RESTAdapterError):
+                raise
+            raise RESTAdapterError(
+                f"Invalid JSON response batch-scoring at "
+                f"{self.endpoint_url}/score-batch: {exc}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise RESTAdapterError(
+                f"Batch response must be a JSON object, got {type(data).__name__}: {data}"
+            )
+
+        result: Dict[str, List[Any]] = {}
+        for key in ("predictions", "probabilities"):
+            values = data.get(key)
+            if values is None:
+                raise RESTAdapterError(
+                    f"Batch response missing '{key}' field: {data}"
+                )
+            if not isinstance(values, list):
+                raise RESTAdapterError(
+                    f"Batch response '{key}' must be a list, got "
+                    f"{type(values).__name__}."
+                )
+            if len(values) != len(records):
+                raise RESTAdapterError(
+                    f"Batch response '{key}' has {len(values)} entries for "
+                    f"{len(records)} input row(s). Refusing a misaligned "
+                    "batch: results are positional, so a length mismatch "
+                    "would attribute one row's score to another."
+                )
+            result[key] = values
+        return result
+
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Return hard class predictions (0 = GOOD, 1 = BAD) for X by scoring each row via HTTP."""
+        """Return hard class predictions (0 = GOOD, 1 = BAD) for X.
+
+        Uses one POST /score-batch call when the adapter declares
+        ``batch_scoring``; otherwise falls back to the original one-HTTP-call-
+        per-row loop. Both paths return the same values in the same order.
+        """
+        if self.supports_batch_scoring:
+            values = self._score_batch(X)["predictions"]
+            try:
+                return np.array([int(v) for v in values], dtype=int)
+            except (ValueError, TypeError) as exc:
+                raise RESTAdapterError(
+                    f"Invalid prediction value in batch response: {exc}"
+                ) from exc
+
         records = X.to_dict("records")
         predictions: List[int] = []
 
@@ -110,11 +205,27 @@ class RESTAdapter(ModelAdapter):
         return np.array(predictions, dtype=int)
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Return P(class == 1) == P(BAD) as a 1-D array, one value per row via HTTP."""
+        """Return P(class == 1) == P(BAD) as a 1-D array, one value per row.
+
+        Uses one POST /score-batch call when the adapter declares
+        ``batch_scoring``; otherwise falls back to the original one-HTTP-call-
+        per-row loop. This is the function perturbation-based explainers call
+        thousands of times per explained row, so the batch path is what makes
+        KernelSHAP/LIME feasible against a remote model at all.
+        """
         if not self.supports_probability:
             raise ProbabilityCapabilityUnavailable(
                 f"Model '{self.model_id}' does not support probability predictions."
             )
+
+        if self.supports_batch_scoring:
+            values = self._score_batch(X)["probabilities"]
+            try:
+                return np.array([float(v) for v in values], dtype=float)
+            except (ValueError, TypeError) as exc:
+                raise RESTAdapterError(
+                    f"Invalid probability value in batch response: {exc}"
+                ) from exc
 
         records = X.to_dict("records")
         probabilities: List[float] = []

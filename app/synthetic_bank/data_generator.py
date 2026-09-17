@@ -31,6 +31,16 @@ NUMERIC_FEATURES: List[str] = [
 FEATURE_COLUMNS: List[str] = CATEGORICAL_FEATURES + NUMERIC_FEATURES
 
 TARGET_COLUMN = "default_flag"
+
+# Stable per-record identity. IDENTITY METADATA ONLY -- deliberately NOT in
+# FEATURE_COLUMNS, so it can never reach the model as a feature. It exists so
+# explainability evidence can be attributed to a specific applicant: explain()
+# reports row_index, which is a POSITION inside whatever frame was explained
+# and restarts at 0 on every call, so it cannot anchor evidence on its own.
+# Mirrors the role app/models/preprocessing.py's INSTANCE_ID_COLUMN plays for
+# German Credit.
+CUSTOMER_ID_COLUMN = "customer_id"
+CUSTOMER_ID_PREFIX = "SB"
 LABEL_GOOD = 0
 LABEL_BAD = 1
 POSITIVE_CLASS = LABEL_BAD
@@ -79,6 +89,27 @@ def _sigmoid(z: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-z))
 
 
+def make_customer_ids(n: int, random_state: int) -> List[str]:
+    """Deterministic, unique customer identifiers for a generated population.
+
+    Derived purely from ``(random_state, position)`` -- NO random draws are
+    involved. That matters twice over: the same call always produces the same
+    ids, and adding identity to a population cannot perturb the rng call
+    order or any generated feature distribution.
+
+    Row ``i`` of a population keeps its id across regenerations, and across
+    population sizes, which is the durability that lets explainability
+    evidence reference an applicant after the frame has been re-derived.
+
+    The seed is part of the id because two different populations are two
+    different sets of people; sharing ids between them would make records
+    from distinct scenarios collide. That is why the baseline (42), the
+    drift scenario (99), and the registry's background batch (123) each get
+    a disjoint id space for free.
+    """
+    return [f"{CUSTOMER_ID_PREFIX}-{random_state:04d}-{i:06d}" for i in range(n)]
+
+
 def _generate_population(
     n: int,
     random_state: int,
@@ -97,6 +128,15 @@ def _generate_population(
     logic, rng call order, and clipping/rounding as the baseline population
     -- so ``generate_customers()`` (all overrides at their defaults) remains
     byte-identical to its pre-refactor output for a given ``random_state``.
+
+    Every population built here carries a durable ``customer_id`` (see
+    ``make_customer_ids()``). Attaching it at this ONE shared core -- rather
+    than in each ``generate_*`` wrapper -- is what keeps identity consistent
+    across the baseline and drift scenarios without duplicating any
+    generation logic. It is derived arithmetically from ``(random_state,
+    position)``, draws no randomness, and is appended after every rng call
+    below, so the feature values are bit-for-bit what they were before
+    identity existed.
     """
     rng = np.random.RandomState(random_state)
     employment_type_probs = employment_type_probs or EMPLOYMENT_TYPE_PROBS
@@ -138,6 +178,9 @@ def _generate_population(
 
     return pd.DataFrame(
         {
+            # Identity first, so a reader sees whose row this is before its
+            # features. Never in FEATURE_COLUMNS, so it cannot reach the model.
+            CUSTOMER_ID_COLUMN: make_customer_ids(n, random_state),
             "employment_type": employment_type,
             "region": region,
             "loan_purpose": loan_purpose,
@@ -174,7 +217,9 @@ def generate_customers(n: int = 1000, random_state: int = 42) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Columns: FEATURE_COLUMNS + [TARGET_COLUMN], ``n`` rows.
+        Columns: [CUSTOMER_ID_COLUMN] + FEATURE_COLUMNS + [TARGET_COLUMN],
+        ``n`` rows. ``customer_id`` is identity metadata, never a feature --
+        consumers that feed this to a model select ``FEATURE_COLUMNS``.
     """
     return _generate_population(n, random_state)
 
@@ -225,7 +270,10 @@ def generate_drift_customers(n: int = 1000, random_state: int = 99) -> pd.DataFr
     Returns
     -------
     pd.DataFrame
-        Columns: FEATURE_COLUMNS + [TARGET_COLUMN], ``n`` rows.
+        Columns: [CUSTOMER_ID_COLUMN] + FEATURE_COLUMNS + [TARGET_COLUMN],
+        ``n`` rows. The drift seed differs from the baseline's, so drift
+        customers occupy a disjoint ``customer_id`` space -- a drifted
+        population is a different set of people, not the same people again.
     """
     return _generate_population(
         n,
@@ -287,10 +335,18 @@ def generate_edge_case_customers() -> pd.DataFrame:
     this function does not change model behavior or compute any assurance
     result.
 
+    Carries NO ``customer_id``, deliberately. These are hand-specified
+    schema probes rather than a generated population of people -- there is
+    no seed or row provenance for an id to be durable against, and labelling
+    a boundary probe as a customer would invite evidence being attributed to
+    an applicant who does not exist. Its exact input-only schema is also a
+    contract callers already rely on.
+
     Returns
     -------
     pd.DataFrame
-        Columns: FEATURE_COLUMNS only (no TARGET_COLUMN).
+        Columns: FEATURE_COLUMNS only (no TARGET_COLUMN, no
+        CUSTOMER_ID_COLUMN).
     """
     return pd.DataFrame(_EDGE_CASE_ROWS)[FEATURE_COLUMNS]
 
@@ -331,11 +387,18 @@ def generate_missing_data_customers(
         Columns to inject missingness into. Defaults to all of
         ``FEATURE_COLUMNS``. Must be a subset of ``FEATURE_COLUMNS``.
 
+    Carries NO ``customer_id``: this is an input-only scenario whose exact
+    FEATURE_COLUMNS schema callers already rely on. Note the useful
+    corollary of ``columns`` having to be a subset of ``FEATURE_COLUMNS`` --
+    identity could never be among the nulled columns even if it were
+    present, because a missing identity is not a missing feature.
+
     Returns
     -------
     pd.DataFrame
-        Columns: FEATURE_COLUMNS only (no TARGET_COLUMN), ``n`` rows, with
-        NaN values injected per the parameters above.
+        Columns: FEATURE_COLUMNS only (no TARGET_COLUMN, no
+        CUSTOMER_ID_COLUMN), ``n`` rows, with NaN values injected per the
+        parameters above.
     """
     if not (0.0 <= missing_rate < 1.0):
         raise ValueError(f"missing_rate must be in [0.0, 1.0), got {missing_rate}")
@@ -379,7 +442,8 @@ def generate_reference(n: int = 1000, random_state: int = 42) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Columns: FEATURE_COLUMNS + [TARGET_COLUMN], ``n`` rows.
+        Columns: [CUSTOMER_ID_COLUMN] + FEATURE_COLUMNS + [TARGET_COLUMN],
+        ``n`` rows.
     """
     return generate_customers(n=n, random_state=random_state)
 
@@ -414,9 +478,10 @@ def generate_current(
     Returns
     -------
     pd.DataFrame
-        ``"normal"``/``"drift"``: FEATURE_COLUMNS + [TARGET_COLUMN].
-        ``"edge"``/``"missing"``: FEATURE_COLUMNS only (no target column --
-        see the respective generator's docstring for why).
+        ``"normal"``/``"drift"``: [CUSTOMER_ID_COLUMN] + FEATURE_COLUMNS +
+        [TARGET_COLUMN].
+        ``"edge"``/``"missing"``: FEATURE_COLUMNS only (no target column and
+        no customer id -- see the respective generator's docstring for why).
 
     Raises
     ------

@@ -56,9 +56,20 @@ __all__ = [
 EVIDENCE_TYPE_INSTANCE = "instance_contribution"
 EVIDENCE_TYPE_GLOBAL = "global_importance"
 
-# The unit each method's numbers are expressed in. Mirrors the semantics
-# documented in app/explainability/explain.py; this module does not convert
-# between them and must never be extended to do so.
+# LEGACY FALLBACK ONLY -- the unit each method's numbers are expressed in when
+# the explanation does not state its own scale.
+#
+# THIS MAPPING IS NOT GENERALLY TRUE, and must never be treated as the
+# authority. "shap" does not imply one scale:
+#
+#   linear SHAP -> log_odds      (additive to the decision function)
+#   tree SHAP   -> probability   (additive to predict_proba)
+#   kernel SHAP -> probability   (estimates the same quantity by sampling)
+#
+# So an explanation that states its own ``scale`` always wins (see
+# ``_resolve_scale``). This table is consulted only for a legacy
+# no-adapter explanation dict, which comes exclusively from the German Credit
+# linear pipeline -- where "shap" genuinely does mean log_odds.
 SCALE_BY_METHOD: Dict[str, str] = {
     "shap": "log_odds",
     "lime": "probability",
@@ -118,6 +129,53 @@ def _validate_explanation(explanation: Any) -> str:
     return method
 
 
+def _resolve_scale(method: str, explanation: Mapping) -> str:
+    """The unit the contributions are actually in.
+
+    THE EXPLANATION'S OWN ``scale`` WINS. Deriving the scale from
+    ``method == 'shap'`` alone is wrong for two of the three SHAP explainers
+    (see SCALE_BY_METHOD): tree and kernel SHAP are probability-scale, so a
+    method-keyed lookup would stamp 'log_odds' on probability numbers. The
+    evidence would then be internally consistent, plausible, and wrong -- and
+    a report comparing it against a genuinely log-odds explanation would be
+    comparing two different units on one axis.
+    """
+    declared = explanation.get("scale")
+    if declared is not None:
+        return str(declared)
+    return SCALE_BY_METHOD[method]
+
+
+def _resolve_model_id(
+    explanation: Mapping, model_id: Optional[str]
+) -> Optional[str]:
+    """The identity of the model that produced this explanation.
+
+    An adapter-aware explanation carries its own ``model_id``, DERIVED from
+    the adapter that was actually explained. That is authoritative. A caller
+    may also pass one -- and if the two disagree, this raises.
+
+    Silently preferring either side would be worse than failing: preferring
+    the caller's would relabel one model's attributions as another model's,
+    which is precisely the mislabelling this module exists to prevent;
+    preferring the explanation's would leave a caller believing its own label
+    had been recorded when it had not.
+    """
+    derived = explanation.get("model_id")
+    derived = None if derived is None else str(derived)
+    supplied = None if model_id is None else str(model_id)
+
+    if derived is not None and supplied is not None and derived != supplied:
+        raise ValueError(
+            f"Conflicting model_id: the explanation was produced for "
+            f"{derived!r} but evidence was requested for {supplied!r}. "
+            "Explainability evidence identity is derived from the model that "
+            "was actually explained, so this will not be relabelled. Pass the "
+            "explanation from the right model, or omit model_id."
+        )
+    return derived if derived is not None else supplied
+
+
 def _build_provenance(
     method: str,
     explanation: Mapping,
@@ -128,18 +186,40 @@ def _build_provenance(
 ) -> Dict[str, Any]:
     """Provenance carried on every record so values cannot be misread.
 
-    model_id / assurance_run_id are additive (Phase 5D): included
-    only when provided. No existing test checks provenance's own key
-    set exactly (confirmed by inspection this session), so this is
-    safe either way -- conditional inclusion is used anyway for
-    consistency with fairness_evidence()'s identical fix.
+    Everything here is READ from the explanation, never recomputed. Fields an
+    explanation does not carry are reported as None/[] rather than guessed --
+    a legacy no-adapter explanation genuinely does not know its explainer, and
+    inventing one would be a claim about how the numbers were produced.
+
+    ``explainer``/``fidelity`` matter alongside ``scale`` because they are what
+    distinguish an exact additive decomposition from a sampled estimate and
+    from a local surrogate fit. A consumer that cannot tell those apart cannot
+    responsibly cite any of them.
+
+    model_id / assurance_run_id stay conditional: an unknown identity is
+    omitted rather than recorded as None, so a consumer cannot mistake
+    "identity unknown" for "identity is null".
     """
     provenance: Dict[str, Any] = {
         "method": method,
-        "scale": SCALE_BY_METHOD[method],
+        "scale": _resolve_scale(method, explanation),
+        "explainer": explanation.get("explainer"),
+        "fidelity": explanation.get("fidelity"),
         "model_version": model_version,
+        "model_type": explanation.get("model_type"),
+        "integration_type": explanation.get("integration_type"),
+        "feature_space": list(explanation.get("feature_space") or []),
+        "n_background": explanation.get("n_background"),
+        "n_samples": explanation.get("n_samples"),
+        "random_seed": explanation.get("random_seed"),
+        "n_rows_explained": len(explanation.get("per_instance") or []),
+        "limitations": list(explanation.get("limitations") or []),
         "is_mock": explanation["is_mock"],
     }
+    # Only present when the explanation actually names one.
+    background_id = explanation.get("background_dataset_id")
+    if background_id is not None:
+        provenance["background_dataset_id"] = background_id
     if model_id is not None:
         provenance["model_id"] = model_id
     if assurance_run_id is not None:
@@ -303,9 +383,21 @@ def build_instance_evidence(
         )
 
     records = _validate_prediction_records(prediction_records, per_instance)
+    resolved_model_id = _resolve_model_id(explanation, model_id)
     provenance = _build_provenance(
-        method, explanation, version, model_id=model_id, assurance_run_id=assurance_run_id,
+        method,
+        explanation,
+        version,
+        model_id=resolved_model_id,
+        assurance_run_id=assurance_run_id,
     )
+    # TOP-LEVEL identity, not only nested in provenance: the report router
+    # (app/report/generate.py::_route_evidence_records) buckets records by
+    # record.get("model_id") at the top level. Identity one level down is
+    # invisible to it, so two models' explanation evidence pooled into one
+    # section would collapse into a single unattributable bucket. Omitted
+    # entirely when unknown, so "unknown" is never recorded as a null id.
+    identity = {} if resolved_model_id is None else {"model_id": resolved_model_id}
 
     evidence: List[Dict[str, Any]] = []
     for position, (row, record) in enumerate(zip(per_instance, records)):
@@ -333,6 +425,7 @@ def build_instance_evidence(
             evidence.append(
                 {
                     "evidence_type": EVIDENCE_TYPE_INSTANCE,
+                    **identity,
                     "instance_id": instance_id,
                     "feature": feature,
                     "importance": _as_jsonable_number(
@@ -386,13 +479,21 @@ def build_global_evidence(
             f"feature -> value, got {type(global_importance).__name__}."
         )
 
+    resolved_model_id = _resolve_model_id(explanation, model_id)
     provenance = _build_provenance(
-        method, explanation, version, model_id=model_id, assurance_run_id=assurance_run_id,
+        method,
+        explanation,
+        version,
+        model_id=resolved_model_id,
+        assurance_run_id=assurance_run_id,
     )
+    # Top-level identity, for the same routing reason as instance evidence.
+    identity = {} if resolved_model_id is None else {"model_id": resolved_model_id}
 
     return [
         {
             "evidence_type": EVIDENCE_TYPE_GLOBAL,
+            **identity,
             "feature": feature,
             "importance": _as_jsonable_number(
                 importance,

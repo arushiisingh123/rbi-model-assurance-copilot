@@ -95,11 +95,17 @@ def _as_plain_float(value: Any, *, where: str) -> float:
 
 
 def scale_label(method: str) -> str:
-    """The unit the given method's contributions are expressed in.
+    """The unit a method's contributions are expressed in, BY METHOD ALONE.
 
     Read from ``app.explainability.evidence.SCALE_BY_METHOD`` — the existing
     source of truth — rather than restated here, so the label can never drift
     from the analytical module.
+
+    PREFER ``explanation_scale_label()`` when an explanation dict is in hand.
+    A method-keyed lookup is only correct for the no-adapter German Credit
+    path, whose SHAP really is log-odds because its final estimator is
+    linear. Tree and kernel SHAP are probability-scale, so labelling those
+    from the method name would put the wrong unit on the axis.
     """
     key = str(method).lower()
     if key not in SCALE_BY_METHOD:
@@ -110,9 +116,31 @@ def scale_label(method: str) -> str:
     return SCALE_BY_METHOD[key]
 
 
+def explanation_scale_label(explanation: Mapping[str, Any]) -> str:
+    """The unit THIS explanation's contributions are actually in.
+
+    The explanation's own ``scale`` wins when it states one. An
+    adapter-aware explanation always does; a legacy one does not, and then
+    the method-keyed fallback applies — correct for that path.
+
+    This is the difference between an axis reading "Contribution (log_odds)"
+    over probability-scale tree SHAP values and one reading the truth. The
+    numbers would look entirely normal either way.
+    """
+    declared = explanation.get("scale") if isinstance(explanation, Mapping) else None
+    if declared:
+        return str(declared)
+    return scale_label(explanation.get("method", ""))
+
+
 def scale_caption(method: str) -> str:
     """One-line axis caption naming the method and its scale."""
     return f"Contribution ({scale_label(method)})"
+
+
+def explanation_scale_caption(explanation: Mapping[str, Any]) -> str:
+    """Axis caption using the explanation's own scale."""
+    return f"Contribution ({explanation_scale_label(explanation)})"
 
 
 def global_importance_rows(explanation: Mapping[str, Any]) -> List[Dict[str, Any]]:

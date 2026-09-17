@@ -4,7 +4,7 @@ Pure Python module with zero FastAPI/uvicorn dependencies. Orchestrates end-to-e
 evaluation across Model, Explainability, Fairness, Drift, and RBI Compliance modules.
 """
 import hashlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 import pandas as pd
@@ -638,6 +638,64 @@ def build_drift_comparison() -> Dict[str, Any]:
 
 
 
+def _monitoring_for_assurance(
+    adapter: Optional[Any],
+    model_dict: Dict[str, Any],
+    *,
+    model_id: Optional[str],
+    assurance_run_id: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Run the monitoring lane for this assurance run, or say why it could not.
+
+    Returns ``(monitoring_result, unavailable_reason)`` -- exactly one is set.
+
+    DEGRADES, NEVER FAILS THE RUN. Monitoring needs to SCORE two windows, so
+    for a remotely-served model it depends on that service being reachable.
+    An unreachable bank must not take down the explainability, fairness and
+    compliance findings that were already computed successfully -- but it must
+    also not silently look like "no drift". So an unavailable monitoring lane
+    is reported as null plus a reason, which is a different statement from a
+    monitoring run that measured no drift.
+
+    This delegates entirely to ``app.monitoring.run_monitoring()`` -- the
+    monitoring implementation is not duplicated or reimplemented here.
+    """
+    from app.monitoring import resolve_protected_attribute, run_monitoring
+
+    if adapter is None:
+        # The default path has no adapter to score windows through. Monitoring
+        # is adapter-driven by construction, so this is a capability gap, not
+        # an error.
+        return None, (
+            "Monitoring requires a model adapter to score its reference and "
+            "current windows. This assurance run was executed on the default "
+            "in-process path with no adapter, so no monitoring was performed. "
+            "Request a model explicitly (model_id) to include monitoring."
+        )
+
+    context = {
+        "model_id": adapter.model_id,
+        "model_version": adapter.model_version,
+        "assurance_run_id": assurance_run_id,
+    }
+    try:
+        return (
+            run_monitoring(
+                adapter,
+                context=context,
+                protected_attribute=resolve_protected_attribute(adapter),
+            ),
+            None,
+        )
+    except Exception as exc:  # noqa: BLE001 - reported verbatim, never swallowed
+        return None, (
+            f"Monitoring could not be completed for model "
+            f"'{model_id or adapter.model_id}' ({type(exc).__name__}: {exc}). "
+            "This is NOT a statement that the model is stable -- no drift was "
+            "measured at all."
+        )
+
+
 def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
     """Execute end-to-end model assurance evaluation across all domains.
 
@@ -655,7 +713,15 @@ def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
     """
     raw_model = compute_real_model(adapter=adapter)
     api_model = format_model_for_api(raw_model)
-    api_model["model_metrics"] = compute_real_model_metrics(adapter=adapter)
+    # Held-out metrics only exist for a model trained on German Credit's
+    # schema. For any other adapter (e.g. the synthetic bank's) that split has
+    # no meaning, so metrics are reported as null -- an UNAVAILABLE capability
+    # must not fail the whole assurance run, and must never be filled with
+    # another model's numbers. Mirrors the same guard the /model route uses.
+    try:
+        api_model["model_metrics"] = compute_real_model_metrics(adapter=adapter)
+    except ValueError:
+        api_model["model_metrics"] = None
     # The SAME adapter that produced raw_model above -- so the explanation
     # describes the model that was actually scored, not the default LR
     # artifact stamped with this adapter's model_id four lines below.
@@ -664,13 +730,24 @@ def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
     drift_res = compute_real_drift(raw_model, adapter=adapter)
     evidence_by_rule = build_evidence_by_rule()
     model_id = adapter.model_id if adapter is not None else None
+
+    # ONE run id for the whole run, minted here because this is the only place
+    # that knows the run is one run. Every downstream artefact (compliance,
+    # monitoring, evidence, report) is stamped with this same value, so a
+    # reviewer can gather everything produced together.
+    assurance_run_id = mint_assurance_run_id()
+
     compliance_res = compute_real_compliance(
         raw_model,
         explain_res,
         fairness_res,
         drift_res,
         model_id=model_id,
+        assurance_run_id=assurance_run_id,
         evidence_by_rule=evidence_by_rule,
+    )
+    monitoring_res, monitoring_unavailable = _monitoring_for_assurance(
+        adapter, raw_model, model_id=model_id, assurance_run_id=assurance_run_id
     )
     return {
         "model": api_model,
@@ -681,6 +758,10 @@ def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
         },
         "compliance": compliance_res,
         "note": ASSURANCE_NOTE,
+        "model_id": model_id,
+        "assurance_run_id": assurance_run_id,
+        "monitoring": monitoring_res,
+        "monitoring_unavailable_reason": monitoring_unavailable,
     }
 
 

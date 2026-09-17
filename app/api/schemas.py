@@ -160,12 +160,33 @@ class ComplianceResult(BaseModel):
 
 
 class AssuranceResult(BaseModel):
-    """Full aggregated assurance result combining all four evaluation domains."""
+    """Full aggregated assurance result across every evaluation domain.
+
+    The five original fields are unchanged. The rest are additive:
+
+    - ``model_id`` / ``assurance_run_id`` make the run self-identifying. Every
+      nested result and every evidence record produced by the same run carries
+      the SAME ``assurance_run_id``, so a reviewer can gather one run's output
+      without relying on request timing.
+    - ``monitoring`` is the monitoring lane's own contract, unchanged.
+    - ``monitoring_unavailable_reason`` is set when, and only when,
+      ``monitoring`` is null. A null monitoring block with a stated reason is a
+      different claim from a monitoring run that measured no drift, and the two
+      must never be confused by a consumer.
+    """
     model: ModelResult
     explainability: ExplainabilityResult
     fairness_drift: FairnessDriftResult
     compliance: ComplianceResult
     note: str
+
+    model_id: Optional[str] = None
+    assurance_run_id: Optional[str] = None
+    # Forward reference: the monitoring schemas are defined further down (they
+    # depend on DriftResult/FairnessResult above). Resolved by the
+    # model_rebuild() call at the end of this module.
+    monitoring: Optional["MonitoringAssuranceResult"] = None
+    monitoring_unavailable_reason: Optional[str] = None
 
 
 # =============================================================================
@@ -393,3 +414,20 @@ class ReportResult(BaseModel):
     disclaimers: list[str]
     evidence_coverage: EvidenceCoverage
     is_mock: bool
+    # Run identity (additive). A report is evidence about ONE model produced by
+    # ONE assurance run; without these a reader cannot tell which. Optional so
+    # the pre-existing default-model report and the mock fallback still
+    # validate unchanged.
+    model_id: Optional[str] = None
+    assurance_run_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Resolve forward references declared before their target model.
+#
+# AssuranceResult.monitoring points at MonitoringAssuranceResult, which is
+# defined below it because it depends on DriftResult/FairnessResult. Without
+# this rebuild the annotation stays an unresolved string and FastAPI cannot
+# build the response schema.
+# ---------------------------------------------------------------------------
+AssuranceResult.model_rebuild()

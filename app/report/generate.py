@@ -382,6 +382,24 @@ EVIDENCE_SECTION_BY_TYPE = {
     "global_importance": "explainability",       # app/explainability/evidence.py
     "fairness_group": "fairness",                # app/fairness/evidence.py
     "fairness_summary": "fairness",              # app/fairness/evidence.py
+    # Monitoring lane (app/monitoring/evidence.py). Registered here so a
+    # monitoring record reaches a report SECTION instead of raising --
+    # _route_evidence_records() deliberately refuses unknown types rather than
+    # dropping them, so without these entries monitoring evidence could not be
+    # carried at all.
+    #
+    # Mapped into the EXISTING five sections rather than adding a sixth: a
+    # report section is a regulatory topic, and monitored drift is the same
+    # topic as measured drift. Prediction drift is a distinct measurement (a
+    # score/label distribution rather than an input distribution) but it
+    # answers the same "has the population shifted" question, so it belongs in
+    # the drift narrative alongside feature drift.
+    "feature_drift_summary": "drift",            # app/monitoring/evidence.py
+    "prediction_drift_label": "drift",           # app/monitoring/evidence.py
+    "prediction_drift_score": "drift",           # app/monitoring/evidence.py
+    "monitoring_summary": "drift",               # app/monitoring/evidence.py
+    # Monitored fairness is fairness -- same metric family, same section.
+    "fairness_monitor_summary": "fairness",      # app/monitoring/evidence.py
 }
 
 # Evidence types that are unbounded in size (one record per instance per
@@ -591,6 +609,7 @@ def generate_report(
     compliance: Dict[str, Any],
     evidence_records: Optional[List[Dict[str, Any]]] = None,
     model_id: Optional[str] = None,
+    assurance_run_id: Optional[str] = None,
     llm_client: Optional[Any] = None,
     retrieval_fn: Optional[Any] = None,
     skip_live: bool = False,
@@ -818,6 +837,11 @@ def generate_report(
         disclaimers=disclaimers,
         evidence_coverage=coverage,
         is_mock=False,
+        # Carried through so the report names the model and the run it
+        # describes. Both are passed in rather than inferred: this layer
+        # must never guess which model produced the findings it narrates.
+        model_id=model_id,
+        assurance_run_id=assurance_run_id,
     )
 
     return result.model_dump()

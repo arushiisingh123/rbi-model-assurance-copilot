@@ -27,6 +27,7 @@ from app.api.orchestration import (
     compute_real_model,
     compute_real_model_metrics,
     format_model_for_api,
+    mint_assurance_run_id,
 )
 from app.api.schemas import (
     AssuranceResult,
@@ -44,6 +45,7 @@ from app.models import (
     ModelNotFoundError,
     get_default_registry,
 )
+from app.models.rest_adapter import RESTAdapterError
 
 app = FastAPI(
     title="AI Model Risk & Assurance Copilot",
@@ -145,11 +147,32 @@ def get_explainability(
     here, and none is needed.
     """
     adapter = _resolve_adapter(model_id)
-    raw_model = compute_real_model(adapter=adapter)
     try:
+        raw_model = compute_real_model(adapter=adapter)
         return compute_real_explainability(raw_model, method=method, adapter=adapter)
     except ValueError as exc:
+        # Bad request: unsupported method, or a feature schema this model
+        # cannot accept.
         raise HTTPException(status_code=400, detail=str(exc))
+    except RESTAdapterError as exc:
+        # The model itself is remote and unreachable/misbehaving. That is an
+        # upstream dependency failure, not a client error and not our bug --
+        # 502 says so explicitly instead of surfacing an unexplained 500.
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Model service for '{model_id}' could not be reached or "
+                f"returned an invalid response: {exc}"
+            ),
+        )
+    except NotImplementedError as exc:
+        # A capability the model genuinely does not have.
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                f"Explainability is not implementable for model '{model_id}': {exc}"
+            ),
+        )
 
 
 @app.get("/fairness-drift", response_model=FairnessDriftResult)
@@ -227,9 +250,22 @@ def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
 
 
 @app.get("/assurance-result", response_model=AssuranceResult)
-def get_assurance_result() -> dict:
-    """Retrieve aggregated assurance results across all four evaluation domains."""
-    return build_assurance_result()
+def get_assurance_result(model_id: Optional[str] = Query(default=None)) -> dict:
+    """Retrieve aggregated assurance results for the requested model.
+
+    ``model_id`` is additive: omitted, the default in-process path runs exactly
+    as before. Supplied, ONE adapter drives prediction, metrics, explainability,
+    fairness, drift, compliance identity and monitoring -- so every domain in
+    the response describes the same model, and the run carries a single
+    ``assurance_run_id``.
+
+    Monitoring degrades rather than failing the request: if a model's service
+    is unreachable, ``monitoring`` is null and
+    ``monitoring_unavailable_reason`` says why, while the domains that did
+    compute are still returned.
+    """
+    adapter = _resolve_adapter(model_id)
+    return build_assurance_result(adapter=adapter)
 
 
 @app.get("/mock-assurance-result", response_model=AssuranceResult, deprecated=True)
@@ -243,14 +279,25 @@ def mock_assurance_result() -> dict:
 
 
 @app.get("/report", response_model=ReportResult)
-def get_report() -> dict:
-    """Retrieve Phase 3 LLM model assurance report.
+def get_report(model_id: Optional[str] = Query(default=None)) -> dict:
+    """Retrieve the LLM model assurance report for the requested model.
 
-    Attempts live report generation using Groq (openai/gpt-oss-120b) and
-    interim RAG retrieval. If live generation is unavailable (e.g. missing
+    ``model_id`` is additive: omitted, the default in-process path runs exactly
+    as before. Supplied, ONE adapter drives every finding the report narrates,
+    and the report carries that ``model_id`` plus the run's
+    ``assurance_run_id``.
+
+    Attempts live report generation using Groq (openai/gpt-oss-120b) and the
+    RAG retriever. If live generation is unavailable (e.g. missing
     GROQ_API_KEY, API error, rate limit, timeout), falls back gracefully
     to MOCK_REPORT_RESULT with a disclaimer. Never returns HTTP 500.
+
+    NOTE: the fallback is a clearly-disclaimered MOCK and is only reached when
+    the LLM itself is unavailable -- it never substitutes for a failed
+    analytical finding, which would hide a real failure behind mock numbers.
     """
+    adapter = _resolve_adapter(model_id)
+
     if not os.getenv("GROQ_API_KEY", "").strip():
         logger.info("GROQ_API_KEY not configured; returning mock report fallback immediately.")
         fallback = dict(MOCK_REPORT_RESULT)
@@ -265,13 +312,29 @@ def get_report() -> dict:
         return fallback
 
     try:
-        raw_model = compute_real_model()
-        explain_res = compute_real_explainability(raw_model, method="shap")
-        fairness_res = compute_real_fairness(raw_model)
-        drift_res = compute_real_drift(raw_model)
-        compliance_res = compute_real_compliance(raw_model, explain_res, fairness_res, drift_res)
+        resolved_model_id = adapter.model_id if adapter is not None else None
+        assurance_run_id = mint_assurance_run_id()
+
+        raw_model = compute_real_model(adapter=adapter)
+        explain_res = compute_real_explainability(
+            raw_model, method="shap", adapter=adapter
+        )
+        fairness_res = compute_real_fairness(raw_model, adapter=adapter)
+        drift_res = compute_real_drift(raw_model, adapter=adapter)
+        compliance_res = compute_real_compliance(
+            raw_model,
+            explain_res,
+            fairness_res,
+            drift_res,
+            model_id=resolved_model_id,
+            assurance_run_id=assurance_run_id,
+        )
         evidence_records = build_evidence_records(
-            raw_model, explain_res, method="shap"
+            raw_model,
+            explain_res,
+            method="shap",
+            model_id=resolved_model_id,
+            assurance_run_id=assurance_run_id,
         )
         from app.report import generate_report
         return generate_report(
@@ -281,6 +344,8 @@ def get_report() -> dict:
             drift=drift_res,
             compliance=compliance_res,
             evidence_records=evidence_records,
+            model_id=resolved_model_id,
+            assurance_run_id=assurance_run_id,
         )
     except Exception as exc:
         logger.warning("Live report generation failed, falling back to mock: %s", exc)

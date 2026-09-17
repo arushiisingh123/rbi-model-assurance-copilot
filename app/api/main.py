@@ -5,6 +5,7 @@ fairness & drift, and RBI compliance assurance.
 """
 import logging
 import os
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -36,6 +37,11 @@ from app.api.schemas import (
     ModelResult,
     ReportResult,
 )
+from app.models import (
+    ModelAdapter,
+    ModelNotFoundError,
+    get_default_registry,
+)
 
 app = FastAPI(
     title="AI Model Risk & Assurance Copilot",
@@ -44,18 +50,60 @@ app = FastAPI(
 )
 
 
+def _resolve_adapter(model_id: Optional[str]) -> Optional[ModelAdapter]:
+    """Resolve a model_id to its registered ModelAdapter.
+
+    None -> None (preserves today's default-LR behavior exactly).
+    Otherwise -> get_default_registry().get(model_id), raising HTTPException(404)
+    on ModelNotFoundError.
+    """
+    if model_id is None:
+        return None
+    try:
+        return get_default_registry().get(model_id)
+    except ModelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @app.get("/health")
 def health() -> dict:
     """Basic liveness check."""
     return {"status": "ok"}
 
 
+@app.get("/models")
+def list_models() -> list[dict]:
+    """List all registered credit-scoring models and their metadata."""
+    return get_default_registry().list_models()
+
+
+@app.get("/models/{model_id}")
+def get_model_metadata(model_id: str) -> dict:
+    """Retrieve metadata for a specific registered model."""
+    try:
+        return get_default_registry().get(model_id).metadata()
+    except ModelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/models/{model_id}/health")
+def get_model_health(model_id: str) -> dict:
+    """Check health/readiness status for a specific registered model."""
+    try:
+        return get_default_registry().get(model_id).health()
+    except ModelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @app.get("/model", response_model=ModelResult)
-def get_model() -> dict:
+def get_model(model_id: Optional[str] = Query(default=None)) -> dict:
     """Retrieve real model predictions, feature matrix (list[dict]), metadata, and metrics."""
-    raw_model = compute_real_model()
+    adapter = _resolve_adapter(model_id)
+    raw_model = compute_real_model(adapter=adapter)
     model_dict = format_model_for_api(raw_model)
-    model_dict["model_metrics"] = compute_real_model_metrics()
+    model_dict["model_metrics"] = (
+        compute_real_model_metrics() if adapter is None else None
+    )
     return model_dict
 
 
@@ -65,9 +113,11 @@ def get_explainability(
         default="shap",
         description="Explainability method ('shap' or 'lime')",
     ),
+    model_id: Optional[str] = Query(default=None),
 ) -> dict:
     """Retrieve real explainability results for the credit scoring model (SHAP or LIME)."""
-    raw_model = compute_real_model()
+    adapter = _resolve_adapter(model_id)
+    raw_model = compute_real_model(adapter=adapter)
     try:
         return compute_real_explainability(raw_model, method=method)
     except ValueError as exc:
@@ -75,9 +125,10 @@ def get_explainability(
 
 
 @app.get("/fairness-drift", response_model=FairnessDriftResult)
-def get_fairness_drift() -> dict:
+def get_fairness_drift(model_id: Optional[str] = Query(default=None)) -> dict:
     """Retrieve real fairness metrics and train/test drift detection analysis."""
-    raw_model = compute_real_model()
+    adapter = _resolve_adapter(model_id)
+    raw_model = compute_real_model(adapter=adapter)
     fairness_res = compute_real_fairness(raw_model)
     drift_res = compute_real_drift(raw_model)
     return {
@@ -126,9 +177,10 @@ def get_drift_comparison() -> dict:
 
 
 @app.get("/compliance", response_model=ComplianceResult)
-def get_compliance() -> dict:
+def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
     """Retrieve RBI compliance findings mapped against real technical checks."""
-    raw_model = compute_real_model()
+    adapter = _resolve_adapter(model_id)
+    raw_model = compute_real_model(adapter=adapter)
     explain_res = compute_real_explainability(raw_model, method="shap")
     fairness_res = compute_real_fairness(raw_model)
     drift_res = compute_real_drift(raw_model)

@@ -39,6 +39,11 @@ from app.models.preprocessing import (
     preprocess,
     split_data,
 )
+from app.models.registry import (
+    ModelNotFoundError,
+    ModelRegistry,
+    get_default_registry,
+)
 
 __all__ = [
     "train",
@@ -77,4 +82,8 @@ __all__ = [
     "RF_MODEL_TYPE",
     "RF_MODEL_VERSION",
     "RandomForestAdapter",
+    # Model registry (Phase 5)
+    "ModelNotFoundError",
+    "ModelRegistry",
+    "get_default_registry",
 ]

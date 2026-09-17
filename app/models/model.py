@@ -582,6 +582,42 @@ class ModelAdapter(ABC):
     model_version: str
     model_type: str
     feature_names: List[str]
+    integration_type: str = "in_process"
+
+    @property
+    def input_schema(self) -> Dict[str, Dict[str, str]]:
+        """Expected feature types for the model's raw inputs."""
+        return {
+            col: {
+                "type": "categorical" if col in CATEGORICAL_FEATURES else "numeric"
+            }
+            for col in self.feature_names
+        }
+
+    @property
+    def capabilities(self) -> Dict[str, bool]:
+        """Adapter capability flags."""
+        return {
+            "predict_proba": self.supports_probability,
+            "batch": True,
+            "explainability": True,
+        }
+
+    def health(self) -> Dict[str, Any]:
+        """Liveness/readiness check. In-process adapters just confirm the fitted
+        model is loaded, e.g. return {"status": "ok"}."""
+        return {"status": "ok"}
+
+    def metadata(self) -> Dict[str, Any]:
+        """Return {model_id, model_version, model_type, integration_type,
+        capabilities} — the same shape /models/{model_id} will serialize."""
+        return {
+            "model_id": self.model_id,
+            "model_version": self.model_version,
+            "model_type": self.model_type,
+            "integration_type": self.integration_type,
+            "capabilities": self.capabilities,
+        }
 
     @property
     @abstractmethod

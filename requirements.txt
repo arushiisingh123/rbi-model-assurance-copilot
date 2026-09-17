@@ -21,3 +21,4 @@ lime
 joblib
 pydantic
 groq==1.7.0
+xgboost

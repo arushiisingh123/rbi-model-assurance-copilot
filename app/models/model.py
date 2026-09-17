@@ -582,6 +582,42 @@ class ModelAdapter(ABC):
     model_version: str
     model_type: str
     feature_names: List[str]
+    integration_type: str = "in_process"
+
+    @property
+    def input_schema(self) -> Dict[str, Dict[str, str]]:
+        """Expected feature types for the model's raw inputs."""
+        return {
+            col: {
+                "type": "categorical" if col in CATEGORICAL_FEATURES else "numeric"
+            }
+            for col in self.feature_names
+        }
+
+    @property
+    def capabilities(self) -> Dict[str, bool]:
+        """Adapter capability flags."""
+        return {
+            "predict_proba": self.supports_probability,
+            "batch": True,
+            "explainability": True,
+        }
+
+    def health(self) -> Dict[str, Any]:
+        """Liveness/readiness check. In-process adapters just confirm the fitted
+        model is loaded, e.g. return {"status": "ok"}."""
+        return {"status": "ok"}
+
+    def metadata(self) -> Dict[str, Any]:
+        """Return {model_id, model_version, model_type, integration_type,
+        capabilities} — the same shape /models/{model_id} will serialize."""
+        return {
+            "model_id": self.model_id,
+            "model_version": self.model_version,
+            "model_type": self.model_type,
+            "integration_type": self.integration_type,
+            "capabilities": self.capabilities,
+        }
 
     @property
     @abstractmethod
@@ -798,16 +834,33 @@ def predict_batch(
         schema = list(adapter.feature_names)
 
     if feature_matrix is None:
-        # Provide held-out test split as sensible default
-        df = load_dataset(DEFAULT_DATASET_PATH)
-        X, y, _, _ = preprocess(df)
-        id_series = df[INSTANCE_ID_COLUMN]
-        _, X_test, _, _ = split_data(X, y, test_size=0.2, random_state=42)
-        # Align identity to the shuffled test rows BEFORE reset_index: the
-        # pre-reset index labels are only a join key back to the identifiers
-        # captured at load; the identity itself is the instance_id value.
-        instance_ids: List[str] = id_series.loc[X_test.index].astype(str).tolist()
-        feature_matrix = X_test.reset_index(drop=True)
+        if adapter is not None and set(schema) != set(FEATURE_COLUMNS):
+            # The adapter's schema is not German Credit's (e.g. a RESTAdapter
+            # for an external model with its own feature space) -- the
+            # German Credit test split below cannot serve as demo input for
+            # it. Fall back to the adapter's own background/reference data
+            # instead. Adapters whose schema matches German Credit's (the
+            # default LR path, and RandomForestAdapter) are unaffected and
+            # keep using the test split exactly as before this branch existed.
+            demo_data = adapter.background_data()
+            if demo_data is None or len(demo_data) == 0:
+                raise ValueError(
+                    f"No feature_matrix supplied and adapter '{adapter.model_id}' "
+                    "has no background data to use as default demo input."
+                )
+            instance_ids = make_fallback_instance_ids(len(demo_data))
+            feature_matrix = demo_data.reset_index(drop=True)
+        else:
+            # Provide held-out test split as sensible default
+            df = load_dataset(DEFAULT_DATASET_PATH)
+            X, y, _, _ = preprocess(df)
+            id_series = df[INSTANCE_ID_COLUMN]
+            _, X_test, _, _ = split_data(X, y, test_size=0.2, random_state=42)
+            # Align identity to the shuffled test rows BEFORE reset_index: the
+            # pre-reset index labels are only a join key back to the identifiers
+            # captured at load; the identity itself is the instance_id value.
+            instance_ids: List[str] = id_series.loc[X_test.index].astype(str).tolist()
+            feature_matrix = X_test.reset_index(drop=True)
     else:
         if not isinstance(feature_matrix, pd.DataFrame):
             raise TypeError(

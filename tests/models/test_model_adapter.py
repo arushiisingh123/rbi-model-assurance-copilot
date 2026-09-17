@@ -30,8 +30,9 @@ from app.models.model import (
     MODEL_VERSION,
     ProbabilityCapabilityUnavailable,
     _get_or_train_default_model,
+    _positive_class_probabilities,
 )
-from app.models.preprocessing import FEATURE_COLUMNS
+from app.models.preprocessing import DEFAULT_DATASET_PATH, FEATURE_COLUMNS
 
 
 # =====================================================================
@@ -225,3 +226,58 @@ def test_predict_batch_raises_when_adapter_lacks_probability_capability(sample_r
     stub = _NoProbabilityAdapter(_get_or_train_default_model())
     with pytest.raises(ProbabilityCapabilityUnavailable):
         predict_batch(feature_matrix=sample_rows, adapter=stub)
+
+
+# =====================================================================
+# 6. trained_on provenance (owner: Namitha)
+# =====================================================================
+
+
+class _CustomTrainedOnAdapter(ModelAdapter):
+    """Stub adapter exposing a non-German-Credit ``trained_on`` value, for
+    testing that ``predict_batch()`` reflects adapter-specific provenance
+    instead of hardcoding the German Credit dataset path."""
+
+    model_id = "stub-custom-trained-on"
+    model_version = "0.0.0"
+    model_type = "stub"
+    trained_on = "synthetic:stub-generator(seed=1)"
+
+    def __init__(self, fitted_model):
+        self.feature_names = list(FEATURE_COLUMNS)
+        self._fitted_model = fitted_model
+
+    @property
+    def supports_probability(self) -> bool:
+        return True
+
+    def predict(self, X):
+        return self._fitted_model.predict(X)
+
+    def predict_proba(self, X):
+        return _positive_class_probabilities(self._fitted_model, X)
+
+    def load_fitted_model(self):
+        return self._fitted_model
+
+    def background_data(self):
+        return None
+
+
+def test_predict_batch_uses_adapter_trained_on_when_present(sample_rows):
+    stub = _CustomTrainedOnAdapter(_get_or_train_default_model())
+    result = predict_batch(feature_matrix=sample_rows, adapter=stub)
+    assert result["model_metadata"]["trained_on"] == "synthetic:stub-generator(seed=1)"
+
+
+def test_predict_batch_falls_back_to_default_dataset_path_when_adapter_lacks_trained_on(
+    sample_rows, adapter
+):
+    assert not hasattr(adapter, "trained_on")
+    result = predict_batch(feature_matrix=sample_rows, adapter=adapter)
+    assert result["model_metadata"]["trained_on"] == DEFAULT_DATASET_PATH
+
+
+def test_predict_batch_no_adapter_still_uses_default_dataset_path(sample_rows):
+    result = predict_batch(feature_matrix=sample_rows)
+    assert result["model_metadata"]["trained_on"] == DEFAULT_DATASET_PATH

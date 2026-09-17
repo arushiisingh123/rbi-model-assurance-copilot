@@ -17,6 +17,7 @@ from app.config.thresholds import (
     VALID_STATUSES,
     classify_disparate_impact,
     classify_psi,
+    worst_status,
 )
 
 
@@ -85,3 +86,69 @@ def test_doc_parity_with_thresholds_md():
     assert DI_WARNING_THRESHOLD == 0.70
     assert PSI_PASS_THRESHOLD == 0.10
     assert PSI_WARNING_THRESHOLD == 0.25
+
+
+# ---------------------------------------------------------------------------
+# worst_status -- combining already-classified statuses (Arushi, monitoring)
+# ---------------------------------------------------------------------------
+
+
+def test_worst_status_severity_ordering():
+    """FAIL beats WARNING beats PASS, whatever order they arrive in."""
+    assert worst_status(STATUS_PASS, STATUS_WARNING, STATUS_FAIL) == STATUS_FAIL
+    assert worst_status(STATUS_FAIL, STATUS_PASS) == STATUS_FAIL
+    assert worst_status(STATUS_PASS, STATUS_WARNING) == STATUS_WARNING
+    assert worst_status(STATUS_WARNING, STATUS_PASS) == STATUS_WARNING
+    assert worst_status(STATUS_PASS, STATUS_PASS) == STATUS_PASS
+    assert worst_status(STATUS_WARNING) == STATUS_WARNING
+
+
+def test_worst_status_skips_pending_rather_than_ranking_it():
+    """PENDING means "not measured", which is not a severity.
+
+    An unmeasured channel must neither hide a real finding behind a PASS nor be
+    reported as a finding itself -- so it is skipped, and the measured channels
+    decide the outcome on their own.
+    """
+    assert worst_status(STATUS_PENDING, STATUS_PASS) == STATUS_PASS
+    assert worst_status(STATUS_PENDING, STATUS_FAIL) == STATUS_FAIL
+    assert worst_status(STATUS_PENDING, STATUS_WARNING) == STATUS_WARNING
+    # A PENDING alongside a PASS must not become WARNING or FAIL...
+    assert worst_status(STATUS_PASS, STATUS_PENDING) != STATUS_FAIL
+    # ...and must not suppress a FAIL either.
+    assert worst_status(STATUS_FAIL, STATUS_PENDING, STATUS_PENDING) == STATUS_FAIL
+
+
+def test_worst_status_is_pending_when_nothing_was_measured():
+    """No arguments, or all PENDING, means "not measured" -- never PASS.
+
+    Returning PASS here would report a clean bill of health for a run in which
+    no channel produced a measurement at all.
+    """
+    assert worst_status() == STATUS_PENDING
+    assert worst_status(STATUS_PENDING) == STATUS_PENDING
+    assert worst_status(STATUS_PENDING, STATUS_PENDING) == STATUS_PENDING
+
+
+def test_worst_status_rejects_an_unknown_status():
+    """An unrecognised status is refused, not silently dropped.
+
+    Ignoring it could discard a real FAIL from the aggregate and report the run
+    as passing.
+    """
+    import pytest
+
+    with pytest.raises(ValueError, match="Unknown status value"):
+        worst_status(STATUS_PASS, "CRITICAL")
+
+
+def test_worst_status_introduces_no_new_status_value():
+    """The vocabulary stays exactly the four existing statuses."""
+    combinations = [
+        (STATUS_PASS, STATUS_WARNING),
+        (STATUS_FAIL, STATUS_PENDING),
+        (STATUS_PENDING,),
+        (),
+    ]
+    for combo in combinations:
+        assert worst_status(*combo) in VALID_STATUSES

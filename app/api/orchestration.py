@@ -27,6 +27,10 @@ from app.models.model import (
     predict_batch,
 )
 from app.models.preprocessing import DEFAULT_DATASET_PATH
+from app.rag.evidence import RBIEvidence, build_evidence
+from app.rag.retrieval import build_default_retriever
+from app.rbi.rules import load_rules
+from app.report.generate import SECTION_QUERIES
 
 # LIME is materially more expensive per row than SHAP, so the explained frame
 # is capped. Declared once and used by both the explainability call and the
@@ -52,11 +56,19 @@ def compute_real_model(adapter: Optional[Any] = None) -> Dict[str, Any]:
     return predict_batch(adapter=adapter)
 
 
-def compute_real_model_metrics() -> Dict[str, Any]:
-    """Evaluate held-out metrics for the current trained credit model."""
+def compute_real_model_metrics(adapter: Optional[Any] = None) -> Dict[str, Any]:
+    """Evaluate held-out metrics for the current trained credit model.
+
+    ``adapter`` is optional and additive (Phase 5D): omitted, this is
+    byte-identical to the pre-Phase-5D default LR path. Passed, metrics
+    are computed for that adapter's own fitted model instead of the
+    default LR model (delegates to
+    ``app.models.model.evaluate_current_model(adapter=...)``, which does
+    the actual metric calculation).
+    """
     from app.models.model import evaluate_current_model
 
-    raw_metrics = evaluate_current_model()
+    raw_metrics = evaluate_current_model(adapter=adapter)
     roc_auc_status = (
         "computed" if raw_metrics.get("roc_auc") is not None
         else "unavailable_no_probabilities"
@@ -284,6 +296,7 @@ def compute_real_compliance(
     *,
     model_id: Optional[str] = None,
     assurance_run_id: Optional[str] = None,
+    evidence_by_rule: Optional[Dict[str, List[Any]]] = None,
 ) -> Dict[str, Any]:
     """Run real compliance evaluation against flat technical findings.
 
@@ -291,6 +304,15 @@ def compute_real_compliance(
     behavior is byte-identical to before this parameter existed (both
     existing callers -- get_compliance() and get_report() in main.py --
     omit them and are therefore unaffected).
+
+    evidence_by_rule is additive and optional (Phase 5D, live RAG ->
+    compliance wiring): omitted, behavior is byte-identical to before
+    this parameter existed -- forwarded verbatim to
+    app.compliance.compliance.evaluate_compliance(), which already
+    defines the exact shape (dict keyed by rule_id, values are lists of
+    app.rag.evidence.RBIEvidence records) and does no retrieval itself.
+    This function does not build evidence_by_rule -- see
+    build_evidence_by_rule() below for the live retrieval step.
     """
     technical_findings = {
         "model": model_dict,
@@ -299,8 +321,66 @@ def compute_real_compliance(
         "drift": drift_dict,
     }
     return evaluate_compliance(
-        technical_findings, model_id=model_id, assurance_run_id=assurance_run_id,
+        technical_findings,
+        model_id=model_id,
+        assurance_run_id=assurance_run_id,
+        evidence_by_rule=evidence_by_rule,
     )
+
+
+def build_evidence_by_rule(
+    retrieval_fn: Optional[Any] = None,
+) -> Dict[str, List[RBIEvidence]]:
+    """Retrieve real RBI evidence for every rule, keyed by rule_id.
+
+    Phase 5D: the live counterpart to the evidence_by_rule contract
+    app.compliance.compliance.evaluate_compliance() already accepts
+    (docs/decisions.md, "evidence_chunks gap closure"). This function
+    performs the retrieval that closure deliberately left to a caller;
+    it does not change retrieval, evidence-building, or compliance
+    logic in any of their owning modules.
+
+    Query text per rule is not invented here: each rule's ``category``
+    (fairness / drift / explainability / model -- app.rbi.rules) is
+    looked up in app.report.generate.SECTION_QUERIES, the same query
+    text the live report-generation path already uses for that domain,
+    so compliance and report generation query the RBI corpus with one
+    shared vocabulary rather than two that could drift apart. A rule
+    whose category has no entry in SECTION_QUERIES (none exist in the
+    current rule set) is simply given no evidence ([]), never a
+    fabricated or best-guess query.
+
+    retrieval_fn : Optional[Any]
+        Injectable retriever -- a real app.rag.retrieval.RBIRetriever
+        (or any ``retrieval_fn(query=...)`` callable), or a test double.
+        Omitted (the default), builds one fresh
+        app.rag.retrieval.build_default_retriever() for this call only.
+        Never stored on this module or reused across calls -- no global
+        mutable RAG state (each call re-indexes the approved corpus
+        in-memory, the same cost every other live caller of
+        build_default_retriever() already pays).
+
+    Returns
+    -------
+    Dict[str, List[RBIEvidence]]
+        One entry per loaded rule_id. NO_VERIFIED_EVIDENCE (or a rule
+        with no mapped query) yields [] for that rule -- never
+        fabricated evidence.
+    """
+    active_retrieval_fn = retrieval_fn
+    if active_retrieval_fn is None:
+        active_retrieval_fn = build_default_retriever()
+
+    evidence_by_rule: Dict[str, List[RBIEvidence]] = {}
+    for rule in load_rules():
+        rule_id = rule["rule_id"]
+        query = SECTION_QUERIES.get(rule.get("category"))
+        if query is None:
+            evidence_by_rule[rule_id] = []
+            continue
+        result = active_retrieval_fn(query=query)
+        evidence_by_rule[rule_id] = build_evidence(result)
+    return evidence_by_rule
 
 
 # Underscore aliases matching previous private names in app/api/main.py
@@ -464,16 +544,36 @@ def build_drift_comparison() -> Dict[str, Any]:
 
 
 
-def build_assurance_result() -> Dict[str, Any]:
-    """Execute end-to-end model assurance evaluation across all domains."""
-    raw_model = compute_real_model()
+def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
+    """Execute end-to-end model assurance evaluation across all domains.
+
+    adapter : Optional[Any]
+        Phase 5D, additive. Omitted (the default), byte-identical to the
+        pre-existing default Logistic Regression path -- same
+        predictions, same model_metrics, no model_id stamped onto the
+        compliance result. Supplied (a ModelAdapter, e.g.
+        RandomForestAdapter), the SAME adapter is used consistently for
+        model prediction (compute_real_model), model metrics
+        (compute_real_model_metrics), and model identity
+        (adapter.model_id, stamped onto the compliance result) -- so the
+        returned predictions, metrics, and compliance identity always
+        describe one model, never a mix of two.
+    """
+    raw_model = compute_real_model(adapter=adapter)
     api_model = format_model_for_api(raw_model)
-    api_model["model_metrics"] = compute_real_model_metrics()
+    api_model["model_metrics"] = compute_real_model_metrics(adapter=adapter)
     explain_res = compute_real_explainability(raw_model, method="shap")
     fairness_res = compute_real_fairness(raw_model)
     drift_res = compute_real_drift(raw_model)
+    evidence_by_rule = build_evidence_by_rule()
+    model_id = adapter.model_id if adapter is not None else None
     compliance_res = compute_real_compliance(
-        raw_model, explain_res, fairness_res, drift_res
+        raw_model,
+        explain_res,
+        fairness_res,
+        drift_res,
+        model_id=model_id,
+        evidence_by_rule=evidence_by_rule,
     )
     return {
         "model": api_model,

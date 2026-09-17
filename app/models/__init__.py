@@ -43,7 +43,9 @@ from app.models.registry import (
     ModelNotFoundError,
     ModelRegistry,
     get_default_registry,
+    reset_default_registry,
 )
+from app.models.rest_adapter import RESTAdapter, RESTAdapterError
 
 __all__ = [
     "train",
@@ -86,4 +88,8 @@ __all__ = [
     "ModelNotFoundError",
     "ModelRegistry",
     "get_default_registry",
+    "reset_default_registry",
+    # REST adapter (Phase 5)
+    "RESTAdapter",
+    "RESTAdapterError",
 ]

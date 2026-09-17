@@ -22,6 +22,7 @@ from app.models import (
     ModelNotFoundError,
     ModelRegistry,
     RandomForestAdapter,
+    RESTAdapter,
     get_default_registry,
 )
 
@@ -175,15 +176,16 @@ def test_registry_list_models(lr_adapter, rf_adapter):
 # =====================================================================
 
 
-def test_default_registry_contains_both_default_models():
+def test_default_registry_contains_all_default_models():
     default_reg = get_default_registry()
     models = default_reg.list_models()
 
-    assert len(models) == 2
+    assert len(models) == 3
     registered_ids = {m["model_id"] for m in models}
     assert registered_ids == {
         "german-credit-logistic-regression",
         "german-credit-random-forest",
+        "synthetic-bank-credit-v1",
     }
 
     lr = default_reg.get("german-credit-logistic-regression")
@@ -191,6 +193,20 @@ def test_default_registry_contains_both_default_models():
 
     rf = default_reg.get("german-credit-random-forest")
     assert isinstance(rf, RandomForestAdapter)
+
+    synthetic_bank = default_reg.get("synthetic-bank-credit-v1")
+    assert isinstance(synthetic_bank, RESTAdapter)
+    assert synthetic_bank.metadata() == {
+        "model_id": "synthetic-bank-credit-v1",
+        "model_version": "1.0.0",
+        "model_type": "xgboost",
+        "integration_type": "rest",
+        "capabilities": {
+            "predict_proba": True,
+            "batch": True,
+            "explainability": False,
+        },
+    }
 
 
 def test_default_registry_is_singleton():

@@ -32,16 +32,20 @@ client = TestClient(app)
 # =====================================================================
 
 
-def test_get_models_returns_both_default_models():
+SYNTHETIC_BANK_MODEL_ID = "synthetic-bank-credit-v1"
+
+
+def test_get_models_returns_all_default_models():
     response = client.get("/models")
     assert response.status_code == 200
     models = response.json()
     assert isinstance(models, list)
-    assert len(models) == 2
+    assert len(models) == 3
 
     model_map = {m["model_id"]: m for m in models}
     assert MODEL_ID in model_map
     assert RF_MODEL_ID in model_map
+    assert SYNTHETIC_BANK_MODEL_ID in model_map
 
     lr_meta = model_map[MODEL_ID]
     assert lr_meta["model_type"] == MODEL_TYPE
@@ -59,6 +63,15 @@ def test_get_models_returns_both_default_models():
         "predict_proba": True,
         "batch": True,
         "explainability": True,
+    }
+
+    bank_meta = model_map[SYNTHETIC_BANK_MODEL_ID]
+    assert bank_meta["model_type"] == "xgboost"
+    assert bank_meta["integration_type"] == "rest"
+    assert bank_meta["capabilities"] == {
+        "predict_proba": True,
+        "batch": True,
+        "explainability": False,
     }
 
 

@@ -26,15 +26,20 @@ would force both to be revisited. That has now happened:
   DELETED or rewritten into the positive invariant. Nothing here asserts
   "RF explanation equals LR explanation" any more.
 
-TWO TESTS REMAIN XFAIL, FOR A DIFFERENT AND NARROWER REASON
------------------------------------------------------------
-``app/api/orchestration.py::compute_real_explainability()`` still calls
-``explain()`` WITHOUT forwarding an adapter, so explanations requested
-through the API layer are still the LR model's. That file is Khushi's and is
-deliberately not modified here. The two tests that route through it stay
-``xfail(strict=True)`` with that as their stated reason -- so they flip to a
-failure the moment the one-line handoff lands. See the summary's handoff
-section.
+THE ORCHESTRATION HANDOFF IS NOW CLOSED TOO
+-------------------------------------------
+Two tests here were left ``xfail(strict=True)`` because
+``app/api/orchestration.py::compute_real_explainability()`` took no adapter
+and so explanations requested through the API layer were still the default
+LR model's -- ``explain()`` was correct, but the adapter never reached it.
+
+That function now accepts and forwards an adapter, and every live route that
+resolves one (``/explainability``, ``/compliance``,
+``build_assurance_result()``) passes it. Both markers have been REMOVED with
+their assertions unchanged, and the boundary is now covered in both
+directions: identity and explainer selection are asserted through
+orchestration, and a no-adapter call is asserted to keep the original
+four-key default behaviour.
 
 SCOPE
 -----
@@ -119,20 +124,24 @@ def rf_shap(rf_adapter, rf_model_output):
 
 
 @pytest.fixture(scope="module")
-def lr_shap_via_orchestration(lr_model_output):
-    """What the API layer currently returns for LR.
+def lr_shap_via_orchestration(lr_adapter, lr_model_output):
+    """What the API layer returns for LR, through orchestration.
 
-    Kept separate from ``lr_shap`` because orchestration does not forward an
-    adapter yet, so its result is NOT necessarily an explanation of the model
-    that was asked for. That gap is the remaining handoff.
+    Kept separate from ``lr_shap`` because it exercises the ORCHESTRATION
+    boundary rather than ``explain()`` directly -- the adapter has to survive
+    that hop for the explanation to describe the right model.
     """
-    return compute_real_explainability(lr_model_output, method="shap")
+    return compute_real_explainability(
+        lr_model_output, method="shap", adapter=lr_adapter
+    )
 
 
 @pytest.fixture(scope="module")
-def rf_shap_via_orchestration(rf_model_output):
-    """What the API layer currently returns when RF was requested."""
-    return compute_real_explainability(rf_model_output, method="shap")
+def rf_shap_via_orchestration(rf_adapter, rf_model_output):
+    """What the API layer returns when RF was requested, through orchestration."""
+    return compute_real_explainability(
+        rf_model_output, method="shap", adapter=rf_adapter
+    )
 
 
 def _head(model_output: dict, n: int) -> dict:
@@ -253,24 +262,19 @@ def test_lr_and_rf_produce_different_lime_global_importance(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HANDOFF (Khushi): app/api/orchestration.py::"
-        "compute_real_explainability() does not forward an adapter to "
-        "explain(), so explanations requested through the API layer are still "
-        "the default LR model's. explain(adapter=...) itself is fixed and "
-        "proven by test_lr_and_rf_produce_different_shap_global_importance."
-    ),
-)
 def test_orchestration_forwards_the_adapter_to_explain(
     lr_shap_via_orchestration, rf_shap_via_orchestration
 ):
-    """The remaining gap, kept as a strict tripwire on the handoff.
+    """The orchestration boundary must not drop the adapter.
 
-    Everything below explain() is fixed; this asserts the API layer actually
-    uses it. Strict, so it flips to a failure the moment the handoff lands
-    and this marker must be removed.
+    FIXED: ``xfail(strict=True)`` marker REMOVED, assertion unchanged. It was
+    a tripwire on the handoff while ``compute_real_explainability()`` had no
+    adapter parameter; it now forwards one.
+
+    This is deliberately separate from
+    ``test_lr_and_rf_produce_different_shap_global_importance``, which proves
+    ``explain()`` itself is correct. This one proves the API layer actually
+    uses it -- the two failed independently, and only this one covers the hop.
     """
     assert (
         lr_shap_via_orchestration["global_importance"]
@@ -282,25 +286,63 @@ def test_orchestration_forwards_the_adapter_to_explain(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HANDOFF (Khushi): same root cause as above -- orchestration does not "
-        "forward the adapter, so its LIME result is the LR surrogate for "
-        "every model."
-    ),
-)
-def test_orchestration_forwards_the_adapter_for_lime(
-    lr_model_output, rf_model_output
+def test_orchestration_reports_the_identity_it_explained(
+    lr_shap_via_orchestration, rf_shap_via_orchestration
 ):
+    """Identity must survive the orchestration hop, not just the explain call.
+
+    Without this, an explanation could be correct but unattributable -- or
+    worse, attributable to the wrong model by a caller that stamps model_id
+    itself (which is exactly what build_assurance_result() used to do).
+    """
+    assert lr_shap_via_orchestration["model_id"] == MODEL_ID
+    assert rf_shap_via_orchestration["model_id"] == RF_MODEL_ID
+
+    # And the explainer really was chosen per model, not shared.
+    assert lr_shap_via_orchestration["explainer"] == "LinearExplainer"
+    assert rf_shap_via_orchestration["explainer"] == "TreeExplainer"
+    # Two 'shap' results, two different scales -- carried, not inferred.
+    assert lr_shap_via_orchestration["scale"] == "log_odds"
+    assert rf_shap_via_orchestration["scale"] == "probability"
+
+
+def test_orchestration_forwards_the_adapter_for_lime(
+    lr_adapter, rf_adapter, lr_model_output, rf_model_output
+):
+    """FIXED: marker REMOVED, assertion unchanged.
+
+    LIME is the more model-agnostic method -- it needs only a probability
+    callable -- so it must distinguish the two models at least as well as
+    SHAP does once the adapter reaches it.
+    """
     lr_lime = compute_real_explainability(
-        _head(lr_model_output, LIME_ROWS), method="lime"
+        _head(lr_model_output, LIME_ROWS), method="lime", adapter=lr_adapter
     )
     rf_lime = compute_real_explainability(
-        _head(rf_model_output, LIME_ROWS), method="lime"
+        _head(rf_model_output, LIME_ROWS), method="lime", adapter=rf_adapter
     )
 
     assert lr_lime["global_importance"] != rf_lime["global_importance"]
+    assert lr_lime["model_id"] == MODEL_ID
+    assert rf_lime["model_id"] == RF_MODEL_ID
+
+
+def test_orchestration_without_an_adapter_keeps_the_default_behaviour():
+    """Backward compatibility: the adapter parameter is additive.
+
+    Existing callers that pass no adapter (e.g. ``/report``) must keep the
+    default German Credit behaviour and the original four-key output, with no
+    identity claimed for a model nobody named.
+    """
+    model_output = compute_real_model()
+    result = compute_real_explainability(model_output, method="shap")
+
+    assert set(result) == {
+        "method",
+        "per_instance",
+        "global_importance",
+        "is_mock",
+    }
 
 
 def test_explain_accepts_an_adapter_and_reports_the_model_it_explained(rf_adapter):

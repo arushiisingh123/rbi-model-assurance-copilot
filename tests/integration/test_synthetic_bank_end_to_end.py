@@ -157,18 +157,46 @@ def test_model_health_reports_unreachable_when_service_is_not_running():
 
 
 # =====================================================================
-# Documented current limitations -- NOT fixed in this task, asserted so
-# they're a known boundary rather than a silent surprise later.
+# Previously-documented limitations, now CLOSED.
+#
+# These two tests asserted hard failures (400 / 500) caused by
+# compute_real_explainability() dropping the resolved adapter, so explain()
+# fell back to the German Credit schema gate. The adapter is now forwarded,
+# and both routes work for this model over real HTTP.
 # =====================================================================
 
 
-def test_explainability_currently_fails_for_synthetic_bank_model(synthetic_bank_registered):
-    # explain() validates the incoming feature schema against German Credit's
-    # raw schema before it ever reaches load_fitted_model()/background data,
-    # so this is a clean 400 (schema mismatch), not a 500 -- still a hard
-    # failure, just caught earlier and more informatively than expected.
+def test_explainability_now_works_for_synthetic_bank_model(synthetic_bank_registered):
+    """FIXED: was a 400 from the German Credit schema gate.
+
+    The adapter resolved from model_id now reaches explain(), so the bank's
+    own 10-feature schema and reference data are used. It has no local
+    artifact, so the honest result is an APPROXIMATE black-box explanation --
+    never exact TreeSHAP, despite model_type being literally "xgboost".
+    """
     response = client.get(f"/explainability?model_id={SYNTHETIC_BANK_MODEL_ID}")
-    assert response.status_code == 400
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["model_id"] == SYNTHETIC_BANK_MODEL_ID
+    assert body["model_type"] == "xgboost"
+    assert body["integration_type"] == "rest"
+    assert body["available"] is True
+
+    # Black-box, because there are no model internals to inspect.
+    assert body["explainer"] == "KernelExplainer"
+    assert body["fidelity"] == "approximate"
+    assert body["scale"] == "probability"
+    assert body["fidelity"] != "exact"
+    assert body["explainer"] != "TreeExplainer"
+
+    # The bank's OWN feature space -- not German Credit's, and no silent
+    # fallback to the default LR model's 20 columns.
+    from app.synthetic_bank.data_generator import FEATURE_COLUMNS as BANK_FEATURES
+
+    assert set(body["global_importance"]) == set(BANK_FEATURES)
+    assert "status_checking_account" not in body["global_importance"]
+    assert body["limitations"]
 
 
 def test_fairness_drift_now_works_correctly_for_synthetic_bank_model(synthetic_bank_registered):
@@ -221,21 +249,22 @@ def test_drift_without_adapter_falls_back_to_german_credit_by_design(synthetic_b
     assert set(with_adapter["features_evaluated"]) == set(NUMERIC_FEATURES)
 
 
-def test_compliance_still_fails_for_synthetic_bank_model_but_now_via_explainability(
-    synthetic_bank_registered,
-):
-    """/compliance still fails for the synthetic bank model -- but now
-    ONLY because of explainability's genuine, separate, not-yet-fixed
-    schema mismatch (Step 6, Manas's ownership), not because of fairness's
-    now-fixed KeyError. Confirms the fairness/drift fix didn't just move
-    the failure around without checking why it still fails."""
-    response = client.get(f"/compliance?model_id={SYNTHETIC_BANK_MODEL_ID}")
-    assert response.status_code == 500
+def test_compliance_now_works_for_synthetic_bank_model(synthetic_bank_registered):
+    """FIXED: was a 500 caused solely by explainability.
 
-    # Isolate the cause directly: fairness and drift no longer raise for
-    # this model; explainability still does.
+    /compliance was the last route still failing for this model, and the
+    cause was explainability's dropped adapter -- fairness and drift had
+    already been fixed. All three now receive the same adapter, so the route
+    completes.
+    """
+    response = client.get(f"/compliance?model_id={SYNTHETIC_BANK_MODEL_ID}")
+    assert response.status_code == 200
+
+    # Isolate each contributor directly: none of the three raises now, and
+    # explainability describes THIS model rather than the default LR one.
     from app.api.orchestration import (
         compute_real_explainability,
+        compute_real_drift,
         compute_real_fairness,
         compute_real_model,
     )
@@ -245,5 +274,29 @@ def test_compliance_still_fails_for_synthetic_bank_model_but_now_via_explainabil
     raw_model = compute_real_model(adapter=adapter)
 
     compute_real_fairness(raw_model, adapter=adapter)  # must not raise
-    with pytest.raises(ValueError):
+    compute_real_drift(raw_model, adapter=adapter)  # must not raise
+    explain_res = compute_real_explainability(
+        raw_model, method="shap", adapter=adapter
+    )
+    assert explain_res["model_id"] == SYNTHETIC_BANK_MODEL_ID
+    assert explain_res["fidelity"] == "approximate"
+
+
+def test_compliance_without_the_adapter_still_refuses_this_models_schema(
+    synthetic_bank_registered,
+):
+    """The adapter is what makes it work -- omitting it must still refuse.
+
+    Pins that the fix is the forwarded adapter and not a loosened schema
+    gate: called bare, compute_real_explainability() cannot know which model
+    produced model_dict, so it keeps the default German Credit contract and
+    rejects this frame rather than explaining the wrong model.
+    """
+    from app.api.orchestration import compute_real_explainability, compute_real_model
+    from app.models import get_default_registry
+
+    adapter = get_default_registry().get(SYNTHETIC_BANK_MODEL_ID)
+    raw_model = compute_real_model(adapter=adapter)
+
+    with pytest.raises(ValueError, match="Incompatible feature schema"):
         compute_real_explainability(raw_model, method="shap")

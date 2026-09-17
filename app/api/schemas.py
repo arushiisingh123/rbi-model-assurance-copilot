@@ -60,11 +60,41 @@ class PerInstanceContribution(BaseModel):
 
 
 class ExplainabilityResult(BaseModel):
-    """Output payload from the Explainability module."""
+    """Output payload from the Explainability module.
+
+    The four original fields are unchanged and always present. The rest are
+    additive and populated only when the request resolved a model adapter
+    (i.e. ``?model_id=...``); they default to None so a no-adapter response
+    serializes exactly as it did before.
+
+    WHY THEY MUST BE DECLARED HERE: a response_model silently DROPS keys it
+    does not declare. Without ``scale``, a probability-scale TreeSHAP result
+    would reach a consumer with no unit attached, and any consumer inferring
+    the unit from ``method == "shap"`` would label it log-odds -- numbers that
+    look entirely normal while describing the wrong quantity.
+    """
     method: Literal["shap", "lime"]
     per_instance: list[PerInstanceContribution]
     global_importance: dict[str, float]
     is_mock: bool
+
+    # --- Identity: derived from the adapter actually explained -------------
+    model_id: Optional[str] = None
+    model_type: Optional[str] = None
+    integration_type: Optional[str] = None
+
+    # --- How to read the numbers ------------------------------------------
+    # available=False is a first-class result (empty per_instance /
+    # global_importance plus limitations), NOT an error and NOT is_mock.
+    available: Optional[bool] = None
+    explainer: Optional[str] = None
+    # "log_odds" for linear SHAP; "probability" for tree/kernel SHAP and LIME.
+    # Read this rather than inferring a scale from `method`.
+    scale: Optional[str] = None
+    # "exact" | "approximate" | "surrogate" -- three different claims.
+    fidelity: Optional[str] = None
+    feature_space: Optional[list[str]] = None
+    limitations: Optional[list[str]] = None
 
 
 class FairnessGroup(BaseModel):

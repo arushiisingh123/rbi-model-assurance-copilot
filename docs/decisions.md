@@ -2597,3 +2597,81 @@ their behalf.
 
 **Recorded by:** Khushi, implementation-side status only.
 
+---
+
+### 2026-09-17 — evidence_chunks gap closure: evaluate_compliance() gains optional evidence_by_rule (Nidhi)
+
+**Status:** Implemented, not yet wired into any live caller. Contained,
+compliance-scope-only change; no other team member's module touched.
+
+**Context:** The 2026-09-16 "Phase 5D: Compliance + RAG evidence isolation
+verified" entry recorded `ComplianceFinding.evidence_chunks` as "hardcoded
+to `[]` everywhere -- no RAG-evidence-to-rule producer exists," and
+`docs/module-interfaces.md` D1(d) recorded it as "a distinct field that
+remains unpopulated by any producer today." This entry closes that specific
+gap, narrowly.
+
+**What changed:**
+- `app/compliance/compliance.py::evaluate_compliance()` gains an additive,
+  optional `evidence_by_rule` keyword: a `dict` keyed by `rule_id` (the
+  same ids `app.rbi.rules.load_rules()` uses) whose values are lists of
+  already-retrieved `app.rag.evidence.RBIEvidence` records for that
+  specific rule. A finding's `evidence_chunks` becomes the list of that
+  evidence's `chunk_id` strings, in the caller's order -- deterministic by
+  rule_id, never by topic/fuzzy matching, so evidence cannot leak onto an
+  unrelated rule's finding. Omitted (every existing caller), behavior is
+  byte-identical to before this parameter existed: `evidence_chunks` stays
+  `[]`.
+- `app/compliance/technical_findings.py::run_compliance()` gains the same
+  optional keyword, forwarded only to `evaluate_compliance()` (not to
+  `build_technical_findings()` -- retrieved RBI evidence is not a
+  technical finding).
+- Neither function performs RAG retrieval. `evaluate_compliance()` does not
+  import `app.rag` at runtime at all (duck-types on a `chunk_id` attribute)
+  so compliance gains no new hard dependency on ChromaDB for the many
+  callers that never pass evidence.
+- `ComplianceFinding.evidence_chunks` stays `list[str]` in
+  `app/api/schemas.py` (untouched) -- populated with chunk_id strings, not
+  embedded evidence objects. Full source/locator/provenance for a chunk_id
+  remains reachable through the RAG layer that produced it
+  (`app/rag/vector_store.py`, `app/rag/evidence.py`), consistent with how
+  `ReportSection.llm_interpretation.grounded_in` already represents
+  evidence traceability as locator strings rather than embedded objects.
+
+**What did NOT change:** `app/rbi/`, `app/compliance/engine.py`,
+`app/rag/` (any file), `app/api/orchestration.py`, `app/api/main.py`,
+`app/api/schemas.py`, `app/report/generate.py`, the dashboard, any model/
+fairness/drift/explainability code, and no PASS/WARNING/FAIL/PENDING
+semantics or label semantics. `test_output_matches_approved_shape`'s exact
+finding key-set assertion and all pre-existing compliance/RAG/report tests
+pass unmodified.
+
+**Explicitly out of scope, recorded so it is not silently rediscovered:**
+- No live caller populates `evidence_by_rule` yet. `app/api/orchestration.py`
+  and `app/report/generate.py` are unchanged, so `GET /compliance` and the
+  dashboard's compliance panel still observe `evidence_chunks: []` today.
+  Wiring a real per-rule RAG query into orchestration is separate work,
+  requiring Khushi's involvement (orchestration.py is her module).
+- No rule-to-query mapping (e.g. deriving a RAG query from a rule's
+  category or `technical_finding_ref`) was introduced. The interface
+  intentionally stops at "map evidence a caller already retrieved," per
+  this task's explicit instruction to prefer an optional evidence input
+  over having compliance perform retrieval.
+- `ComplianceAssuranceEnvelope` asymmetry (noted 2026-09-16) is unaffected
+  and remains an open option for the team, not addressed here.
+
+**Tests:** `tests/compliance/test_compliance_evidence_chunks.py` (new, 14
+tests) covers: correct rule receives its evidence; no leakage to unrelated
+rules; multiple chunks preserve order and are not collapsed; source/
+provenance remain reachable on the caller's own `RBIEvidence` objects;
+omitted/empty/unknown-rule_id evidence all yield `[]`, never fabricated; a
+malformed evidence item raises `TypeError` rather than being silently
+dropped or inventing a chunk id; identity kwargs and evidence coexist
+without interference; two calls with different evidence do not leak into
+each other (no hidden global state); `run_compliance()` forwards the
+parameter correctly. Full command and results in the implementation
+report; summary: 14/14 new tests pass, 320 passed + 1 skipped (GROQ-gated,
+pre-existing) across `tests/compliance/ tests/rag/ tests/report/ tests/rbi/`.
+
+**Recorded by:** Nidhi (RBI Compliance / Rule Engine / RAG scope).
+

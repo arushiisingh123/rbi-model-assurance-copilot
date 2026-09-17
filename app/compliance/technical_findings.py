@@ -76,6 +76,7 @@ def run_compliance(
     drift: dict | None = None,
     model_id: Optional[str] = None,
     assurance_run_id: Optional[str] = None,
+    evidence_by_rule: Optional[dict] = None,
 ) -> dict:
     """Assemble the four module outputs and evaluate every RBI rule.
 
@@ -84,6 +85,12 @@ def run_compliance(
     self-documenting) and evaluate_compliance() (so the output
     findings actually carry it -- that's the one that matters for
     telling two models' results apart).
+
+    evidence_by_rule is additive and optional (Phase 5, evidence_chunks
+    gap closure): forwarded only to evaluate_compliance() (see its
+    docstring for the exact shape), never to build_technical_findings()
+    -- retrieved RBI evidence is not a technical finding. Omitted,
+    behavior is byte-identical to before this parameter existed.
     """
     return evaluate_compliance(
         build_technical_findings(
@@ -96,4 +103,5 @@ def run_compliance(
         ),
         model_id=model_id,
         assurance_run_id=assurance_run_id,
+        evidence_by_rule=evidence_by_rule,
     )

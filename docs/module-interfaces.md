@@ -541,11 +541,26 @@ edge.
     "findings": [
         {"rule_id": "RBI-FAIR-01", "rule_description": "...",
          "technical_finding_ref": "fairness.disparate_impact_ratio",
-         "status": "FAIL", "evidence_chunks": []}   # populated once RAG lands, Phase 3
+         "status": "FAIL", "evidence_chunks": []}   # [] unless evidence_by_rule supplies some (Phase 5)
     ],
     "is_mock": False
 }
 ```
+
+**Phase 5 (evidence_chunks gap closure).** `evaluate_compliance()` and
+`run_compliance()` accept an additive, optional `evidence_by_rule` keyword:
+a `dict` keyed by `rule_id` whose values are lists of already-retrieved
+`app.rag.evidence.RBIEvidence` records for that specific rule. When
+supplied, a finding's `evidence_chunks` becomes the list of that
+evidence's `chunk_id` strings (matching `ComplianceFinding.evidence_chunks:
+list[str]` in `app/api/schemas.py`) -- deterministic by rule_id, never
+fuzzy-matched, never fabricated. Omitted (the default), `evidence_chunks`
+stays `[]` exactly as before. Neither function performs RAG retrieval
+itself; that remains `app/rag/`'s responsibility. This parameter is not
+yet wired into any live caller (`app/api/orchestration.py`,
+`app/report/generate.py`) -- that wiring is separate, later work. See
+`app/compliance/compliance.py::evaluate_compliance` docstring for the
+full contract, and `docs/decisions.md`, "evidence_chunks gap closure".
 
 Phase 0 stub (historical): `evaluate_compliance()` builds `findings` from
 `app/rbi/rules.SAMPLE_RULES` (2 sample rules) with `status: "PENDING"` and
@@ -877,7 +892,11 @@ retrieved-evidence citations) on branch
 `feature/nidhi-phase4-compliance-report`, pending team review before merge.
 No schema change was required for this item. `dashboard/panels/compliance_panel.py`
 (also Nidhi, same branch) separately renders `ComplianceFinding.evidence_chunks`,
-a distinct field that remains unpopulated by any producer today.
+a distinct field that was unpopulated by any producer at Phase 4 time. Phase 5
+(see "Phase 5 interface additions" below) added an optional `evidence_by_rule`
+parameter to `evaluate_compliance()`/`run_compliance()` so a caller holding
+retrieved RBI evidence can populate it per rule; no live caller passes it yet,
+so in the current running system the field is still `[]` end to end.
 
 ## Phase 5 interface additions — multi-model assurance
 

@@ -498,8 +498,17 @@ def test_build_evidence_records_threads_model_id():
             assert r["model_id"] == "german-credit-random-forest"
             assert r["assurance_run_id"] == "run-evidence-1"
         elif etype in ("instance_contribution", "global_importance"):
-            assert "model_id" not in r
-            assert "assurance_run_id" not in r
+            # UPDATED: explainability evidence now carries model_id at the TOP
+            # level, like fairness evidence already did.
+            # app/report/generate.py::_route_evidence_records() buckets records
+            # by record.get("model_id") at the top level, so identity nested
+            # only inside provenance was invisible to it -- both models'
+            # explainability evidence collapsed into a single
+            # ("explainability", None) bucket.
+            assert r["model_id"] == "german-credit-random-forest"
+            # assurance_run_id stays in provenance for these two record types
+            # (the router does not read it), so it is verified there. Identity
+            # threading is therefore still fully asserted for both fields.
             assert r["provenance"]["model_id"] == "german-credit-random-forest"
             assert r["provenance"]["assurance_run_id"] == "run-evidence-1"
 

@@ -12,10 +12,15 @@ currently applies to monitoring evidence records.
 
 from app.monitoring.evidence import monitoring_evidence
 from app.monitoring.monitor import MONITORING_CHANNELS, monitor_run
-from app.monitoring.windows import MonitoringWindow, window_from_model_output
+from app.monitoring.windows import (
+    WINDOW_PROVENANCE_VALUES,
+    MonitoringWindow,
+    window_from_model_output,
+)
 
 __all__ = [
     "MONITORING_CHANNELS",
+    "WINDOW_PROVENANCE_VALUES",
     "MonitoringWindow",
     "monitor_run",
     "monitoring_evidence",

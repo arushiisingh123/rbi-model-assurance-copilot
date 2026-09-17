@@ -1102,9 +1102,17 @@ MonitoringWindow(
     scores: Optional[list],              # aligned 1:1 with predictions
     instance_ids: Optional[list],        # aligned 1:1 with predictions
     favorable_label: Optional[Any],      # from the contract's label_semantics
+    provenance: Optional[str] = None,    # additive; WINDOW_PROVENANCE_VALUES
+    window_start: Optional[datetime] = None,   # additive
+    window_end: Optional[datetime] = None,     # additive
 )
 
-window_from_model_output(model_output, *, window_id) -> MonitoringWindow
+window_from_model_output(
+    model_output, *, window_id,
+    provenance=None, window_start=None, window_end=None,
+) -> MonitoringWindow
+
+WINDOW_PROVENANCE_VALUES = ("observed", "mock", "synthetic_fixture")
 ```
 
 `window_from_model_output()` is the monitoring layer's single point of
@@ -1118,6 +1126,50 @@ names a feature, a model type, or a dataset.
 Frozen, and channel lengths are validated at construction — a window
 whose channels describe different record counts is refused rather than
 measured.
+
+**Additive window metadata.** The three fields below are optional and
+backward-compatible: a window constructed the way every existing caller
+constructs one behaves exactly as before, and the five model-output keys
+read by `window_from_model_output()` are unchanged. They are
+**parameters**, not fields of `predict_batch()` output — the model
+contract carries neither provenance nor timestamps, and only the caller
+knows whether the frame it scored was real traffic.
+
+- **`provenance`** — one of `WINDOW_PROVENANCE_VALUES`, or `None`.
+  Exactly the three values `TechnicalFinding.provenance` already uses in
+  `app/api/schemas.py`; no monitoring-specific taxonomy is introduced.
+  The tuple is declared in `app/monitoring/windows.py` rather than
+  imported, so the package stays free of `app.api`, with a parity test
+  asserting it against the real schema (same pattern as
+  `REQUIRED_CONTEXT_FIELDS`). An unrecognised value is refused.
+
+  `None` means "not stated" and is **not** a synonym for `observed`:
+  `is_mock=False` says only that the arithmetic is real, so without this
+  field a synthetic-scenario window is indistinguishable from observed
+  traffic. Defaulting it would license exactly the claim every generator
+  docstring in this project forbids.
+
+- **`window_start` / `window_end`** — optional `datetime` bounds.
+  Semantics: **monitoring-window boundaries**, the period the records in
+  this window describe. Explicitly *not* collection time and *not*
+  scoring time. Independently optional; when both are supplied they must
+  satisfy `window_start <= window_end` and must agree on timezone
+  awareness (mixing naive and aware is refused with an explanation
+  rather than an opaque `TypeError`). Timezone-aware UTC is preferred,
+  matching `app/report/generate.py`; naive datetimes are accepted.
+
+  Nothing in `app/monitoring/` orders, sorts, selects, or schedules by
+  these values. `window_id` is still never parsed. A scheduler, a store
+  and a collector all remain out of scope.
+
+All three are immutable with the rest of the frozen dataclass, and
+participate in equality — two windows over identical data, one
+`observed` and one `synthetic_fixture`, are not equal.
+
+> Not yet threaded into `monitor_run()` results or `monitoring_evidence()`
+> records. That changes a contract other modules consume and is a
+> deliberate follow-up. Covered by
+> `tests/monitoring/test_monitoring_window_metadata.py`.
 
 #### Monitoring run — `app/monitoring/monitor.py`
 

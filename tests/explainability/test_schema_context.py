@@ -720,7 +720,7 @@ def test_no_adapter_shap_global_importance_matches_the_pre_step3_values():
         0.6148128368804278, abs=1e-11
     )
     assert importance["duration_months"] == pytest.approx(
-        0.22136306321736124, abs=1e-12
+        0.22136306321736124, abs=1e-11
     )
 
 

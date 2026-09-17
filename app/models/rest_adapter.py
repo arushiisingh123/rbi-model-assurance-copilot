@@ -36,6 +36,7 @@ class RESTAdapter(ModelAdapter):
         capabilities: Dict[str, bool],
         timeout: float = 10.0,
         background: Optional[pd.DataFrame] = None,
+        protected_attribute: Optional[str] = None,
     ):
         self.model_id = model_id
         self.model_version = model_version
@@ -46,6 +47,10 @@ class RESTAdapter(ModelAdapter):
         self._capabilities = dict(capabilities)
         self.timeout = timeout
         self._background = background
+        # None (the default) means "not declared" -- orchestration must treat
+        # fairness as not applicable/PENDING for this adapter, never guess a
+        # protected attribute or fall back to another model's.
+        self.protected_attribute = protected_attribute
 
     @property
     def supports_probability(self) -> bool:

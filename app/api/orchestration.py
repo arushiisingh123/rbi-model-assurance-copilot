@@ -17,16 +17,17 @@ from app.explainability.evidence import (
     build_global_evidence,
     build_instance_evidence,
 )
+from app.config.thresholds import STATUS_PENDING
 from app.explainability.explain import explain
 from app.fairness.evidence import fairness_evidence
-from app.fairness.fairness import fairness_report
+from app.fairness.fairness import DEFAULT_PROTECTED_ATTRIBUTE, fairness_report
 from app.models.model import (
     MODEL_ID,
     MODEL_VERSION,
     RandomForestAdapter,
     predict_batch,
 )
-from app.models.preprocessing import DEFAULT_DATASET_PATH
+from app.models.preprocessing import DEFAULT_DATASET_PATH, FEATURE_COLUMNS
 from app.rag.evidence import RBIEvidence, build_evidence
 from app.rag.retrieval import build_default_retriever
 from app.rbi.rules import load_rules
@@ -177,15 +178,28 @@ def build_prediction_records(
     ]
 
 
-def _fairness_inputs(model_dict: Dict[str, Any]) -> tuple:
+def _fairness_inputs(
+    model_dict: Dict[str, Any], protected_attribute: Optional[str] = None
+) -> tuple:
     """The exact inputs the fairness finding is computed from.
 
     Shared by ``compute_real_fairness`` and the fairness evidence builder so the
     two can never be given different predictions, a different sensitive feature,
     or a different favourable label.
+
+    protected_attribute is optional and additive: omitted (every existing
+    caller, e.g. build_evidence_records()), behavior is byte-identical to
+    before this parameter existed -- DEFAULT_PROTECTED_ATTRIBUTE
+    ("personal_status_and_sex") is used, exactly as it was hardcoded before.
+    Passed explicitly (by compute_real_fairness(), for an adapter that
+    declares a different -- or no -- protected attribute), that column name
+    is used instead. Callers must not pass protected_attribute=None expecting
+    "no protected attribute": that case must be handled by the caller before
+    reaching this function (see compute_real_fairness()'s PENDING short-circuit).
     """
     predictions = model_dict["predictions"]
-    sens_feature = model_dict["feature_matrix"]["personal_status_and_sex"]
+    attr = protected_attribute if protected_attribute is not None else DEFAULT_PROTECTED_ATTRIBUTE
+    sens_feature = model_dict["feature_matrix"][attr]
     favorable_label = (
         model_dict.get("model_metadata", {})
         .get("label_semantics", {})
@@ -194,9 +208,39 @@ def _fairness_inputs(model_dict: Dict[str, Any]) -> tuple:
     return predictions, sens_feature, favorable_label
 
 
-def compute_real_fairness(model_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Run real fairness evaluation on personal_status_and_sex."""
-    predictions, sens_feature, favorable_label = _fairness_inputs(model_dict)
+# Sentinel reported as FairnessResult.protected_attribute when an adapter
+# declares none -- never a fabricated or guessed attribute name.
+NO_PROTECTED_ATTRIBUTE_DECLARED = "none_declared"
+
+
+def compute_real_fairness(
+    model_dict: Dict[str, Any], adapter: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Run real fairness evaluation on the model's protected attribute.
+
+    adapter is optional and additive: omitted, behavior is byte-identical to
+    before this parameter existed -- DEFAULT_PROTECTED_ATTRIBUTE
+    ("personal_status_and_sex") is used. Supplied, the adapter's own
+    ``protected_attribute`` is used instead (e.g. RandomForestAdapter also
+    declares "personal_status_and_sex", so its result is unaffected; a
+    RESTAdapter with no declared protected attribute gets a PENDING result
+    instead of a KeyError or a guessed/fabricated attribute).
+    """
+    protected_attribute = (
+        adapter.protected_attribute if adapter is not None else DEFAULT_PROTECTED_ATTRIBUTE
+    )
+    if protected_attribute is None:
+        return {
+            "protected_attribute": NO_PROTECTED_ATTRIBUTE_DECLARED,
+            "demographic_parity_diff": 0.0,
+            "disparate_impact_ratio": 1.0,
+            "status": STATUS_PENDING,
+            "is_mock": False,
+            "groups": [],
+        }
+    predictions, sens_feature, favorable_label = _fairness_inputs(
+        model_dict, protected_attribute
+    )
     return fairness_report(
         predictions=predictions,
         sensitive_feature=sens_feature,
@@ -269,8 +313,38 @@ def build_evidence_records(
     return records
 
 
-def compute_real_drift(model_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Run real drift detection on the canonical German Credit train/test split."""
+def compute_real_drift(
+    model_dict: Dict[str, Any], adapter: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Run real drift detection between a reference distribution and the
+    current model_dict's feature_matrix.
+
+    adapter is optional and additive: omitted, or supplied with a schema
+    matching German Credit's (e.g. RandomForestAdapter), behavior is
+    byte-identical to before this parameter existed -- German Credit's own
+    training split is the reference.
+
+    Supplied with an adapter whose schema differs from German Credit's (e.g.
+    the synthetic bank's RESTAdapter), the reference distribution instead
+    comes from that adapter's own background_data() -- so drift is always
+    computed between two distributions of the SAME schema, never a
+    coincidental column-name overlap between two unrelated datasets (see
+    docs/decisions.md: a prior version of this function silently "succeeded"
+    by comparing German Credit's and the synthetic bank's unrelated "age"
+    columns as if they measured the same population). If that adapter has no
+    background data, an empty reference frame is passed through -- this is
+    NOT special-cased here; drift_report() already returns its documented
+    PENDING result for an empty reference, exactly as it would for any other
+    caller with nothing to compare against.
+    """
+    current = model_dict["feature_matrix"]
+
+    if adapter is not None and set(adapter.feature_names) != set(FEATURE_COLUMNS):
+        reference = adapter.background_data()
+        if reference is None:
+            reference = pd.DataFrame()
+        return drift_report(reference, current)
+
     from app.models.preprocessing import (
         DEFAULT_DATASET_PATH,
         load_dataset,
@@ -284,7 +358,6 @@ def compute_real_drift(model_dict: Dict[str, Any]) -> Dict[str, Any]:
         X, y, test_size=0.2, random_state=42
     )
 
-    current = model_dict["feature_matrix"]
     return drift_report(X_train, current)
 
 
@@ -563,8 +636,8 @@ def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
     api_model = format_model_for_api(raw_model)
     api_model["model_metrics"] = compute_real_model_metrics(adapter=adapter)
     explain_res = compute_real_explainability(raw_model, method="shap")
-    fairness_res = compute_real_fairness(raw_model)
-    drift_res = compute_real_drift(raw_model)
+    fairness_res = compute_real_fairness(raw_model, adapter=adapter)
+    drift_res = compute_real_drift(raw_model, adapter=adapter)
     evidence_by_rule = build_evidence_by_rule()
     model_id = adapter.model_id if adapter is not None else None
     compliance_res = compute_real_compliance(

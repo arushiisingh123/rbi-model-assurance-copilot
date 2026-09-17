@@ -70,6 +70,7 @@ from app.models.registry import get_default_registry, reset_default_registry
 from app.monitoring import (
     monitor_run,
     monitoring_evidence,
+    run_monitoring,
     window_from_model_output,
 )
 from app.synthetic_bank.data_generator import (
@@ -602,3 +603,98 @@ def test_psi_on_small_windows_reports_drift_that_is_not_there():
 
     assert tiny > PSI_WARNING_THRESHOLD
     assert large < PSI_WARNING_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# The orchestration path, over the same real REST adapter
+# ---------------------------------------------------------------------------
+
+
+def test_run_monitoring_drives_the_bank_end_to_end(bank_adapter, bank_context):
+    """The reachable entry point works against a real REST-backed model.
+
+    Same real service, same registry adapter, same canonical scenario API as
+    the rest of this file -- but through ``run_monitoring()``, which is what
+    the API router calls. If the orchestration layer had a German Credit
+    assumption in it, this is where it would surface.
+    """
+    reference_df = generate_reference(n=WINDOW_ROWS, random_state=101)[
+        FEATURE_COLUMNS
+    ].reset_index(drop=True)
+    drifted_df = generate_current("drift", n=WINDOW_ROWS, random_state=202)[
+        FEATURE_COLUMNS
+    ].reset_index(drop=True)
+
+    out = run_monitoring(
+        bank_adapter,
+        context=bank_context,
+        reference_features=reference_df,
+        current_features=drifted_df,
+        reference_window_id="bank-reference",
+        current_window_id="bank-current-drift",
+        reference_provenance="synthetic_fixture",
+        current_provenance="synthetic_fixture",
+        protected_attribute=BANK_PROTECTED_ATTRIBUTE,
+    )
+    result = out["result"]
+
+    # Identity is the bank's, not a German Credit model's.
+    assert result["context"]["model_id"] == SYNTHETIC_BANK_MODEL_ID
+    from app.models.model import MODEL_ID, RF_MODEL_ID
+
+    assert result["context"]["model_id"] not in {MODEL_ID, RF_MODEL_ID}
+
+    # The bank's own feature space, not a coincidental single-column overlap.
+    from app.synthetic_bank.data_generator import NUMERIC_FEATURES
+
+    assert set(result["feature_drift"]["features_evaluated"]) == set(NUMERIC_FEATURES)
+
+    # Prediction drift is genuinely measured on the model's own output.
+    prediction_drift = result["prediction_drift"]
+    assert prediction_drift["score_availability"] == SCORE_AVAILABILITY_COMPUTED
+    assert prediction_drift["label_psi"] > 0.0
+
+    # Window metadata survives the orchestration layer.
+    for side in ("reference", "current"):
+        assert result["windows"][side]["provenance"] == "synthetic_fixture"
+        assert result["windows"][side]["record_count"] == WINDOW_ROWS
+
+    # Evidence carries the bank's identity and the window metadata.
+    assert len(out["evidence"]) == 5
+    for record in out["evidence"]:
+        assert record["model_id"] == SYNTHETIC_BANK_MODEL_ID
+        assert record["current_window"]["provenance"] == "synthetic_fixture"
+
+
+def test_run_monitoring_honours_the_banks_undeclared_protected_attribute(
+    bank_adapter, bank_context
+):
+    """No attribute declared and none supplied: PENDING, never a guess.
+
+    The bank's RESTAdapter declares ``protected_attribute = None``. Through the
+    orchestration layer that must resolve to None and leave the fairness
+    channel unmeasured, matching the API layer's ``none_declared`` behaviour.
+    """
+    assert bank_adapter.protected_attribute is None
+
+    reference_df = generate_reference(n=60, random_state=101)[
+        FEATURE_COLUMNS
+    ].reset_index(drop=True)
+    current_df = generate_current("drift", n=60, random_state=202)[
+        FEATURE_COLUMNS
+    ].reset_index(drop=True)
+
+    out = run_monitoring(
+        bank_adapter,
+        context=bank_context,
+        reference_features=reference_df,
+        current_features=current_df,
+    )
+
+    assert out["protected_attribute"] is None
+    assert out["result"]["fairness"] is None
+    assert out["result"]["channel_status"]["fairness"] == STATUS_PENDING
+    # The other two channels still ran -- an undeclared attribute is not a
+    # reason to stop monitoring the model.
+    assert out["result"]["feature_drift"] is not None
+    assert out["result"]["prediction_drift"] is not None

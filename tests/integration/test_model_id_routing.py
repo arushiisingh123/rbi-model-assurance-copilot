@@ -140,12 +140,30 @@ def test_get_model_routing_default_vs_rf():
     assert body_rf["model_metadata"]["model_type"] == RF_MODEL_TYPE
     # RF predictions differ from LR predictions on some German credit samples
     assert body_rf["model_metadata"]["model_type"] != body_default["model_metadata"]["model_type"]
-    assert body_rf["model_metrics"] is None
+    # RF shares German Credit's schema, so it now gets real, RF-specific
+    # held-out metrics (not null) -- and they must genuinely differ from
+    # the default LR model's, not just be present.
+    assert body_rf["model_metrics"] is not None
+    assert body_rf["model_metrics"] != body_default["model_metrics"]
 
     # Validate schema
     parsed_rf = ModelResult(**body_rf)
     assert parsed_rf.model_metadata.model_type == RF_MODEL_TYPE
-    assert parsed_rf.model_metrics is None
+    assert parsed_rf.model_metrics is not None
+
+
+def test_get_model_metrics_null_for_schema_mismatched_adapter():
+    """A different-schema adapter (the synthetic bank) has no meaning under
+    German Credit's held-out split -- model_metrics degrades to null rather
+    than crashing or reporting another model's numbers under this one's
+    label. Uses the adapter directly (no live synthetic bank server needed)
+    since the schema-mismatch guard fires before any HTTP call would."""
+    from app.api.orchestration import compute_real_model_metrics
+    from app.models import get_default_registry
+
+    bank_adapter = get_default_registry().get("synthetic-bank-credit-v1")
+    with pytest.raises(ValueError, match="synthetic-bank-credit-v1"):
+        compute_real_model_metrics(adapter=bank_adapter)
 
 
 def test_get_explainability_routing_default_vs_rf():

@@ -15,6 +15,7 @@ from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.orchestration import (
     build_assurance_result,
     build_drift_comparison,
+    build_evidence_by_rule,
     build_evidence_records,
     build_drift_assurance_envelope,
     build_fairness_assurance_envelope,
@@ -97,13 +98,26 @@ def get_model_health(model_id: str) -> dict:
 
 @app.get("/model", response_model=ModelResult)
 def get_model(model_id: Optional[str] = Query(default=None)) -> dict:
-    """Retrieve real model predictions, feature matrix (list[dict]), metadata, and metrics."""
+    """Retrieve real model predictions, feature matrix (list[dict]), metadata, and metrics.
+
+    model_metrics is real held-out performance for the default model and
+    for any adapter sharing German Credit's schema (e.g. RandomForestAdapter).
+    For an adapter with a different schema (e.g. the synthetic bank's
+    RESTAdapter), evaluate_current_model() raises ValueError -- German
+    Credit's held-out split has no meaning for it -- and model_metrics is
+    null rather than a crash or another model's numbers under this one's
+    label.
+    """
     adapter = _resolve_adapter(model_id)
     raw_model = compute_real_model(adapter=adapter)
     model_dict = format_model_for_api(raw_model)
-    model_dict["model_metrics"] = (
-        compute_real_model_metrics() if adapter is None else None
-    )
+    if adapter is None:
+        model_dict["model_metrics"] = compute_real_model_metrics()
+    else:
+        try:
+            model_dict["model_metrics"] = compute_real_model_metrics(adapter=adapter)
+        except ValueError:
+            model_dict["model_metrics"] = None
     return model_dict
 
 
@@ -129,8 +143,8 @@ def get_fairness_drift(model_id: Optional[str] = Query(default=None)) -> dict:
     """Retrieve real fairness metrics and train/test drift detection analysis."""
     adapter = _resolve_adapter(model_id)
     raw_model = compute_real_model(adapter=adapter)
-    fairness_res = compute_real_fairness(raw_model)
-    drift_res = compute_real_drift(raw_model)
+    fairness_res = compute_real_fairness(raw_model, adapter=adapter)
+    drift_res = compute_real_drift(raw_model, adapter=adapter)
     return {
         "fairness": fairness_res,
         "drift": drift_res,
@@ -178,13 +192,22 @@ def get_drift_comparison() -> dict:
 
 @app.get("/compliance", response_model=ComplianceResult)
 def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
-    """Retrieve RBI compliance findings mapped against real technical checks."""
+    """Retrieve RBI compliance findings mapped against real technical checks.
+
+    Each finding's evidence_chunks is populated from a real, live RAG
+    retrieval per rule category (build_evidence_by_rule(), Phase 5D) rather
+    than left as [] -- the same evidence-wiring build_assurance_result()
+    already uses, now also reachable through this standalone route.
+    """
     adapter = _resolve_adapter(model_id)
     raw_model = compute_real_model(adapter=adapter)
     explain_res = compute_real_explainability(raw_model, method="shap")
-    fairness_res = compute_real_fairness(raw_model)
-    drift_res = compute_real_drift(raw_model)
-    return compute_real_compliance(raw_model, explain_res, fairness_res, drift_res)
+    fairness_res = compute_real_fairness(raw_model, adapter=adapter)
+    drift_res = compute_real_drift(raw_model, adapter=adapter)
+    evidence_by_rule = build_evidence_by_rule()
+    return compute_real_compliance(
+        raw_model, explain_res, fairness_res, drift_res, evidence_by_rule=evidence_by_rule
+    )
 
 
 @app.get("/assurance-result", response_model=AssuranceResult)

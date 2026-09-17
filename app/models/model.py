@@ -50,6 +50,7 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from app.fairness.fairness import DEFAULT_PROTECTED_ATTRIBUTE
 from app.models.preprocessing import (
     CATEGORICAL_FEATURES,
     DEFAULT_DATASET_PATH,
@@ -399,11 +400,26 @@ def evaluate_current_model(adapter: Optional[Any] = None) -> Dict[str, Any]:
         calculation is introduced; both paths delegate to the same
         ``evaluate()``.
 
+        This function's held-out split is German Credit's own test split --
+        it has no meaning for an adapter whose schema isn't German Credit's
+        (e.g. a RESTAdapter for an external model). Raises ``ValueError``
+        for such an adapter rather than a confusing ``KeyError``/
+        ``NotImplementedError`` from deep inside column selection or
+        ``load_fitted_model()``; callers that want to support arbitrary
+        adapters must catch this and degrade (e.g. to ``None`` metrics),
+        not assume every adapter can be evaluated this way.
+
     Returns
     -------
     Dict[str, Any]
         Exactly ``evaluate()``'s return shape: accuracy, precision, recall,
         f1, roc_auc, n_test_samples, is_mock.
+
+    Raises
+    ------
+    ValueError
+        If ``adapter`` is supplied and its feature schema does not match
+        German Credit's (``FEATURE_COLUMNS``).
     """
     df = load_dataset(DEFAULT_DATASET_PATH)
     X, y, _, _ = preprocess(df)
@@ -412,6 +428,16 @@ def evaluate_current_model(adapter: Optional[Any] = None) -> Dict[str, Any]:
     if adapter is None:
         model = _get_or_train_default_model()
         return evaluate(model, X_test, y_test)
+
+    if set(adapter.feature_names) != set(FEATURE_COLUMNS):
+        raise ValueError(
+            f"evaluate_current_model() cannot compute held-out metrics for "
+            f"adapter '{adapter.model_id}': its feature schema does not "
+            f"match German Credit's (FEATURE_COLUMNS), so German Credit's "
+            f"held-out test split has no meaning for it. This function only "
+            f"supports adapters trained on the German Credit schema (e.g. "
+            f"LogisticRegressionAdapter, RandomForestAdapter)."
+        )
 
     model = adapter.load_fitted_model()
     return evaluate(model, X_test[list(adapter.feature_names)], y_test)
@@ -602,6 +628,11 @@ class ModelAdapter(ABC):
     model_type: str
     feature_names: List[str]
     integration_type: str = "in_process"
+    # Which raw feature (in feature_names) is this model's fairness protected
+    # attribute, if any. None means "not declared" -- orchestration must
+    # treat fairness as not applicable/PENDING for this adapter rather than
+    # guessing or falling back to another model's protected attribute.
+    protected_attribute: Optional[str] = None
 
     @property
     def input_schema(self) -> Dict[str, Dict[str, str]]:
@@ -679,6 +710,7 @@ class LogisticRegressionAdapter(ModelAdapter):
     """
 
     model_type = MODEL_TYPE
+    protected_attribute = DEFAULT_PROTECTED_ATTRIBUTE
 
     def __init__(self, fitted_model: Any, background: Optional[pd.DataFrame] = None):
         self.model_id = MODEL_ID
@@ -732,6 +764,7 @@ class RandomForestAdapter(ModelAdapter):
     """
 
     model_type = RF_MODEL_TYPE
+    protected_attribute = DEFAULT_PROTECTED_ATTRIBUTE
 
     def __init__(self, fitted_model: Any, background: Optional[pd.DataFrame] = None):
         self.model_id = RF_MODEL_ID

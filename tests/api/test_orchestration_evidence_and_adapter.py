@@ -1,16 +1,33 @@
 """Phase 5D orchestration wiring (owner: Nidhi + Khushi's follow-up).
 
-Two related, additive changes to app/api/orchestration.py, tested together
-because both are exercised through the same live build_assurance_result()
-path:
+Three related, additive changes to app/api/orchestration.py:
 
 1. RAG -> compliance evidence wiring: build_evidence_by_rule() retrieves
    real RBI evidence per rule (app/rag/) and threads it through
    compute_real_compliance() into evaluate_compliance()'s existing
    evidence_by_rule parameter (app/compliance/compliance.py -- unchanged).
+   Exercised through both build_assurance_result() and GET /compliance
+   (app/api/main.py) -- the latter previously the only compliance path NOT
+   wired to build_evidence_by_rule(), despite being the one that supports
+   model_id.
 2. Adapter-aware model metrics: compute_real_model_metrics() and
    build_assurance_result() accept an optional adapter so predictions,
-   metrics, and identity all describe the same model.
+   metrics, and identity all describe the same model. Guarded in
+   evaluate_current_model() (app/models/model.py) against a schema-
+   mismatched adapter (e.g. the synthetic bank) -- raises ValueError
+   instead of crashing confusingly, so GET /model degrades model_metrics
+   to null rather than reporting a mismatched model's numbers.
+3. Adapter-aware fairness/drift: compute_real_fairness()/compute_real_drift()
+   accept an optional adapter. Fairness reads the protected attribute from
+   adapter.protected_attribute instead of hardcoding
+   "personal_status_and_sex" (None declared -> PENDING, not a KeyError).
+   Drift uses adapter.background_data() as the reference distribution
+   instead of always loading German Credit, when the adapter's schema
+   differs -- closing a prior finding where a coincidental column-name
+   overlap (both schemas have an "age" column) let drift silently fabricate
+   a plausible-looking result comparing two unrelated populations. See
+   tests/integration/test_synthetic_bank_end_to_end.py for the live,
+   through-the-route proof of this fix.
 
 Deliberately does not exercise app/rag/retrieval.py's real corpus scoring
 for the isolation/ordering assertions below -- those use a hand-built
@@ -20,7 +37,11 @@ these tests do not depend on which RBI documents happen to be indexed.
 """
 from typing import Any, Dict, List
 
+import pandas as pd
+import pytest
+
 from app.api.orchestration import (
+    NO_PROTECTED_ATTRIBUTE_DECLARED,
     build_assurance_result,
     build_evidence_by_rule,
     compute_real_compliance,
@@ -32,7 +53,14 @@ from app.api.orchestration import (
 )
 from app.compliance.compliance import evaluate_compliance
 from app.compliance.mock_findings import MOCK_TECHNICAL_FINDINGS
-from app.models.model import MODEL_ID, MODEL_VERSION, RandomForestAdapter, evaluate_current_model
+from app.models.model import (
+    FEATURE_COLUMNS,
+    MODEL_ID,
+    MODEL_VERSION,
+    RandomForestAdapter,
+    evaluate_current_model,
+)
+from app.models import get_default_registry
 from app.rag.retrieval import EVIDENCE_RETRIEVED, NO_VERIFIED_EVIDENCE
 from app.rbi.rules import load_rules
 
@@ -262,6 +290,60 @@ def test_build_assurance_result_live_path_no_evidence_yields_empty_chunks(monkey
 
 
 # ---------------------------------------------------------------------------
+# GET /compliance (app/api/main.py, owner: Khushi): the standalone route --
+# previously the only compliance path NOT wired to build_evidence_by_rule(),
+# even though it (unlike build_assurance_result()) supports model_id.
+# ---------------------------------------------------------------------------
+
+
+def test_get_compliance_route_forwards_live_evidence_by_rule(monkeypatch):
+    """GET /compliance must carry real retrieved evidence into
+    evidence_chunks, the same way build_assurance_result() already does --
+    proving the standalone route was actually wired, not just the
+    aggregate result."""
+    from fastapi.testclient import TestClient
+
+    from app.api.main import app
+
+    retrieval_fn = _category_routed_retrieval_fn(
+        category_hits={"fairness": [_hit(chunk_id="chunk-via-route", doc_id="doc-z", chunk_index=0, text="t")]}
+    )
+    monkeypatch.setattr(
+        "app.api.orchestration.build_default_retriever", lambda: retrieval_fn
+    )
+
+    client = TestClient(app)
+    response = client.get("/compliance")
+    assert response.status_code == 200
+    findings = {f["rule_id"]: f for f in response.json()["findings"]}
+
+    fairness_rule_ids = [r["rule_id"] for r in load_rules() if r["category"] == "fairness"]
+    for rid in fairness_rule_ids:
+        assert findings[rid]["evidence_chunks"] == ["chunk-via-route"]
+    for rid in findings:
+        if rid not in fairness_rule_ids:
+            assert findings[rid]["evidence_chunks"] == []
+
+
+def test_get_compliance_route_no_evidence_yields_empty_chunks(monkeypatch):
+    """Same route, RAG genuinely finds nothing -- evidence_chunks stays []
+    for every finding, never fabricated."""
+    from fastapi.testclient import TestClient
+
+    from app.api.main import app
+
+    retrieval_fn = _category_routed_retrieval_fn(category_hits={})
+    monkeypatch.setattr(
+        "app.api.orchestration.build_default_retriever", lambda: retrieval_fn
+    )
+
+    client = TestClient(app)
+    response = client.get("/compliance")
+    assert response.status_code == 200
+    assert all(f["evidence_chunks"] == [] for f in response.json()["findings"])
+
+
+# ---------------------------------------------------------------------------
 # Adapter-aware model metrics
 # ---------------------------------------------------------------------------
 
@@ -338,3 +420,156 @@ def test_build_assurance_result_with_rf_adapter_uses_rf_throughout():
     # And it must NOT be the default LR model's own type/identity.
     assert res["model"]["model_metadata"]["model_type"] != "logistic_regression"
     assert res["compliance"]["model_id"] != MODEL_ID
+
+
+# ---------------------------------------------------------------------------
+# Adapter-aware evaluate_current_model()/compute_real_model_metrics():
+# schema-mismatch guard (Khushi's follow-up on top of Nidhi's PR #57)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_current_model_raises_for_schema_mismatched_adapter():
+    """A different-schema adapter (the synthetic bank) has no meaning under
+    German Credit's held-out split -- this must raise a clear ValueError,
+    not a confusing KeyError/NotImplementedError from deep inside column
+    selection or load_fitted_model()."""
+    bank_adapter = get_default_registry().get("synthetic-bank-credit-v1")
+    with pytest.raises(ValueError, match="synthetic-bank-credit-v1"):
+        evaluate_current_model(adapter=bank_adapter)
+
+
+def test_compute_real_model_metrics_raises_for_schema_mismatched_adapter():
+    """Same guard, reachable through the orchestration wrapper."""
+    bank_adapter = get_default_registry().get("synthetic-bank-credit-v1")
+    with pytest.raises(ValueError):
+        compute_real_model_metrics(adapter=bank_adapter)
+
+
+# ---------------------------------------------------------------------------
+# Adapter-aware compute_real_fairness(): protected attribute comes from the
+# adapter, not a hardcoded column name
+# ---------------------------------------------------------------------------
+
+
+def _fake_synthetic_bank_model_dict(n: int = 4) -> Dict[str, Any]:
+    """A hand-built model_dict shaped like predict_batch()'s output for the
+    synthetic bank -- avoids needing a live HTTP server for fairness/drift
+    unit tests, which never touch the network themselves."""
+    return {
+        "predictions": [0, 1, 0, 1][:n],
+        "feature_matrix": pd.DataFrame(
+            {
+                "employment_type": ["salaried", "unemployed", "salaried", "retired"][:n],
+                "region": ["north", "south", "east", "west"][:n],
+                "loan_purpose": ["auto", "personal", "home", "education"][:n],
+                "age": [30, 40, 50, 60][:n],
+                "annual_income": [50000, 20000, 80000, 30000][:n],
+                "employment_years": [5, 1, 20, 2][:n],
+                "existing_loans": [1, 3, 0, 2][:n],
+                "credit_utilization_ratio": [0.2, 0.9, 0.1, 0.5][:n],
+                "late_payments_12m": [0, 4, 0, 1][:n],
+                "loan_amount": [10000, 15000, 20000, 5000][:n],
+            }
+        ),
+        "model_metadata": {"label_semantics": {"favorable_outcome_label": 0}},
+    }
+
+
+def test_compute_real_fairness_default_unchanged():
+    """Omitting adapter is byte-identical to before adapter existed as a
+    parameter: hardcoded personal_status_and_sex, computed via the real
+    default LR model."""
+    raw_model = compute_real_model()
+    result = compute_real_fairness(raw_model)
+    assert result["protected_attribute"] == "personal_status_and_sex"
+    assert result["status"] in {"PASS", "WARNING", "FAIL", "PENDING"}
+
+
+def test_compute_real_fairness_with_rf_adapter_uses_same_protected_attribute():
+    """RF shares German Credit's protected attribute -- passing the adapter
+    must not change which column is used."""
+    rf_adapter = RandomForestAdapter.load_default()
+    raw_model = compute_real_model(adapter=rf_adapter)
+    result = compute_real_fairness(raw_model, adapter=rf_adapter)
+    assert result["protected_attribute"] == "personal_status_and_sex"
+
+
+def test_compute_real_fairness_with_no_protected_attribute_declared_is_pending():
+    """An adapter declaring no protected attribute (the synthetic bank,
+    today) gets a PENDING result -- never a KeyError, never a guessed or
+    fabricated attribute name."""
+    bank_adapter = get_default_registry().get("synthetic-bank-credit-v1")
+    model_dict = _fake_synthetic_bank_model_dict()
+
+    result = compute_real_fairness(model_dict, adapter=bank_adapter)
+    assert result["protected_attribute"] == NO_PROTECTED_ATTRIBUTE_DECLARED
+    assert result["status"] == "PENDING"
+    assert result["demographic_parity_diff"] == 0.0
+    assert result["disparate_impact_ratio"] == 1.0
+    assert result["groups"] == []
+    assert result["is_mock"] is False
+
+
+# ---------------------------------------------------------------------------
+# Adapter-aware compute_real_drift(): reference distribution comes from the
+# adapter's own background_data() for a different-schema model
+# ---------------------------------------------------------------------------
+
+
+def test_compute_real_drift_default_unchanged():
+    """Omitting adapter is byte-identical to before: German Credit's own
+    training split is the reference."""
+    raw_model = compute_real_model()
+    result = compute_real_drift(raw_model)
+    assert set(result["features_evaluated"]).issubset(set(FEATURE_COLUMNS))
+
+
+def test_compute_real_drift_with_rf_adapter_still_uses_german_credit_reference():
+    """RF shares German Credit's schema -- passing the adapter must not
+    change the reference distribution used."""
+    rf_adapter = RandomForestAdapter.load_default()
+    raw_model = compute_real_model(adapter=rf_adapter)
+
+    without_adapter = compute_real_drift(raw_model)
+    with_adapter = compute_real_drift(raw_model, adapter=rf_adapter)
+    assert with_adapter["features_evaluated"] == without_adapter["features_evaluated"]
+
+
+def test_compute_real_drift_different_schema_adapter_uses_own_background_data():
+    """The core fix: a different-schema adapter's drift reference comes from
+    its own background_data(), so ALL of its features are evaluated -- not
+    just a coincidental column-name overlap with German Credit (e.g. both
+    schemas happen to have a column called "age")."""
+    from app.synthetic_bank.data_generator import NUMERIC_FEATURES
+
+    bank_adapter = get_default_registry().get("synthetic-bank-credit-v1")
+    model_dict = _fake_synthetic_bank_model_dict()
+
+    result = compute_real_drift(model_dict, adapter=bank_adapter)
+    assert set(result["features_evaluated"]) == set(NUMERIC_FEATURES)
+    # Never just the one coincidentally-overlapping column -- that was the bug.
+    assert result["features_evaluated"] != ["age"]
+
+
+def test_compute_real_drift_no_background_data_yields_pending_not_a_crash():
+    """An adapter with a different schema and no background data at all
+    (background_data() returns None) must degrade to drift_report()'s own
+    documented PENDING result -- never raise, never silently compare against
+    an empty-but-unchecked reference."""
+    from app.models.rest_adapter import RESTAdapter
+
+    no_background_adapter = RESTAdapter(
+        model_id="no-bg-test-model",
+        model_version="0.0.1",
+        model_type="test",
+        endpoint_url="http://127.0.0.1:9999",
+        feature_names=["employment_type", "age"],
+        input_schema={"employment_type": {"type": "categorical"}, "age": {"type": "numeric"}},
+        capabilities={"predict_proba": False, "batch": True, "explainability": False},
+        # background left as default None
+    )
+    model_dict = _fake_synthetic_bank_model_dict()
+
+    result = compute_real_drift(model_dict, adapter=no_background_adapter)
+    assert result["status"] == "PENDING"
+    assert result["features_evaluated"] == []

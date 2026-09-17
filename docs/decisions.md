@@ -2675,3 +2675,118 @@ pre-existing) across `tests/compliance/ tests/rag/ tests/report/ tests/rbi/`.
 
 **Recorded by:** Nidhi (RBI Compliance / Rule Engine / RAG scope).
 
+---
+
+### 2026-09-17 — PR #57: live RAG -> compliance evidence wiring + adapter-aware model metrics (Nidhi)
+
+**Status:** Merged.
+
+Closes the gap the previous entry left open ("no live caller populates
+`evidence_by_rule` yet"), and separately makes model metrics adapter-aware
+alongside it -- both land in `app/api/orchestration.py`, so they were
+implemented and reviewed together rather than as two PRs.
+
+**1. RAG -> compliance evidence wiring.** Adds
+`build_evidence_by_rule()` to `app/api/orchestration.py`: for every rule
+`app.rbi.rules.load_rules()` returns, looks up that rule's `category`
+(fairness / drift / explainability / model) in
+`app.report.generate.SECTION_QUERIES` -- the same query text the live
+report-generation path already uses for that domain, so compliance and
+report generation share one query vocabulary rather than risking two that
+drift apart -- retrieves via the existing `app.rag.retrieval` pipeline, and
+shapes the result into the `dict[str, list[RBIEvidence]]`
+`evaluate_compliance()` already accepted (previous entry, 2026-09-17).
+`compute_real_compliance()` gained an additive, optional `evidence_by_rule`
+kwarg forwarded verbatim; `build_assurance_result()` now calls
+`build_evidence_by_rule()` and threads it through on every run. No retriever
+is cached at module level -- a fresh one is built per call, matching
+`generate_report()`'s existing convention. `app/rag/retrieval.py`,
+`app/rag/evidence.py`, and `app/compliance/compliance.py` are unchanged.
+Checked against the real (single-document) corpus: all 6 rules currently
+retrieve `NO_VERIFIED_EVIDENCE` -- none of the fairness/drift/
+explainability/model category queries clear the relevance gate against the
+one indexed NPA circular. This is the documented single-document coverage
+limit (CLAUDE.md sec 20), not a defect in the wiring.
+
+**2. Adapter-aware model metrics.** `app.models.model.evaluate_current_model()`
+gained an optional `adapter` parameter: omitted, byte-identical to the
+existing default Logistic Regression path; supplied, evaluates
+`adapter.load_fitted_model()` over the same deterministic held-out split
+using `adapter.feature_names` for column selection, delegating to the
+existing `evaluate()` so no metric calculation is duplicated.
+`compute_real_model_metrics()` and `build_assurance_result()` in
+`app/api/orchestration.py` gained the same optional `adapter`, threaded
+consistently through prediction, metrics, and identity (`model_id` is
+stamped onto the compliance result only when an adapter is supplied, so the
+default run's output stays exactly as it was). Verified directly (not just
+by test pass/fail) that a `RandomForestAdapter` run's predictions and
+metrics both come from the RF model, never a mix with the default LR
+model's numbers.
+
+**Not done by this entry, left to the module owners:** `evaluate_current_model()`'s
+new `adapter` path had no guard against a schema-mismatched adapter (e.g. a
+model with a different feature space) -- it would have hit a confusing
+error deep inside column selection rather than a clear one. Neither did
+this entry touch fairness/drift's hardcoded protected-attribute column name
+or reference distribution for a non-German-Credit adapter. Both closed
+separately by Khushi in PR #58 (below), along with wiring the same evidence
+retrieval into the standalone `GET /compliance` route.
+
+**Tests:** `tests/api/test_orchestration_evidence_and_adapter.py` (new, 14
+tests at merge): evidence isolation by exact rule_id across categories, no
+leakage between an unrelated rule and a category with hits, retrieval rank
+order preserved into `evidence_chunks`, `NO_VERIFIED_EVIDENCE` -> `[]`,
+the live `build_assurance_result()` path proven end-to-end (not only the
+`compute_real_*` helpers in isolation, via a monkeypatched retriever),
+existing compliance behaviour unchanged when evidence is omitted, default
+`build_assurance_result()` byte-identical, and an RF adapter run producing
+RF predictions + RF metrics + RF identity consistently (never a mix with
+LR). Full suite at merge: no regressions against the pre-existing baseline
+(three unrelated local-environment gaps -- missing `fastapi`/`xgboost`/
+`streamlit`, all already declared in `requirements.txt` -- were closed by
+installing them, not by any code or test change).
+
+**Recorded by:** Nidhi. Backfilled after merge, at Nidhi's request, since
+this entry was missed at merge time unlike every other Phase 5 PR in this
+log.
+
+---
+
+### 2026-09-17 — PR #58: `GET /compliance` evidence wiring, adapter schema guard, fairness/drift adapter-awareness (Khushi)
+
+**Status:** Merged. Recorded by Nidhi on Khushi's behalf, from the PR #58
+commit message and diff, because the entry was otherwise missing; Khushi
+should correct this if anything here misstates her own work.
+
+Three additive, backward-compatible fixes on top of PR #57, per the PR #58
+commit message:
+
+1. `GET /compliance` (`app/api/main.py`) now calls `build_evidence_by_rule()`
+   too -- previously the only compliance path PR #57 left unwired, despite
+   being the one route that already supports `model_id`.
+2. `evaluate_current_model(adapter=...)` now raises `ValueError` for a
+   schema-mismatched adapter (e.g. the synthetic bank's `RESTAdapter`)
+   instead of a confusing error from deep inside column selection;
+   `GET /model` degrades `model_metrics` to `null` for such an adapter
+   rather than crashing or reporting the wrong model's numbers.
+3. `ModelAdapter` gains an additive `protected_attribute` field (declared
+   `"personal_status_and_sex"` on `LogisticRegressionAdapter` /
+   `RandomForestAdapter`, `None` on `RESTAdapter` unless supplied).
+   `compute_real_fairness()` reads it from the adapter instead of a
+   hardcoded column name (`None` -> `PENDING`, not a `KeyError`).
+   `compute_real_drift()` uses the adapter's own `background_data()` as the
+   reference distribution when its schema differs from German Credit's,
+   closing a case where a coincidental column-name overlap (both schemas
+   happen to have an `age` column) let drift silently compare two unrelated
+   populations. `/fairness-drift` and `/compliance` now pass the adapter
+   through so the fix is reachable live.
+
+Per the commit message: full suite 1159 passed, 1 skipped, 1 pre-existing
+unrelated failure (`tests/rag/test_vector_store.py::test_embedding_is_deterministic`)
+at merge time; re-run by Nidhi after pulling showed 1160 passed, 1 skipped,
+0 failed (that one test did not fail on re-run -- environment-sensitive,
+not chased further here).
+
+**Recorded by:** Nidhi, from Khushi's commit message and diff (see the
+disclaimer above) -- not Khushi's own first-person record.
+

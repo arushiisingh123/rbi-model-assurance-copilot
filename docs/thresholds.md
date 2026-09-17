@@ -125,6 +125,48 @@ for a risk tool.
 
 Per-feature detail is not part of the Phase 1 output contract.
 
+### 3.6 PSI applied to model OUTPUT, not only to features
+
+`classify_psi()` is reused unchanged by prediction/output drift
+(`app/drift/prediction_drift.py`, monitoring lane). No new band and no
+second set of drift thresholds is introduced — a second source of truth
+for drift severity is exactly what §5 forbids.
+
+The reuse is the *canonical* PSI application rather than a stretch: PSI
+originated in credit scoring as a measure of **score distribution
+stability**, and applying it to predicted class frequencies is standard
+categorical PSI usage.
+
+Two output channels, two PSI formulations, and the distinction is not
+cosmetic:
+
+| Channel | Representation | PSI form |
+|---|---|---|
+| `label_psi` | discrete predicted classes | **categorical** — one term per observed class, no binning |
+| `score_psi` | continuous `P(class == 1)` | **quantile** — the existing `drift_report()` binning, reused |
+
+**The quantile PSI must never be applied to discrete labels.** On
+two-valued data the 10 reference quantile edges frequently collapse to
+`[0, 1]` via `np.unique`, and after the ±inf widening that leaves a
+single bin holding all the mass — so PSI is identically `0.0`, which
+`classify_psi()` reads as `PASS`, however far the base rate moved.
+Measured on the real models (reference = train split, current = test
+split): Random Forest's BAD-flag rate fell from 0.2350 to 0.1450, a 38%
+relative drop, and the quantile PSI reported `0.000000`. The categorical
+PSI reported `0.0535`.
+
+The collapse is arbitrary rather than a smooth loss of sensitivity —
+holding a large shift fixed, a 0.15 reference base rate collapses while
+0.10 and 0.20 do not. Where the binning does survive, the two forms
+agree exactly, which is why the categorical form is a fix for the
+degeneration and not a competing definition. Pinned by
+`tests/drift/test_prediction_drift.py`.
+
+**No KS threshold is introduced for either channel**, consistent with
+§4.1. KS is reported for the score channel only; on a two-point support
+it reduces to the difference between the two base rates, which
+`per_class` already states exactly.
+
 ---
 
 ## 4. Metrics reported without a threshold
@@ -158,8 +200,20 @@ review, but it does not drive an automated status.
 
 **Authoritative code location: `app/config/thresholds.py`** (owner:
 Arushi). Implemented in Phase 1. It exposes the four threshold constants,
-the status constants, `VALID_STATUSES`, and the two classifiers
-`classify_disparate_impact()` and `classify_psi()`.
+the status constants, `VALID_STATUSES`, the two classifiers
+`classify_disparate_impact()` and `classify_psi()`, and the status
+combinator `worst_status()`.
+
+`worst_status()` (additive, monitoring lane) is **not a threshold**. It
+defines no boundary and classifies no metric — it only says which of two
+*already-classified* statuses is the more severe (`FAIL` > `WARNING` >
+`PASS`), so several channels can be summarised into one overall status.
+
+`PENDING` is deliberately unranked. `PENDING` means "not measured",
+which is not a severity: treating it as benign would hide an unmeasured
+channel behind a `PASS`, and treating it as severe would report absent
+data as a finding — which §2 forbids. It is therefore skipped, and
+`worst_status()` returns `PENDING` only when *nothing* was measured.
 
 Rules:
 

@@ -54,3 +54,56 @@ def classify_psi(psi: float) -> str:
     if psi <= PSI_WARNING_THRESHOLD:
         return STATUS_WARNING
     return STATUS_FAIL
+
+
+# Severity ordering over the status vocabulary, used to combine several
+# independently-classified results into one overall status. This is NOT a
+# threshold: it defines no new boundary and classifies no metric. It only
+# says which of two ALREADY-CLASSIFIED statuses is the more severe.
+#
+# PENDING is deliberately absent. PENDING means "not measured", which is not a
+# severity at all -- it is neither better nor worse than PASS. Ranking it would
+# force a false choice: treating it as benign would hide an unmeasured channel
+# behind a PASS, and treating it as severe would report absent data as a
+# finding (docs/thresholds.md: missing data is never reported as FAIL).
+_SEVERITY_RANK = {
+    STATUS_PASS: 0,
+    STATUS_WARNING: 1,
+    STATUS_FAIL: 2,
+}
+
+
+def worst_status(*statuses: str) -> str:
+    """Return the most severe of the MEASURED statuses given.
+
+    FAIL > WARNING > PASS. ``PENDING`` inputs are skipped rather than ranked
+    (see ``_SEVERITY_RANK``), so a channel that could not be measured never
+    upgrades or downgrades the channels that could.
+
+    Args:
+        *statuses: Status values already produced by a classifier. Every value
+            must be in ``VALID_STATUSES``.
+
+    Returns:
+        The most severe status among the non-PENDING inputs. Returns
+        ``STATUS_PENDING`` when no argument is given, or when every argument is
+        ``PENDING`` -- if nothing was measured, the overall result is
+        "not measured", not PASS.
+
+    Raises:
+        ValueError: if any argument is not a recognised status. An unknown
+            status is a contract violation, and silently ignoring it could
+            drop a real FAIL from the aggregate.
+    """
+    unknown = [s for s in statuses if s not in VALID_STATUSES]
+    if unknown:
+        raise ValueError(
+            f"Unknown status value(s): {unknown}. "
+            f"Valid statuses are {list(VALID_STATUSES)}."
+        )
+
+    measured = [s for s in statuses if s in _SEVERITY_RANK]
+    if not measured:
+        return STATUS_PENDING
+
+    return max(measured, key=lambda s: _SEVERITY_RANK[s])

@@ -57,8 +57,21 @@ def test_build_assurance_result_structure():
     """Verify build_assurance_result returns the expected schema and metadata."""
     res = build_assurance_result()
 
-    expected_top_keys = {"model", "explainability", "fairness_drift", "compliance", "note"}
+    # The five original keys are unchanged; identity/monitoring are additive.
+    expected_top_keys = {
+        "model",
+        "explainability",
+        "fairness_drift",
+        "compliance",
+        "note",
+        # Additive (final backend pass): run identity + monitoring lane.
+        "model_id",
+        "assurance_run_id",
+        "monitoring",
+        "monitoring_unavailable_reason",
+    }
     assert set(res.keys()) == expected_top_keys
+    assert {"model", "explainability", "fairness_drift", "compliance", "note"} <= set(res)
 
     # Model domain
     assert res["model"]["is_mock"] is False
@@ -207,7 +220,19 @@ def test_run_assurance_cli_json_export(tmp_path, capsys):
     with open(export_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    assert set(data.keys()) == {"model", "explainability", "fairness_drift", "compliance", "note"}
+    assert set(data.keys()) == {
+        "model",
+        "explainability",
+        "fairness_drift",
+        "compliance",
+        "note",
+        # Additive (final backend pass): run identity + monitoring lane.
+        "model_id",
+        "assurance_run_id",
+        "monitoring",
+        "monitoring_unavailable_reason",
+    }
+    assert {"model", "explainability", "fairness_drift", "compliance", "note"} <= set(data)
     captured = capsys.readouterr()
     assert str(export_file) in captured.out
 
@@ -335,12 +360,31 @@ def test_build_fairness_assurance_envelope_with_real_fairness():
     assert parsed.result.model_dump() == FairnessResult(**real_fairness).model_dump()
 
 
-def test_build_assurance_result_exact_five_top_level_keys():
-    """Verify build_assurance_result still returns exactly the 5 original top-level keys."""
+def test_build_assurance_result_exact_top_level_keys():
+    """Pin the exact top-level contract of build_assurance_result().
+
+    UPDATED (final backend pass): still an exact set comparison, so
+    accidental drift is still caught -- the expected set now includes the
+    four additive identity/monitoring keys. The five ORIGINAL keys are
+    asserted separately so their presence can never be lost while the
+    total set happens to match.
+    """
     res = build_assurance_result()
-    expected_keys = {"model", "explainability", "fairness_drift", "compliance", "note"}
+    expected_keys = {
+        "model",
+        "explainability",
+        "fairness_drift",
+        "compliance",
+        "note",
+        # Additive (final backend pass): run identity + monitoring lane.
+        "model_id",
+        "assurance_run_id",
+        "monitoring",
+        "monitoring_unavailable_reason",
+    }
     assert set(res.keys()) == expected_keys
-    assert len(res.keys()) == 5
+    assert {"model", "explainability", "fairness_drift", "compliance", "note"} <= set(res)
+    assert len(res.keys()) == 9
 
 
 def test_compute_real_model_metrics_returns_computed_roc_auc_status():

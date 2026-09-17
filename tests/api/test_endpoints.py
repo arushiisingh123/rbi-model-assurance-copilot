@@ -203,9 +203,21 @@ def test_assurance_result_top_level_keys_unchanged():
     response = client.get("/assurance-result")
     assert response.status_code == 200
     body = response.json()
-    expected_top_keys = {"model", "explainability", "fairness_drift", "compliance", "note"}
+    # UPDATED (final backend pass): the five original keys are unchanged;
+    # run identity and the monitoring lane are additive.
+    expected_top_keys = {
+        "model",
+        "explainability",
+        "fairness_drift",
+        "compliance",
+        "note",
+        "model_id",
+        "assurance_run_id",
+        "monitoring",
+        "monitoring_unavailable_reason",
+    }
     assert set(body.keys()) == expected_top_keys
-    assert len(body.keys()) == 5
+    assert {"model", "explainability", "fairness_drift", "compliance", "note"} <= set(body)
 
 
 def test_drift_assurance_endpoint():

@@ -389,9 +389,18 @@ def test_build_assurance_result_default_backward_compatible():
     """Omitted adapter: build_assurance_result() output is unchanged --
     same top-level keys, no model_id stamped onto compliance."""
     res = build_assurance_result()
-    assert set(res.keys()) == {"model", "explainability", "fairness_drift", "compliance", "note"}
+    assert {"model", "explainability", "fairness_drift", "compliance", "note"} <= set(res)
     assert res["model"]["model_metadata"]["version"] == MODEL_VERSION
-    assert "model_id" not in res["compliance"]
+
+    # No adapter was named, so no model identity is claimed for the run
+    # or stamped onto compliance -- unchanged from before.
+    assert res["model_id"] is None
+    assert res["compliance"].get("model_id") is None
+
+    # Monitoring is adapter-driven, so the default path reports it as
+    # unavailable WITH A REASON rather than as "no drift found".
+    assert res["monitoring"] is None
+    assert "adapter" in res["monitoring_unavailable_reason"]
     for finding in res["compliance"]["findings"]:
         assert "model_id" not in finding
 

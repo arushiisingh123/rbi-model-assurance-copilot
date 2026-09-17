@@ -391,31 +391,49 @@ def test_adapter_id_is_preserved_when_supplied(lr_run, rf_run):
 # ---------------------------------------------------------------------------
 
 
-def test_monitoring_evidence_types_are_not_yet_registered_for_the_report(lr_run):
-    """Documents a real constraint so it is found by a test, not by a crash.
+def test_monitoring_evidence_types_are_registered_for_the_report(lr_run):
+    """UPDATED as this test's own docstring anticipated.
 
-    The report already HAS a drift section (``app.report.generate`` builds a
-    ``"drift"`` section populated by ``_extract_drift_finding()`` as a Layer 1
-    technical finding). What is missing is the supporting-evidence routing
-    table: ``EVIDENCE_SECTION_BY_TYPE`` RAISES ``ValueError`` on an
-    ``evidence_type`` it does not cover, and it currently covers only the four
-    explainability/fairness types -- nothing maps to ``"drift"``. So these
-    records must NOT be appended to the list handed to ``build_report()`` yet.
+    It previously asserted that ``EVIDENCE_SECTION_BY_TYPE`` did NOT cover the
+    monitoring types, and that routing them therefore raised -- a real
+    constraint at the time, since ``app/monitoring/`` does not extend another
+    module's routing table unilaterally. It closed with: "The day those
+    entries exist this test fails, which is the signal to update it rather
+    than a regression." That day is now.
 
-    Registering them is a one-table change in ``app/report/generate.py``
-    (Nidhi's module), not a new report section -- but ``app/monitoring/`` does
-    not extend another module's routing table unilaterally.
-
-    The day those entries exist this test fails, which is the signal to update
-    it rather than a regression.
+    The entries exist, so monitoring evidence routes into report sections
+    instead of raising. The routing table still REFUSES genuinely unknown
+    types, which is the property that made this test possible in the first
+    place and is asserted separately below.
     """
-    from app.report.generate import EVIDENCE_SECTION_BY_TYPE
+    from app.report.generate import EVIDENCE_SECTION_BY_TYPE, _route_evidence_records
 
     for evidence_type in MONITORING_EVIDENCE_TYPES:
-        assert evidence_type not in EVIDENCE_SECTION_BY_TYPE
+        assert evidence_type in EVIDENCE_SECTION_BY_TYPE
 
-    # And the consequence, stated concretely.
+    routed = _route_evidence_records(monitoring_evidence(lr_run))
+    assert routed, "monitoring evidence produced no routed records"
+
+    # Drift channels narrate the drift section; monitored fairness narrates
+    # fairness. Nothing lands in an unrelated section.
+    sections = {section for section, _model_id in routed}
+    assert sections <= {"drift", "fairness"}
+    assert "drift" in sections
+
+    # Identity survives routing -- records bucket by their own model_id, so
+    # two models' monitoring evidence stays separable.
+    model_ids = {model_id for _section, model_id in routed}
+    assert model_ids == {lr_run["context"]["model_id"]}
+
+
+def test_unknown_evidence_types_are_still_refused_not_dropped():
+    """The guarantee that makes the routing table trustworthy.
+
+    Registering the monitoring types must not have loosened the table into
+    accepting anything. An unrecognised type has no section, and silently
+    dropping it would lose evidence without a trace -- so it raises.
+    """
     from app.report.generate import _route_evidence_records
 
-    with pytest.raises(ValueError):
-        _route_evidence_records(monitoring_evidence(lr_run))
+    with pytest.raises(ValueError, match="EVIDENCE_SECTION_BY_TYPE"):
+        _route_evidence_records([{"evidence_type": "not_a_real_evidence_type"}])

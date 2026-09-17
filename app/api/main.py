@@ -133,11 +133,21 @@ def get_explainability(
     ),
     model_id: Optional[str] = Query(default=None),
 ) -> dict:
-    """Retrieve real explainability results for the credit scoring model (SHAP or LIME)."""
+    """Retrieve real explainability results for the requested model (SHAP or LIME).
+
+    The adapter resolved from ``model_id`` is passed to BOTH prediction and
+    explainability, so the explanation always describes the same model that
+    was scored. It previously reached prediction only, and explainability
+    silently fell back to the default Logistic Regression artifact.
+
+    Which explainer runs is decided by ``app/explainability/capability.py``
+    from the model's observable structure -- there is no per-model branching
+    here, and none is needed.
+    """
     adapter = _resolve_adapter(model_id)
     raw_model = compute_real_model(adapter=adapter)
     try:
-        return compute_real_explainability(raw_model, method=method)
+        return compute_real_explainability(raw_model, method=method, adapter=adapter)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -205,7 +215,9 @@ def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
     """
     adapter = _resolve_adapter(model_id)
     raw_model = compute_real_model(adapter=adapter)
-    explain_res = compute_real_explainability(raw_model, method="shap")
+    # Same adapter as fairness/drift below: a compliance finding derived from
+    # another model's explanation would be a false regulatory conclusion.
+    explain_res = compute_real_explainability(raw_model, method="shap", adapter=adapter)
     fairness_res = compute_real_fairness(raw_model, adapter=adapter)
     drift_res = compute_real_drift(raw_model, adapter=adapter)
     evidence_by_rule = build_evidence_by_rule()

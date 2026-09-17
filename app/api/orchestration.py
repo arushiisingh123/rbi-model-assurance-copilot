@@ -104,8 +104,29 @@ def _explained_row_limit(method: str) -> Optional[int]:
 def compute_real_explainability(
     model_dict: Dict[str, Any],
     method: str = "shap",
+    adapter: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Run real explainability analysis with bounded row count for LIME."""
+    """Run real explainability analysis with bounded row count for LIME.
+
+    ``adapter`` is optional and additive, matching
+    ``compute_real_fairness()`` / ``compute_real_drift()``. It is forwarded
+    straight to ``explain()``, which then treats it as the SOLE source of the
+    model, its raw feature schema, its reference data, and its identity.
+
+    WHY THIS PARAMETER EXISTS (the defect it closes)
+    ------------------------------------------------
+    Every live route that supports ``model_id`` resolves an adapter and scores
+    predictions through it. This function used to drop that adapter, so
+    ``explain()`` fell back to loading the DEFAULT Logistic Regression
+    artifact. A caller could therefore request Random Forest explanations,
+    receive the Logistic Regression's SHAP values, and have them stamped with
+    the Random Forest's ``model_id`` -- confident, specific, and about the
+    wrong model. Passing the SAME adapter used for prediction is what makes
+    the explanation describe the model that was actually scored.
+
+    Omitting it preserves the previous default-LR behaviour exactly, for the
+    existing callers that have no adapter to give (e.g. ``/report``).
+    """
     method_lower = method.lower()
     if method_lower not in ("shap", "lime"):
         raise ValueError(
@@ -122,7 +143,7 @@ def compute_real_explainability(
         model_input = {**model_dict, "feature_matrix": capped_matrix}
     else:
         model_input = model_dict
-    return explain(model_output=model_input, method=method_lower)
+    return explain(model_output=model_input, method=method_lower, adapter=adapter)
 
 
 def build_prediction_records(
@@ -635,7 +656,10 @@ def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
     raw_model = compute_real_model(adapter=adapter)
     api_model = format_model_for_api(raw_model)
     api_model["model_metrics"] = compute_real_model_metrics(adapter=adapter)
-    explain_res = compute_real_explainability(raw_model, method="shap")
+    # The SAME adapter that produced raw_model above -- so the explanation
+    # describes the model that was actually scored, not the default LR
+    # artifact stamped with this adapter's model_id four lines below.
+    explain_res = compute_real_explainability(raw_model, method="shap", adapter=adapter)
     fairness_res = compute_real_fairness(raw_model, adapter=adapter)
     drift_res = compute_real_drift(raw_model, adapter=adapter)
     evidence_by_rule = build_evidence_by_rule()

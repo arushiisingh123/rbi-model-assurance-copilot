@@ -62,14 +62,22 @@ correctly, so **no change is needed on the monitoring side** once this lands.
 data (see the reproduction above). Not a monitoring blocker; flagged for whoever
 owns that default.
 
-**Also same area, not a monitoring blocker but a provenance defect:**
-`predict_batch()` stamps `trained_on = DEFAULT_DATASET_PATH` and the global
-German Credit `LABEL_SEMANTICS` onto **every** output regardless of adapter.
-Scoring the synthetic bank through the REST adapter returns
-`trained_on: "data/german_credit/german_credit.csv"` for an XGBoost model that
-never saw German Credit. Monitoring does not read `trained_on`, so nothing is
-currently wrong in a monitoring result — but any consumer that does read it is
-being told something false.
+**Also same area — `trained_on` provenance, PARTIALLY resolved.** `605bdde`
+added the mechanism: `predict_batch()` now honours
+`getattr(adapter, "trained_on", DEFAULT_DATASET_PATH)`, so an adapter may
+declare its own training provenance. But **no adapter sets it yet** —
+`RESTAdapter.__init__` takes no `trained_on`, and `registry.py`'s
+`_build_synthetic_bank_adapter()` is unchanged — so scoring the synthetic bank
+still returns `trained_on: "data/german_credit/german_credit.csv"` for an
+XGBoost model that never saw German Credit. Verified on `aaf6ae4`: the
+attribute is absent from the registered bank adapter. The global German Credit
+`LABEL_SEMANTICS` is likewise stamped on every output regardless of adapter.
+
+Monitoring does not read `trained_on`, and `MonitoringWindow` does not carry
+`model_metadata`, so no monitoring result or evidence record is affected —
+pinned by `test_no_german_credit_identity_or_column_leaks_anywhere`. Any
+consumer that *does* read it is still being told something false. Owner:
+Namitha / Manas. **Not fixed here** — it is outside this lane.
 
 ---
 
@@ -119,32 +127,56 @@ a regression.
 
 ---
 
-### C. Fairness and drift are hardcoded to German Credit in the API layer — Khushi
+### C. Fairness and drift schema-hardcoding in the API layer — RESOLVED upstream (Khushi)
 
-**Where:** `app/api/orchestration.py`.
+**Status: resolved in commit `605bdde`** (merged as PR #58, `aaf6ae4`). This
+entry previously described both problems as current; they are not. Re-verified
+against the code on `aaf6ae4`.
 
-Two separate problems, already partly documented by
-`tests/integration/test_synthetic_bank_end_to_end.py`:
+**What was fixed, in `app/api/orchestration.py`:**
 
-1. `_fairness_inputs()` reads `model_dict["feature_matrix"]["personal_status_and_sex"]`,
-   which raises `KeyError` for any model without that column.
-2. `compute_real_drift()` reloads German Credit and uses **its** train split as
-   the reference window regardless of which model is being evaluated. For the
-   synthetic bank this does not crash — it silently evaluates the single
-   coincidentally-shared column name `age`, comparing German Credit's age
-   distribution against the bank's as if they described one population.
+1. **Fairness.** `compute_real_fairness(model_dict, adapter)` now reads
+   `adapter.protected_attribute` rather than a hardcoded
+   `feature_matrix["personal_status_and_sex"]`. An adapter that declares no
+   protected attribute (`None`) short-circuits to a PENDING result reporting
+   `protected_attribute: "none_declared"` — never a guess, never another
+   model's attribute, and no longer a `KeyError`.
+2. **Drift.** `compute_real_drift(model_dict, adapter)` now uses
+   `adapter.background_data()` as the reference distribution whenever the
+   adapter's schema differs from German Credit's, so both sides of the
+   comparison share one schema. For the synthetic bank the live
+   `/fairness-drift` route returns 200 and evaluates all seven of the bank's
+   numeric features.
 
-**The monitoring lane is structurally immune to (2)** and this is now pinned.
-`monitor_run()` takes both windows from the caller, so there is no hidden
-dataset to fall back to. Measured on the live synthetic bank through the REST
-adapter, monitoring evaluates the bank's **seven** numeric features
+The enabling change is the new `ModelAdapter.protected_attribute` class
+attribute (`None` = "not declared"); `LogisticRegressionAdapter` and
+`RandomForestAdapter` declare `personal_status_and_sex`, and the synthetic
+bank's `RESTAdapter` declares `None`.
+
+**Residual risk — not a defect, but worth knowing.** `compute_real_drift()`
+called *without* `adapter=` still falls back to German Credit's train split, by
+design, for backward compatibility with existing callers. For the synthetic
+bank that path still evaluates only the coincidentally-shared `age` column.
+Every live route now passes `adapter=` explicitly; a future caller that forgets
+silently gets the degraded path back rather than an error. Pinned upstream by
+`tests/integration/test_synthetic_bank_end_to_end.py::test_drift_without_adapter_falls_back_to_german_credit_by_design`.
+
+**The monitoring lane is structurally immune to that residual risk.**
+`monitor_run()` takes both windows from the caller, so there is no default
+dataset it *can* fall back to — the failure mode is absent rather than avoided
+by discipline. Measured on the live synthetic bank through the REST adapter,
+monitoring evaluates the bank's **seven** numeric features
 (`age, annual_income, employment_years, existing_loans,
-credit_utilization_ratio, late_payments_12m, loan_amount`), not the one
+credit_utilization_ratio, late_payments_12m, loan_amount`), never the one
 overlapping name — see
 `tests/monitoring/test_monitoring_synthetic_bank.py::test_feature_space_is_the_banks_own_not_german_credit`.
 
 This is offered as evidence that the windowed approach avoids the failure mode,
-not as a proposal to move orchestration into `app/monitoring/`.
+not as a proposal to move orchestration into `app/monitoring/`. The monitoring
+lane also agrees with the API layer on undeclared attributes: feeding
+`adapter.protected_attribute` (`None`) into `monitor_run()` yields a PENDING
+fairness channel, pinned by
+`test_the_adapters_declared_protected_attribute_is_honoured`.
 
 ---
 
@@ -211,37 +243,50 @@ Identity is supplied separately as an `AssuranceRunContext`-shaped mapping
 (`model_id`, `model_version`, `assurance_run_id`, optional `adapter_id`) and is
 threaded through unchanged. Monitoring mints no identity.
 
-### 2.2 What is genuinely missing — three additive extensions
+### 2.2 Window metadata — two extensions now IMPLEMENTED, one still blocked
 
-These are proposals for `MonitoringWindow`, all additive and optional, so every
-current caller stays valid. **Not implemented.**
+**(i) Collection provenance — `provenance`. IMPLEMENTED.**
 
-**(i) Window time bounds — `window_start`, `window_end`**
+`is_mock=False` states only that the arithmetic is real. It says nothing about
+where the data came from, and a window built from `app/drift/scenario.py` or
+`app/synthetic_bank/data_generator.py` output is synthetic.
 
-Today `window_id` is an opaque caller label, explicitly never parsed. That is
-correct for a two-window comparison but insufficient for a continuous series,
-which needs to know:
+`MonitoringWindow.provenance` is optional and validated against
+`WINDOW_PROVENANCE_VALUES` — exactly `observed` / `mock` / `synthetic_fixture`,
+the same three values `TechnicalFinding.provenance` already uses in
+`app/api/schemas.py`. No monitoring-specific taxonomy was introduced. The tuple
+is declared locally so `app/monitoring/` still imports nothing from `app.api`,
+and a parity test asserts it against the real schema so the two cannot drift
+apart — the same pattern `REQUIRED_CONTEXT_FIELDS` already uses.
 
-- which window is earlier, so an inverted reference/current pair can be refused
-  (`monitor_run()` is directional, and swapping the arguments is a different
-  measurement — pinned by `test_swapping_reference_and_current_is_a_different_measurement`);
-- what period a finding describes, for evidence provenance and any RBI-facing
-  statement about when a condition held;
-- whether consecutive windows are contiguous or overlapping.
+`None` means "not stated" and is deliberately **not** a synonym for `observed`:
+defaulting it would license reporting generated scenario data as real observed
+drift. The synthetic-bank integration test declares `synthetic_fixture` on both
+windows.
 
-**(ii) Collection provenance — `provenance`**
+**(ii) Window time bounds — `window_start`, `window_end`. IMPLEMENTED.**
 
-`is_mock=False` states only that the arithmetic is real. It deliberately says
-nothing about where the data came from, and a window built from
-`app/drift/scenario.py` output is synthetic. The repository already has a
-vocabulary for this: `TechnicalFinding.provenance` in `app/api/schemas.py` uses
-`observed` / `mock` / `synthetic_fixture`. A monitoring window should carry the
-same vocabulary so a synthetic or development-split window can never be
-presented as observed drift in a real lending population. This is squarely in
-this lane's "monitoring evidence/provenance" ownership and is the extension it
-would implement first.
+`window_id` remains an opaque caller label that is never parsed. The optional
+bounds are the only time semantics in the package, and they are **monitoring-
+window boundaries** — the period the records describe. They are explicitly
+*not* collection time and *not* scoring time.
 
-**(iii) Realized outcomes — required before a performance channel can exist**
+Both are independently optional; when both are supplied they must satisfy
+`window_start <= window_end`, and must agree on timezone awareness (mixing
+naive and aware datetimes is refused with an explanation rather than surfacing
+as an opaque `TypeError`). Timezone-aware UTC is preferred, matching
+`app/report/generate.py`'s `datetime.now(timezone.utc)`; naive datetimes are
+accepted so a caller with naive local timestamps is not blocked.
+
+**Nothing orders, sorts, selects, or schedules by these values.** They let a
+finding state the period it describes. A scheduler remains out of scope.
+
+**Not yet threaded into results or evidence.** Both fields live on the window
+today. Carrying them into `monitor_run()` output and `monitoring_evidence()`
+records changes a contract other modules consume, so it is a deliberate
+follow-up rather than something this lane did unilaterally.
+
+**(iii) Realized outcomes — required before a performance channel can exist. STILL BLOCKED.**
 
 The target architecture lists **performance** as a monitoring channel alongside
 feature drift, prediction drift and fairness. `monitor_run()` has three
@@ -320,12 +365,102 @@ The lane produces `detection → structured alert/status` and stops there.
 
 ---
 
-## 4. Summary of what this lane is waiting on
+## 3a. Current synthetic-bank integration
+
+`tests/monitoring/test_monitoring_synthetic_bank.py` is the lane's proof that
+monitoring consumes a model it knows nothing about. It is not mocked:
+
+- the synthetic bank's real FastAPI app runs under a genuine `uvicorn` server
+  on a background thread (port 8195, distinct from the service default 8100 and
+  from 8199 used by `tests/integration/test_synthetic_bank_end_to_end.py`);
+- the adapter comes **from `get_default_registry()`**, not constructed in the
+  test, so monitoring consumes whatever the platform actually registered — a
+  `RESTAdapter` (`integration_type="rest"`, `model_type="xgboost"`) reached
+  over real HTTP;
+- both populations come from the bank's **own canonical scenario API** —
+  `generate_reference()` for the baseline and `generate_current("drift")` for
+  the shifted window — rather than a hand-rolled shift, so the test exercises
+  the scenario the bank's owner defined and feels any future retune of it.
+  `n` and the seeds are passed explicitly only because every row costs two HTTP
+  round trips; the scenario itself is unmodified.
+
+Measured end to end through that path: the model's predicted BAD rate moves
+`0.1917 → 0.7750`, `label_psi` 1.561 (FAIL) and `score_psi` 5.0186 (FAIL),
+feature drift evaluates the bank's seven numeric features, fairness runs on
+`region` (explicitly supplied), and all five evidence records carry
+`synthetic-bank-credit-v1` / `1.0.0`. Assertions are structural, directional,
+or identity checks rather than pinned PSI values.
+
+## 3b. Known technical limitations of prediction drift
+
+**1. The quantile PSI degenerates on binary labels.** This is why the label
+channel uses a categorical PSI instead. Re-verified on `aaf6ae4` (the helper in
+`app/drift/drift.py` is unchanged): for a 35-percentage-point shift in the
+positive rate, `_compute_feature_psi` returns **exactly 0.000000** — which
+`classify_psi()` reads as PASS — at reference rates 0.02, 0.05, 0.08 and 0.15,
+while surviving at 0.10, 0.20 and 0.30 and there matching the categorical PSI
+exactly (e.g. 0.698794 vs 0.6988).
+
+The collapse is **not** a smooth loss of sensitivity: it is non-monotonic in
+the reference rate, so whether a real shift is seen at all depends on where the
+base rate happens to fall relative to the decile grid. This is a property of
+**this repository's current quantile-binning implementation** — 10 reference
+quantiles, duplicate edges collapsed with `np.unique`, outer edges widened to
+±inf, which on two-valued data leaves a single bin holding all the mass. It is
+not a claim about PSI in general or about other implementations. Pinned by
+`tests/drift/test_prediction_drift.py::test_quantile_psi_collapses_to_zero_on_binary_labels`
+(parametrized, and asserting against the real helper rather than a stand-in) and
+reached through the public API by
+`test_feature_drift_on_a_label_column_would_report_zero_drift`.
+
+**2. Small windows manufacture drift.** See §2.3 — two independent draws from
+the *same* population report FAIL-band PSI below roughly 300 rows per window.
+A constraint on window sizing, not a threshold to change.
+
+**3. No KS threshold exists for either channel**, consistent with
+`docs/thresholds.md`. KS is reported for the score channel as a metric only; on
+a two-point support it reduces to the difference between base rates, which
+`per_class` already states exactly.
+
+## 4. Summary — status as of `aaf6ae4`
+
+Every row below was re-verified against the code, not carried forward from an
+earlier draft.
+
+**Resolved upstream — no longer blocking:**
+
+| # | Item | Resolved by |
+|---|---|---|
+| C | Fairness/drift schema-hardcoding in orchestration | `605bdde` — `adapter.protected_attribute`, `adapter.background_data()` |
+
+**Still open:**
 
 | # | Blocker | Owner | Blocks |
 |---|---|---|---|
 | A | `predict_batch()` guards `predict_proba()` on capability | Namitha / Khushi | monitoring any label-only model |
+| A2 | An adapter that actually sets `trained_on` (mechanism exists, unused) | Namitha / Manas | honest training provenance for non-German-Credit models |
 | B | Five entries in `EVIDENCE_SECTION_BY_TYPE` (+ the `fairness_monitor_summary` routing decision) | Nidhi | monitoring evidence reaching the report |
-| C | Generic protected attribute + reference window in orchestration | Khushi | API/dashboard exposure of monitoring |
 | D | Decision on the unnamed-sensitive-feature fallback | Team | correct labelling for external models |
 | — | Reference policy, window size/cadence, outcomes contract | Team + Khushi | continuous monitoring, performance channel |
+
+## 5. What this lane deliberately does NOT implement
+
+Stated so the gaps read as decisions rather than omissions:
+
+- **No collector, scheduler, or storage.** `MonitoringWindow` holds data it was
+  handed; it does not fetch, persist, or poll. Telemetry is Khushi's.
+- **No performance channel.** It needs realized outcomes, and no contract in
+  this repository carries actuals. Outcomes also arrive *after* the predictions
+  they judge (label lag), so they cannot simply be another column on the same
+  window. `monitor_run()` therefore has three channels, not four.
+- **No notification delivery, routing, deduplication, or suppression state.**
+  The lane produces `detection → structured alert/status` and stops there.
+- **No second threshold or status vocabulary.** `app/config/thresholds.py`
+  remains the single source of truth; `worst_status()` only combines statuses
+  the analytical modules already produced.
+- **No writes to another module's routing table, orchestration, or adapters.**
+  The open rows above are documented rather than silently fixed.
+- **Provenance and window bounds are not yet threaded into `monitor_run()`
+  results or evidence records.** They are window-level metadata today. Wiring
+  them into the evidence contract is a deliberate follow-up, not an oversight —
+  it changes a contract that other modules consume.

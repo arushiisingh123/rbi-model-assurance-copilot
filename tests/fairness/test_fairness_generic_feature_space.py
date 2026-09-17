@@ -240,6 +240,14 @@ def test_an_unnamed_sensitive_feature_is_labelled_german_credits_attribute():
     wrong label on fairness evidence is exactly the kind of misattribution the
     Phase 5 identity work exists to prevent.
 
+    NOT fixed by ``ModelAdapter.protected_attribute``. That upstream field
+    (None = "not declared") decides WHICH attribute a caller asks about, and
+    ``app.api.orchestration.compute_real_fairness()`` now uses it instead of a
+    hardcoded column name. This fallback is a different layer: it decides what
+    name is REPORTED once an unnamed sequence has already been handed to
+    ``fairness_report()``. An adapter declaring its attribute correctly still
+    hits this fallback if the caller passes the column as a plain list.
+
     This test asserts what the code does TODAY so the behaviour cannot change
     silently, and so the team can see it. It is NOT an endorsement. Changing
     the fallback would alter the frozen six-key contract and break

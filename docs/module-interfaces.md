@@ -1048,6 +1048,164 @@ Phase 5 adds three new endpoints for envelope-wrapped assurance and cross-model 
 - **`GET /drift-assurance`** → Returns `DriftAssuranceEnvelope`: PSI and KS drift metrics stamped with `AssuranceRunContext`, `dataset_id`, and `feature_space`.
 - **`GET /drift-comparison`** → Returns `DriftComparisonResult`: compares drift envelopes between the default Logistic Regression and Random Forest models with comparability enforcement (always HTTP 200).
 
+### Monitoring lane — `app/drift/prediction_drift.py` + `app/monitoring/` (Arushi)
+
+Additive. No existing interface changes: `drift_report()`,
+`fairness_report()`, their evidence builders, and every threshold value
+are untouched.
+
+#### Prediction / output drift — `app/drift/prediction_drift.py`
+
+```python
+# prediction_drift_report(reference_predictions, current_predictions,
+#                        *, reference_scores=None, current_scores=None)
+{
+    "label_psi": 0.0535,                 # CATEGORICAL PSI over class frequencies
+    "label_status": "PASS",
+    "classes_evaluated": [0, 1],         # first-observed order, native Python values
+    "per_class": [
+        {"class": 0, "reference_rate": 0.765, "current_rate": 0.855},
+        {"class": 1, "reference_rate": 0.235, "current_rate": 0.145},
+    ],
+    "score_psi": 0.3399,                 # QUANTILE PSI, reused from drift_report()
+    "score_ks_statistic": 0.1363,
+    "score_status": "FAIL",
+    "score_availability": "computed",    # or "unavailable_no_scores"
+    "status": "FAIL",                    # worst_status(label_status, score_status)
+    "is_mock": False,
+}
+```
+
+**Feature drift and prediction drift answer different questions and are
+never merged.** `drift_report()` asks whether the *input population*
+changed and is model-independent — two models over the same rows get the
+same answer, and that is correct. `prediction_drift_report()` asks
+whether the *model's own output* changed, so its value is
+model-specific. On the canonical German Credit windows the two models
+move in opposite directions (LR's BAD rate rises, RF's falls), which is
+why attributing an output-drift result to the wrong model is a wrong
+statement rather than a mislabel.
+
+Two channels, two PSI formulations — see `docs/thresholds.md` §3.6 for
+why the quantile PSI is invalid on discrete labels. `score_*` is
+`None` with `score_availability: "unavailable_no_scores"` when the model
+has no probability capability; the label channel is still measured and
+`status` falls back to it, because `worst_status()` skips `PENDING`.
+
+#### Monitoring windows — `app/monitoring/windows.py`
+
+```python
+MonitoringWindow(
+    window_id: str,                      # caller label, never parsed as a timestamp
+    features: Optional[DataFrame],
+    predictions: Optional[list],
+    scores: Optional[list],              # aligned 1:1 with predictions
+    instance_ids: Optional[list],        # aligned 1:1 with predictions
+    favorable_label: Optional[Any],      # from the contract's label_semantics
+)
+
+window_from_model_output(model_output, *, window_id) -> MonitoringWindow
+```
+
+`window_from_model_output()` is the monitoring layer's single point of
+contact with the model contract. It READS `feature_matrix`,
+`predictions`, `probabilities`, `instance_ids` and
+`model_metadata.label_semantics.favorable_outcome_label`, and re-derives
+none of them. Model-agnostic by construction: every adapter returns this
+same dict shape through `predict_batch(adapter=...)`, so nothing here
+names a feature, a model type, or a dataset.
+
+Frozen, and channel lengths are validated at construction — a window
+whose channels describe different record counts is refused rather than
+measured.
+
+#### Monitoring run — `app/monitoring/monitor.py`
+
+```python
+# monitor_run(reference, current, *, context, protected_attribute=None)
+{
+    "context": {...},                    # AssuranceRunContext dict, threaded UNCHANGED
+    "reference_window_id": "train",
+    "current_window_id": "test",
+    "feature_drift": {...} | None,       # drift_report() output
+    "prediction_drift": {...} | None,    # prediction_drift_report() output
+    "fairness": {...} | None,            # fairness_report() output, CURRENT window
+    "channel_status": {                  # always all three keys
+        "feature_drift": "PASS",
+        "prediction_drift": "FAIL",
+        "fairness": "WARNING",
+    },
+    "monitoring_status": "FAIL",         # worst_status() over the three
+    "alerts": [{"channel": ..., "status": ..., "detail": {...}}],
+    "is_mock": False,
+}
+```
+
+Pure coordination: every number comes from the module that owns that
+calculation, and `monitor_run()` classifies nothing. `channel_status` is
+read from each channel's own `status`, never re-derived. A channel that
+could not run is `None` with status `PENDING` — never `PASS`.
+
+`context` is required and must carry non-empty `model_id`,
+`model_version` and `assurance_run_id`; build it with the existing
+`build_assurance_run_context()`. Monitoring mints no identity and
+defines no identity format — there is one identity mechanism in this
+project and this reuses it. `app/monitoring/` imports nothing from
+`app/api/`, matching `app/drift/comparability.py`.
+
+`protected_attribute` is **required for the fairness channel and never
+inferred**. Which attribute is protected is a regulatory and governance
+decision; a monitoring module that guessed one would be inventing a
+compliance judgement. Omitted, fairness reports `PENDING`.
+
+Alerts are detection only — no delivery, no routing, no suppression
+state. An alert carries no severity of its own; it echoes its channel's
+existing status, so it can never disagree with the result it came from.
+`PASS` and `PENDING` channels raise nothing.
+
+#### Monitoring evidence — `app/monitoring/evidence.py`
+
+```python
+# monitoring_evidence(monitor_result) -> list[dict]
+# evidence_type ∈ {feature_drift_summary, prediction_drift_label,
+#                  prediction_drift_score, fairness_monitor_summary,
+#                  monitoring_summary}
+```
+
+Same record shape and conventions as `fairness_evidence()` — one dict
+per finding, each carrying its own `evidence_type` and `is_mock`, with
+identity keys omitted rather than set to `None`. Adds `model_version`
+alongside `model_id`/`assurance_run_id`, because monitoring compares one
+model across time and two versions of one `model_id` are different
+measurements.
+
+Identity comes **only** from the result's own validated `context`; there
+is deliberately no override parameter, since an override is exactly how
+one model's measurement acquires another's label.
+
+A channel that did not run produces **no record** — an absent
+measurement is not evidence — while the `monitoring_summary` record's
+`channel_status` keeps the gap visible.
+
+> ⚠️ **Not yet routable into the report.**
+> The report **already has a drift section** — `app/report/generate.py`
+> builds a `"drift"` section titled "Data & Prediction Drift Detection",
+> with its own RAG query and relevance keywords, populated by
+> `_extract_drift_finding()` from the flat `drift_report()` output as a
+> Layer 1 technical finding. The missing piece is the **supporting-evidence
+> routing table**: `EVIDENCE_SECTION_BY_TYPE` raises `ValueError` on an
+> unregistered `evidence_type` and currently covers only the four
+> explainability/fairness types, so no evidence type maps to `"drift"` and
+> that section carries no per-record supporting evidence today.
+>
+> These records must therefore **not** be appended to the list handed to
+> `build_report()` until that table gains entries for them. That is a
+> one-table change in `app/report/generate.py` (Nidhi's module), not a new
+> report section — but the monitoring lane does not extend another module's
+> routing table unilaterally, and which section each of the five types
+> belongs to is the report owner's decision. Pinned by
+> `tests/monitoring/test_monitoring_identity.py`.
+
 ## Changing an interface
 
 Small additive changes (a new optional key) are low-friction. Renaming or

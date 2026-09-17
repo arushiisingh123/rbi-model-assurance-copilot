@@ -1,18 +1,102 @@
-# Monitoring lane — interface handoffs and continuous-monitoring contract
+# Monitoring lane — delivered architecture and interface handoffs
 
-**Owner:** Arushi (monitoring / fairness)
-**Status:** Findings and proposals. Nothing here is an approved decision, and
-nothing here has been implemented in another owner's module.
-**Date:** 2026-09-17
+**Owner:** Arushi (monitoring, prediction drift, monitoring API, monitoring
+evidence, monitoring dashboard)
+**Date:** 2026-09-18
 
-This document records what the monitoring lane needs from other modules, and
-what it proposes to build next, so that cross-module changes are discussed
-rather than made unilaterally. It documents; it does not decide.
+This document describes what the monitoring lane delivers, the contract it
+exposes downstream, and what it still needs from the other lane. Sections 1–5
+record cross-module findings; section 0 records the delivered path.
 
-Scope reminder: `app/monitoring/`, `app/drift/`, `app/fairness/` and
-`app/config/thresholds.py` are this lane's. `app/api/`, `app/models/`,
-`dashboard/`, `run_assurance.py`, `app/report/` are not, and none of them was
-modified.
+Scope reminder: `app/monitoring/`, `app/drift/`, `app/fairness/`,
+`app/config/thresholds.py`, `app/api/monitoring.py`, the monitoring dashboard
+files and their tests are this lane's. `app/api/orchestration.py`,
+`app/models/`, `app/report/`, `app/rag/` and the other dashboard panels are
+not; the only edits made outside the lane are a one-line router registration in
+`app/api/main.py` and monitoring-only additions to `app/api/schemas.py`.
+
+---
+
+## 0. The delivered monitoring path
+
+Monitoring is reachable end to end:
+
+```
+ModelAdapter (registry)
+    -> app/monitoring/orchestration.py   build_monitoring_window / run_monitoring
+    -> MonitoringWindow x2               reference + current
+    -> monitor_run()                     three analytical channels
+    -> monitoring result                 + window metadata
+    -> monitoring_evidence()             five evidence records
+    -> GET/POST /monitoring              app/api/monitoring.py
+    -> dashboard monitoring panel        dashboard/panels/monitoring_panel.py
+```
+
+**Model-agnostic by construction.** Nothing in `app/monitoring/` or
+`app/api/monitoring.py` names a dataset, a feature, a protected attribute, or a
+label value. Pinned by
+`tests/api/test_monitoring_endpoint.py::test_the_router_names_no_dataset_feature_or_protected_attribute`.
+
+**Caller-supplied windows.** `monitor_run()` takes both windows from its
+caller. Where a window is not supplied, the orchestration layer falls back to
+the model's OWN `adapter.background_data()` / default batch — never another
+model's dataset. An adapter declaring no background data is **refused**, not
+substituted: that refusal is the whole point, and is pinned by
+`test_a_model_without_background_data_is_refused_not_substituted`.
+
+Honest consequence: for an adapter whose default batch *is* its background
+data, `GET /monitoring` compares a population with itself and drift is
+legitimately zero. That is reported as-is rather than dressed up; genuinely
+shifted windows come from the caller via `POST /monitoring`.
+
+**No collection, storage, or scheduling.** The lane fetches nothing, persists
+nothing, and polls nothing. A monitoring run happens when someone asks for one.
+
+**Three analytical channels**, never merged, each keeping its own status:
+
+| Channel | Question | Model-specific? |
+|---|---|---|
+| Feature drift | Has the INPUT population changed? | No — same for any model over the same rows |
+| Prediction drift | Has the MODEL'S OUTPUT changed? | **Yes** |
+| Fairness | Is the model's outcome distributed unequally across a protected attribute? | Yes |
+
+**Performance remains blocked**, deliberately. It needs realized outcomes, and
+no contract in this repository carries actuals; outcomes also arrive *after*
+the predictions they judge (label lag), so they cannot simply be another column
+on the same window. There are three channels, not four, and this lane will not
+fabricate a fourth.
+
+### The API
+
+| Route | Purpose |
+|---|---|
+| `GET /monitoring?model_id=&protected_attribute=` | Monitor a model against its own declared reference population. Reachability/demo path. |
+| `POST /monitoring` | Monitor over caller-supplied windows — the contract a collector would use. Body carries `model_id`, `protected_attribute`, and `reference`/`current` each with `records`, `window_id`, `provenance`, `window_start`, `window_end`. |
+
+Both return `MonitoringAssuranceResult`: `{result, evidence, protected_attribute}`.
+`assurance_run_id` is minted per request with the project's existing
+`mint_assurance_run_id()`; monitoring introduces no second identity mechanism.
+
+Error behaviour: `404` unknown `model_id`; `422` for an unknown provenance, an
+unparseable or reversed window bound, an empty `records` list, or a model with
+no declared reference population. Never a bare 500 for caller input.
+
+### Provenance and window-bound semantics
+
+`provenance` ∈ `observed` / `mock` / `synthetic_fixture` / `None`, matching
+`TechnicalFinding.provenance` exactly — no monitoring-specific taxonomy.
+**`None` means "not stated" and is never upgraded to `"observed"`**, at any
+layer: not in the window, not in the orchestration, not in the API, and the
+dashboard renders it as *not stated*. `is_mock=False` says only that the
+arithmetic is real; provenance is what says whether the DATA was observed.
+
+`window_start` / `window_end` are **monitoring-window boundaries** — the period
+the records describe. They are *not* collection timestamps and *not* scoring
+timestamps. Nothing orders, sorts, selects, or schedules by them.
+
+Both now travel all the way through: window → `monitor_run()` result
+(`result["windows"]`) → every evidence record (`reference_window` /
+`current_window`) → API response → dashboard.
 
 ---
 
@@ -45,9 +129,20 @@ covered by tests using hand-built dicts, but it is **currently unreachable from
 the real platform**, because no label-only model can produce a
 `predict_batch()` output at all. A label-only model cannot be monitored today.
 
-**Proposed fix (Namitha's/Khushi's call, not made here):** guard the call on
-the capability the adapter already declares, and omit the key rather than
-emit a misleading zero —
+**Worked around inside the monitoring lane, not fixed upstream.**
+`app/monitoring/orchestration.py::_score_frame` checks
+`adapter.supports_probability` first and, for a label-only model, builds the
+window from `adapter.predict()` alone — omitting `probabilities` entirely. So a
+label-only model IS monitorable today on its label channel, with
+`score_availability="unavailable_no_scores"` and no fabricated scores. Pinned
+by `test_a_label_only_model_is_monitored_on_its_label_channel`.
+
+That is a local workaround, not a fix: every other consumer of
+`predict_batch()` still hits the unconditional call.
+
+**Proposed upstream fix (the model owner's call, not made here):** guard the
+call on the capability the adapter already declares, and omit the key rather
+than emit a misleading zero —
 
 ```python
 raw_probs = adapter.predict_proba(scored_features) if adapter.supports_probability else None
@@ -81,9 +176,16 @@ Namitha / Manas. **Not fixed here** — it is outside this lane.
 
 ---
 
-### B. Monitoring evidence cannot reach `build_report()` — Nidhi
+### B. Monitoring evidence cannot reach `build_report()` — **MANAS HANDOFF**
 
 **Where:** `app/report/generate.py`, `EVIDENCE_SECTION_BY_TYPE`.
+
+> **This is the one thing the monitoring lane cannot finish itself.** The
+> records exist, carry full identity and window metadata, and are served by the
+> API today. They simply have nowhere to be routed in the report, and that
+> table is in the report owner's module. Everything Manas needs is in
+> "What is needed" below; no monitoring-side change is required once the
+> entries land.
 
 **The situation, stated accurately.** The report **already has a drift
 section**: `section_configs` includes
@@ -120,6 +222,19 @@ fairness assessment in the same section, where a reader could conflate them.
 Routing it to `drift` keeps them apart but files a fairness finding under a
 drift heading. The monitoring lane has no basis to decide this; it is a report
 presentation question.
+
+**The contract Manas consumes.** Each record is a flat dict carrying its own
+`evidence_type`, `status`, `model_id`, `model_version`, `assurance_run_id`,
+optional `adapter_id`, `reference_window_id` / `current_window_id`, the
+`reference_window` / `current_window` descriptors (including `provenance`,
+which may legitimately be `None`), `is_mock`, and that type's own metric
+fields. The stable type list is
+`app.monitoring.evidence.MONITORING_EVIDENCE_TYPES` — import it rather than
+re-typing the five strings, so a future change cannot silently desynchronise.
+
+Producing the records needs no new plumbing either: `run_monitoring()` already
+returns them under `evidence`, and `GET`/`POST /monitoring` already serves
+them.
 
 **Pinned by** `tests/monitoring/test_monitoring_identity.py::test_monitoring_evidence_types_are_not_yet_registered_for_the_report`,
 which fails the day the entries are added — that is the signal to update it, not
@@ -281,10 +396,14 @@ accepted so a caller with naive local timestamps is not blocked.
 **Nothing orders, sorts, selects, or schedules by these values.** They let a
 finding state the period it describes. A scheduler remains out of scope.
 
-**Not yet threaded into results or evidence.** Both fields live on the window
-today. Carrying them into `monitor_run()` output and `monitoring_evidence()`
-records changes a contract other modules consume, so it is a deliberate
-follow-up rather than something this lane did unilaterally.
+**Now threaded end to end.** Both fields travel from the window onto the
+`monitor_run()` result (`result["windows"]["reference"|"current"]`), onto every
+evidence record (`reference_window` / `current_window`), through the API
+response, and into the dashboard. Timestamps are emitted as ISO-8601 strings
+because these records are JSON-serialized; `None` stays `None`.
+
+Both additions are purely additive — `reference_window_id` /
+`current_window_id` and every pre-existing evidence field are unchanged.
 
 **(iii) Realized outcomes — required before a performance channel can exist. STILL BLOCKED.**
 

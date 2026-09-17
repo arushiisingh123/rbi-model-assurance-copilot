@@ -8,7 +8,7 @@ ModelAdapter/RESTAdapter contract against a different model implementation.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -152,5 +152,65 @@ def predict_one(model: Any, features: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "prediction": prediction,
         "probability": probability,
+        "model_version": MODEL_VERSION,
+    }
+
+
+def predict_many(model: Any, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Score a batch of flat feature dicts in one model call, order preserved.
+
+    Used by app.synthetic_bank.service's POST /score-batch handler.
+
+    WHY THIS EXISTS
+    ---------------
+    Perturbation-based explanation (KernelSHAP, LIME) draws thousands of
+    predictions per explained row. Against a one-row-per-HTTP-call interface
+    that is thousands of round trips, which is why
+    ``app/explainability/capability.py`` refuses black-box explanation for an
+    adapter that cannot batch. One model call for the whole batch is what
+    makes it feasible.
+
+    The returned lists are positionally aligned with ``rows``: index ``i`` of
+    every output list describes ``rows[i]``. The frame is built in one pass
+    with an explicit column order, so no reordering or row loss can occur
+    between input and output -- a silent misalignment here would attribute
+    one applicant's score to another.
+    """
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(
+            "predict_many() requires a non-empty list of feature dicts; "
+            f"got {type(rows).__name__} with {len(rows) if hasattr(rows, '__len__') else '?'} "
+            "entries. An empty batch is a caller error, not an empty result."
+        )
+
+    frame_rows = []
+    for index, features in enumerate(rows):
+        if not isinstance(features, dict):
+            raise ValueError(
+                f"rows[{index}] must be a dict of features, got {type(features).__name__}."
+            )
+        missing = [col for col in FEATURE_COLUMNS if col not in features]
+        if missing:
+            raise ValueError(f"rows[{index}] is missing feature(s): {missing}.")
+        frame_rows.append({col: features[col] for col in FEATURE_COLUMNS})
+
+    frame = pd.DataFrame(frame_rows, columns=FEATURE_COLUMNS)
+
+    predictions = model.predict(frame)
+    proba = model.predict_proba(frame)
+    classes = list(model.classes_)
+    probabilities = proba[:, classes.index(POSITIVE_CLASS)]
+
+    if len(predictions) != len(rows) or len(probabilities) != len(rows):
+        raise ValueError(
+            "Model returned a different number of scores than rows supplied "
+            f"({len(predictions)} predictions, {len(probabilities)} "
+            f"probabilities, {len(rows)} rows). Refusing to return a "
+            "misaligned batch."
+        )
+
+    return {
+        "predictions": [int(p) for p in predictions],
+        "probabilities": [float(p) for p in probabilities],
         "model_version": MODEL_VERSION,
     }

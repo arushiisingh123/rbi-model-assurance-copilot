@@ -28,8 +28,8 @@ from dashboard.panels.explainability_presentation import (
     global_importance_rows,
     instance_contribution_rows,
     instance_options,
-    scale_caption,
-    scale_label,
+    explanation_scale_caption,
+    explanation_scale_label,
 )
 
 SUPPORTED_METHODS = ("shap", "lime")
@@ -82,8 +82,12 @@ def render(
         )
 
     try:
-        unit = scale_label(method)
-        axis_label = scale_caption(method)
+        # The EXPLANATION's own scale, not one inferred from the method name.
+        # An adapter-aware tree-SHAP explanation is probability-scale while
+        # linear SHAP is log-odds; labelling either from 'shap' alone would
+        # put the wrong unit on the axis over normal-looking numbers.
+        unit = explanation_scale_label(explanation)
+        axis_label = explanation_scale_caption(explanation)
     except ValueError as exc:
         st.error(str(exc))
         return
@@ -91,9 +95,11 @@ def render(
     st.info(f"**{method.upper()} contribution scale: {unit}.** {SCALE_CAPTION}")
 
     try:
-        _render_global(explanation, method, axis_label)
+        _render_global(explanation, method, axis_label, unit)
         st.divider()
-        _render_instance(explanation, method, axis_label, instance_ids, key_prefix)
+        _render_instance(
+            explanation, method, axis_label, instance_ids, key_prefix, unit
+        )
         st.divider()
         _render_full_data(explanation, instance_ids)
     except ValueError as exc:
@@ -102,7 +108,9 @@ def render(
         st.error(f"Could not present this explanation: {exc}")
 
 
-def _render_global(explanation: Mapping[str, Any], method: str, axis_label: str) -> None:
+def _render_global(
+    explanation: Mapping[str, Any], method: str, axis_label: str, unit: str
+) -> None:
     """Model-level view: which features drive the model overall."""
     st.subheader(f"Global feature importance — {method.upper()}")
     st.caption(
@@ -120,7 +128,7 @@ def _render_global(explanation: Mapping[str, Any], method: str, axis_label: str)
         x="feature",
         y="importance",
         x_label="Feature",
-        y_label=f"Mean absolute contribution ({scale_label(method)})",
+        y_label=f"Mean absolute contribution ({unit})",
         horizontal=True,
         # sort=False keeps the helper's descending order. It must be False,
         # not None: Streamlit treats anything that is not a bool as a column
@@ -139,6 +147,7 @@ def _render_instance(
     axis_label: str,
     instance_ids: Optional[Sequence[Any]],
     key_prefix: str,
+    unit: str,
 ) -> None:
     """Record-level view: why one prediction came out as it did."""
     st.subheader(f"Single-record explanation — {method.upper()}")
@@ -203,7 +212,7 @@ def _render_instance(
     st.markdown(f"**Top {len(rows)} contributions**")
     st.dataframe(
         [
-            {"Feature": r["feature"], f"Contribution ({scale_label(method)})": r["contribution"]}
+            {"Feature": r["feature"], f"Contribution ({unit})": r["contribution"]}
             for r in rows
         ],
         use_container_width=True,

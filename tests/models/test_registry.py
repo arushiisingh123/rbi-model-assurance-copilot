@@ -204,9 +204,54 @@ def test_default_registry_contains_all_default_models():
         "capabilities": {
             "predict_proba": True,
             "batch": True,
+            # Declared because app/synthetic_bank/service.py implements
+            # POST /score-batch and RESTAdapter uses it -- distinct from the
+            # weaker "batch" flag, which a per-row loop already satisfies.
+            "batch_scoring": True,
             "explainability": False,
         },
     }
+    assert synthetic_bank.supports_batch_scoring is True
+
+
+def test_registry_survives_a_model_that_cannot_be_constructed():
+    """One model's missing optional dependency must not empty the registry.
+
+    The synthetic bank entry needs xgboost, which the German Credit models do
+    not. It used to be constructed eagerly, so an ImportError there took the
+    whole registry down -- including two models with no such dependency.
+    """
+    registry = ModelRegistry()
+    registry.register(LogisticRegressionAdapter.load_default())
+
+    def explodes():
+        raise ImportError("No module named 'xgboost'")
+
+    assert registry.register_guarded("synthetic-bank-credit-v1", explodes) is False
+
+    # The healthy model is untouched and still usable.
+    assert len(registry.list_models()) == 1
+    assert registry.get("german-credit-logistic-regression") is not None
+
+    # The failure is recorded, with the original cause preserved.
+    unavailable = registry.unavailable_models()
+    assert set(unavailable) == {"synthetic-bank-credit-v1"}
+    assert "xgboost" in unavailable["synthetic-bank-credit-v1"]
+
+    # Asking for it reports WHY, rather than a bare "not found".
+    with pytest.raises(ModelNotFoundError, match="unavailable.*xgboost"):
+        registry.get("synthetic-bank-credit-v1")
+
+
+def test_guarded_registration_reports_success():
+    registry = ModelRegistry()
+    assert (
+        registry.register_guarded(
+            "german-credit-logistic-regression", LogisticRegressionAdapter.load_default
+        )
+        is True
+    )
+    assert registry.unavailable_models() == {}
 
 
 def test_default_registry_is_singleton():

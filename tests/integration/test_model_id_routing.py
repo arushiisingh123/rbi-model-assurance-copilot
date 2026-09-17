@@ -71,6 +71,11 @@ def test_get_models_returns_all_default_models():
     assert bank_meta["capabilities"] == {
         "predict_proba": True,
         "batch": True,
+        # UPDATED: the synthetic bank service now implements POST /score-batch
+        # and RESTAdapter uses it. Deliberately distinct from the weaker
+        # "batch" flag above, which only means "accepts a multi-row DataFrame"
+        # and is satisfied by a per-row loop.
+        "batch_scoring": True,
         "explainability": False,
     }
 

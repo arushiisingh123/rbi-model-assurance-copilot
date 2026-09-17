@@ -1257,6 +1257,80 @@ measurement is not evidence — while the `monitoring_summary` record's
 > routing table unilaterally, and which section each of the five types
 > belongs to is the report owner's decision. Pinned by
 > `tests/monitoring/test_monitoring_identity.py`.
+>
+> Everything else is ready: the records carry full identity and window
+> metadata, `run_monitoring()` returns them, and `GET`/`POST /monitoring`
+> serves them. Import the stable type list from
+> `app.monitoring.evidence.MONITORING_EVIDENCE_TYPES` rather than re-typing
+> the five strings.
+
+#### Monitoring orchestration — `app/monitoring/orchestration.py` (Arushi)
+
+The reachable entry point: adapter → windows → result → evidence.
+
+```python
+run_monitoring(
+    adapter, *, context,
+    reference_features=None, current_features=None,      # None -> the model's own
+    reference_window_id="reference", current_window_id="current",
+    protected_attribute=None,                            # None -> adapter's declaration
+    reference_provenance=None, current_provenance=None,
+    reference_window_start=None, reference_window_end=None,
+    current_window_start=None, current_window_end=None,
+) -> {"result": {...}, "evidence": [...], "protected_attribute": str | None}
+
+build_monitoring_window(adapter, *, window_id, features=None, provenance=None,
+                        window_start=None, window_end=None) -> MonitoringWindow
+resolve_protected_attribute(adapter, override=None) -> str | None
+```
+
+Names no dataset, feature, protected attribute, or label value. Where a window
+is not supplied it falls back to that **model's own** `background_data()` /
+default batch; an adapter declaring neither is **refused**, never substituted
+with another model's data. Imports nothing from `app.api`, `app.report`,
+`app.rag` or `app.compliance`.
+
+`resolve_protected_attribute()` is explicit-override → adapter declaration →
+`None`. There is deliberately no inference step, so an undeclared attribute
+yields a PENDING fairness channel rather than a guess.
+
+A label-only adapter (`supports_probability` False) is scored through
+`adapter.predict()` alone, omitting `probabilities`, so the score channel
+reports `unavailable_no_scores` rather than a fabricated zero.
+
+#### Monitoring API — `app/api/monitoring.py` (Arushi)
+
+- **`GET /monitoring?model_id=&protected_attribute=`** → `MonitoringAssuranceResult`.
+  Monitors a model against its own declared reference population.
+- **`POST /monitoring`** → `MonitoringAssuranceResult`. Caller-supplied windows;
+  body carries `model_id`, `protected_attribute`, and `reference`/`current`
+  each with `records`, `window_id`, `provenance`, `window_start`, `window_end`.
+
+`MonitoringAssuranceResult` is `{result, evidence, protected_attribute}`.
+`result` reuses `DriftResult` for the feature-drift channel and `FairnessResult`
+for the fairness channel unchanged — only genuinely new concepts
+(`PredictionDriftResult`, `MonitoringWindowInfo`, `MonitoringAlert`) get a new
+model. `assurance_run_id` is minted per request with the existing
+`mint_assurance_run_id()`.
+
+Errors: `404` unknown `model_id`; `422` unknown provenance, unparseable or
+reversed window bound, empty `records`, or a model with no declared reference
+population.
+
+#### Monitoring dashboard — `dashboard/panels/monitoring_panel.py` (Arushi)
+
+`render_monitoring_panel(data, source)` over a `MonitoringAssuranceResult`.
+Reshaping lives in `monitoring_presentation.py`, which is streamlit-free and
+tested headlessly. The panel calculates nothing and classifies nothing.
+
+`dashboard/monitoring_client.py::get_monitoring()` fetches it and, unlike the
+shared client, has **no mock fallback**: when the API is unreachable it returns
+an empty payload and a source label saying so. A fabricated PSI or PASS must
+never appear on a risk dashboard.
+
+> **Not yet wired into `dashboard/dashboard_app.py`.** Adding the tab is a
+> one-line change in the dashboard shell, which this lane does not own. See
+> `docs/monitoring-handoffs.md` §0.
 
 ## Changing an interface
 

@@ -10,8 +10,13 @@ channel separation and ``evidence.py`` for the report-routing constraint that
 currently applies to monitoring evidence records.
 """
 
-from app.monitoring.evidence import monitoring_evidence
+from app.monitoring.evidence import MONITORING_EVIDENCE_TYPES, monitoring_evidence
 from app.monitoring.monitor import MONITORING_CHANNELS, monitor_run
+from app.monitoring.orchestration import (
+    build_monitoring_window,
+    resolve_protected_attribute,
+    run_monitoring,
+)
 from app.monitoring.windows import (
     WINDOW_PROVENANCE_VALUES,
     MonitoringWindow,
@@ -20,9 +25,13 @@ from app.monitoring.windows import (
 
 __all__ = [
     "MONITORING_CHANNELS",
+    "MONITORING_EVIDENCE_TYPES",
     "WINDOW_PROVENANCE_VALUES",
     "MonitoringWindow",
+    "build_monitoring_window",
     "monitor_run",
     "monitoring_evidence",
+    "resolve_protected_attribute",
+    "run_monitoring",
     "window_from_model_output",
 ]

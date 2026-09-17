@@ -122,11 +122,35 @@ def _identity(context: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _window_labels(result: Mapping[str, Any]) -> Dict[str, Any]:
-    """The two window labels, so a record names the periods it compared."""
-    return {
+    """The two window labels and their declared metadata.
+
+    The labels answer "which periods were compared". The additive
+    ``reference_window`` / ``current_window`` descriptors answer the question a
+    reader asks next: was this data OBSERVED, and over what period?
+
+    That distinction is the whole reason provenance exists. ``is_mock=False``
+    on these records means the arithmetic is real; it says nothing about the
+    data. A record built over generated scenario data and one built over real
+    traffic are otherwise indistinguishable once pooled.
+
+    Copied verbatim from the result's own ``windows`` block -- nothing is
+    inferred, and a ``provenance`` of None (caller did not state it) is never
+    upgraded to ``"observed"``. Absent from a legacy result, the descriptors
+    are simply omitted rather than invented.
+    """
+    labels: Dict[str, Any] = {
         "reference_window_id": result.get("reference_window_id"),
         "current_window_id": result.get("current_window_id"),
     }
+
+    windows = result.get("windows")
+    if isinstance(windows, Mapping):
+        for side in ("reference", "current"):
+            descriptor = windows.get(side)
+            if isinstance(descriptor, Mapping):
+                labels[f"{side}_window"] = dict(descriptor)
+
+    return labels
 
 
 def monitoring_evidence(monitor_result: Mapping[str, Any]) -> List[Dict[str, Any]]:

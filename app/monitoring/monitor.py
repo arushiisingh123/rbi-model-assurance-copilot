@@ -208,6 +208,35 @@ def _fairness_channel(
     )
 
 
+def _window_descriptor(window: MonitoringWindow) -> Dict[str, Any]:
+    """The window's own metadata, copied onto the result.
+
+    Additive: ``reference_window_id`` / ``current_window_id`` stay exactly where
+    they were, so no existing consumer changes. This carries the rest of what
+    the window declared about ITSELF -- where its data came from and which
+    period it describes -- so a downstream reader is not forced back to the
+    window object to answer "was this observed or generated?".
+
+    Timestamps are emitted as ISO-8601 strings rather than ``datetime``
+    objects: these records travel into evidence and JSON responses, and a
+    ``datetime`` is not JSON-serializable. ``None`` stays ``None`` -- an
+    unstated bound is not converted into a value.
+
+    ``provenance`` is likewise passed through untouched. ``None`` means the
+    caller did not state where the data came from and is NEVER upgraded to
+    ``"observed"``.
+    """
+    return {
+        "window_id": window.window_id,
+        "provenance": window.provenance,
+        "window_start": (
+            window.window_start.isoformat() if window.window_start else None
+        ),
+        "window_end": window.window_end.isoformat() if window.window_end else None,
+        "record_count": len(window.predictions) if window.predictions else None,
+    }
+
+
 def _channel_status(result: Optional[Mapping[str, Any]]) -> str:
     """The status a channel reported, or PENDING when it did not run.
 
@@ -304,6 +333,11 @@ def monitor_run(
             context (dict): the identity mapping passed in, copied unchanged.
             reference_window_id / current_window_id (str): the two windows'
                 labels, so a result names the periods it compared.
+            windows (dict): additive. ``{"reference": {...}, "current": {...}}``,
+                each carrying that window's own ``window_id``, ``provenance``,
+                ``window_start``/``window_end`` (ISO-8601 strings or None) and
+                ``record_count``. Copied from the window, never inferred --
+                a ``provenance`` of None stays None.
             feature_drift (dict or None): ``drift_report()`` output, or None
                 when either window carries no features.
             prediction_drift (dict or None): ``prediction_drift_report()``
@@ -351,6 +385,12 @@ def monitor_run(
         "context": validated_context,
         "reference_window_id": reference.window_id,
         "current_window_id": current.window_id,
+        # Additive: each window's own declared metadata (provenance, period,
+        # size). See _window_descriptor -- nothing here is inferred.
+        "windows": {
+            "reference": _window_descriptor(reference),
+            "current": _window_descriptor(current),
+        },
         CHANNEL_FEATURE_DRIFT: results[CHANNEL_FEATURE_DRIFT],
         CHANNEL_PREDICTION_DRIFT: results[CHANNEL_PREDICTION_DRIFT],
         CHANNEL_FAIRNESS: results[CHANNEL_FAIRNESS],

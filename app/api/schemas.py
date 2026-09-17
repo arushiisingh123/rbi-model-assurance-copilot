@@ -171,6 +171,111 @@ class DriftComparisonResult(BaseModel):
 
 
 # =============================================================================
+# Monitoring Schemas (Owner: Arushi)
+#
+# These are the HTTP projection of the monitoring lane's EXISTING internal
+# contract (app/monitoring/monitor.py, evidence.py) -- not a parallel model of
+# it. FeatureDrift reuses DriftResult and the fairness channel reuses
+# FairnessResult unchanged, so a monitored drift/fairness result is the same
+# shape as the one /fairness-drift already returns. Only the genuinely new
+# concepts (prediction drift, window metadata, channel status, alerts) get a
+# new model.
+# =============================================================================
+
+class MonitoringWindowInfo(BaseModel):
+    """One window's own declared metadata.
+
+    provenance is Optional and None means "the caller did not state where this
+    data came from". It is NEVER defaulted to "observed" -- that would let
+    generated scenario data be read as real observed drift.
+
+    window_start/window_end are monitoring-window BOUNDARIES (the period the
+    records describe), not collection or scoring timestamps, carried as
+    ISO-8601 strings.
+    """
+    window_id: str
+    provenance: Optional[Literal["observed", "mock", "synthetic_fixture"]] = None
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    record_count: Optional[int] = None
+
+
+class MonitoringWindows(BaseModel):
+    reference: MonitoringWindowInfo
+    current: MonitoringWindowInfo
+
+
+class PredictionDriftResult(BaseModel):
+    """Drift in the MODEL'S OWN OUTPUT -- distinct from feature drift.
+
+    Two channels measured with two different PSI formulations (categorical over
+    labels, quantile over scores); see docs/thresholds.md 3.6. score_* is None
+    with score_availability="unavailable_no_scores" when the model has no
+    probability capability -- never a fabricated zero.
+    """
+    label_psi: float
+    label_status: Status
+    classes_evaluated: list[Any] = Field(default_factory=list)
+    # Left as plain dicts rather than a model: each entry's key is literally
+    # "class", which is a Python keyword and would need an alias whose
+    # serialization behaviour could silently rename the field on the wire. The
+    # producing module already defines the shape (class/reference_rate/
+    # current_rate) and re-declaring it here would be a second source of truth.
+    per_class: list[dict[str, Any]] = Field(default_factory=list)
+    score_psi: Optional[float] = None
+    score_ks_statistic: Optional[float] = None
+    score_status: Status
+    score_availability: Literal["computed", "unavailable_no_scores"]
+    status: Status
+    is_mock: bool
+
+
+class MonitoringAlert(BaseModel):
+    """Detection only -- no delivery, routing, or suppression state.
+
+    An alert carries no severity of its own: it echoes its channel's existing
+    status, so it can never disagree with the result it came from.
+    """
+    channel: str
+    status: Status
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class MonitoringResult(BaseModel):
+    """One monitoring run over a reference/current window pair."""
+    context: AssuranceRunContext
+    reference_window_id: str
+    current_window_id: str
+    windows: MonitoringWindows
+    feature_drift: Optional[DriftResult] = None
+    prediction_drift: Optional[PredictionDriftResult] = None
+    fairness: Optional[FairnessResult] = None
+    channel_status: dict[str, Status]
+    monitoring_status: Status
+    alerts: list[MonitoringAlert] = Field(default_factory=list)
+    is_mock: bool
+
+
+class MonitoringAssuranceResult(BaseModel):
+    """The monitoring lane's outward contract: result plus its evidence.
+
+    ``evidence`` records are flat dicts carrying their own ``evidence_type``
+    (one of app.monitoring.evidence.MONITORING_EVIDENCE_TYPES) and identity.
+    They are typed as plain dicts here for the same reason the report layer
+    treats evidence records as dicts: the evidence contract is defined by its
+    producing module, and re-declaring it here would create a second source of
+    truth for it.
+
+    ``protected_attribute`` is the attribute fairness was actually evaluated
+    over, or None when the adapter declared none and the caller supplied none.
+    None means the fairness channel is PENDING -- never that it passed.
+    """
+    result: MonitoringResult
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    protected_attribute: Optional[str] = None
+
+
+# =============================================================================
 # Phase 3 LLM Reporting Schemas (PROVISIONAL — pending Nidhi + team sign-off)
 # =============================================================================
 

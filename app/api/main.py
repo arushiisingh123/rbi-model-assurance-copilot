@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Query
 logger = logging.getLogger(__name__)
 
 from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
+from app.api.monitoring import router as monitoring_router
 from app.api.orchestration import (
     build_assurance_result,
     build_drift_comparison,
@@ -49,6 +50,9 @@ app = FastAPI(
     version="0.2.0-phase2",
     description="API for credit-scoring model assurance and RBI compliance evidence.",
 )
+
+# Monitoring lane (owner: Arushi) -- self-contained router, see app/api/monitoring.py.
+app.include_router(monitoring_router)
 
 
 def _resolve_adapter(model_id: Optional[str]) -> Optional[ModelAdapter]:

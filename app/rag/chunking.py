@@ -53,11 +53,47 @@ class DocumentChunk:
     source_metadata
         The exact ``RBISourceMetadata`` record for the document this chunk
         came from -- the same object, so no provenance field is lost.
+
+    page, section_id, section_title, paragraph
+        WHERE IN THE DOCUMENT this chunk came from. All Optional and all
+        default to None, because they are only knowable from a document that
+        has structure to extract (a paginated PDF, a numbered circular). The
+        existing plain-text excerpt has none, so its chunks legitimately
+        carry None.
+
+        They are NEVER filled with a placeholder. A citation pointing at
+        "page 1" because no page was known is worse than one that admits it
+        has no page: it looks checkable, and checking it finds the wrong
+        thing. ``is_locatable()`` is the honest test of whether this chunk
+        can anchor a citation.
     """
 
     text: str
     chunk_index: int
     source_metadata: RBISourceMetadata
+    page: int | None = None
+    section_id: str | None = None
+    section_title: str | None = None
+    paragraph: int | None = None
+
+    def is_locatable(self) -> bool:
+        """Whether this chunk points at a place a reviewer could open.
+
+        A compliance finding that cites a chunk should require this: without
+        a page or a section, "as per the RBI circular" is unverifiable.
+        """
+        return self.page is not None or bool(self.section_id)
+
+    @property
+    def location(self) -> dict:
+        """Page/section provenance as a dict, omitting what is unknown."""
+        raw = {
+            "page": self.page,
+            "section_id": self.section_id,
+            "section_title": self.section_title,
+            "paragraph": self.paragraph,
+        }
+        return {k: v for k, v in raw.items() if v is not None}
 
     @property
     def doc_id(self) -> str:
@@ -81,8 +117,13 @@ class DocumentChunk:
         ``retrieved_date``, ``applicable_to``, ``is_excerpt``,
         ``is_current``, ``coverage_note``, ``scope_note``. Values are
         copied verbatim from the source record -- nothing invented.
+
+        Page/section location is merged in when known, so every consumer
+        downstream of this property (Chroma metadata, retrieval hits,
+        report citations) inherits chunk-level provenance without needing
+        its own change. Unknown location fields are absent, not empty.
         """
-        return _source_provenance(self.source_metadata)
+        return {**_source_provenance(self.source_metadata), **self.location}
 
 
 def chunk_document(

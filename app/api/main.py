@@ -244,8 +244,22 @@ def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
     fairness_res = compute_real_fairness(raw_model, adapter=adapter)
     drift_res = compute_real_drift(raw_model, adapter=adapter)
     evidence_by_rule = build_evidence_by_rule()
+    # Stamp the run's identity onto the result and every finding, exactly as
+    # build_assurance_result() already does. The adapter is resolved above but
+    # its identity was previously dropped here, so this route returned
+    # findings with model_id null -- leaving a consumer unable to say which
+    # model a compliance finding describes. The alternative (the caller
+    # labelling findings with the model it *believes* it asked for) would make
+    # a wrong-model result indistinguishable from a correct one, which is the
+    # failure mode this platform exists to prevent.
     return compute_real_compliance(
-        raw_model, explain_res, fairness_res, drift_res, evidence_by_rule=evidence_by_rule
+        raw_model,
+        explain_res,
+        fairness_res,
+        drift_res,
+        model_id=adapter.model_id if adapter is not None else None,
+        assurance_run_id=mint_assurance_run_id(),
+        evidence_by_rule=evidence_by_rule,
     )
 
 

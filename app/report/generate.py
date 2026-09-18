@@ -400,6 +400,15 @@ EVIDENCE_SECTION_BY_TYPE = {
     "monitoring_summary": "drift",               # app/monitoring/evidence.py
     # Monitored fairness is fairness -- same metric family, same section.
     "fairness_monitor_summary": "fairness",      # app/monitoring/evidence.py
+    # RBI requirement layer (app/rbi/service.py). Routes into the compliance
+    # section, where regulatory findings already live.
+    #
+    # It is a SEPARATE evidence_type from the six-rule engine's output on
+    # purpose: the two layers answer different questions with different
+    # status vocabularies, and pooling them under one type would make an
+    # unassessed obligation indistinguishable from an evaluated rule. They
+    # stay separable in a pooled evidence list.
+    "rbi_requirement_finding": "compliance",     # app/rbi/service.py
 }
 
 # Evidence types that are unbounded in size (one record per instance per

@@ -72,6 +72,33 @@ def _resolve_adapter(model_id: Optional[str]) -> Optional[ModelAdapter]:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+def _unreachable_model(model_id: Optional[str], exc: Exception) -> HTTPException:
+    """Turn a remote-model transport failure into an honest 502.
+
+    A REST-backed model lives in another process. When that process is down,
+    EVERY domain of an assurance run fails, because none of them can score a
+    single row -- so there is no partial result to salvage and nothing to
+    report as "unavailable but assessed".
+
+    Surfacing it as 502 rather than letting RESTAdapterError escape as a bare
+    500 matters for two reasons. It names the actual problem ("the model's
+    own service is unreachable") instead of implying a defect in this
+    backend, and it tells the operator the action to take -- start the model
+    service. A 500 with "unexpected error" sends them to read our traceback
+    instead.
+
+    Deliberately NOT swallowed into a mock or empty result: an assurance run
+    that scored nothing must not look like one that found nothing wrong.
+    """
+    return HTTPException(
+        status_code=502,
+        detail=(
+            f"Model service for '{model_id}' could not be reached, so no part "
+            f"of the assurance run could be computed: {exc}"
+        ),
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     """Basic liveness check."""
@@ -115,7 +142,10 @@ def get_model(model_id: Optional[str] = Query(default=None)) -> dict:
     label.
     """
     adapter = _resolve_adapter(model_id)
-    raw_model = compute_real_model(adapter=adapter)
+    try:
+        raw_model = compute_real_model(adapter=adapter)
+    except RESTAdapterError as exc:
+        raise _unreachable_model(model_id, exc)
     model_dict = format_model_for_api(raw_model)
     if adapter is None:
         model_dict["model_metrics"] = compute_real_model_metrics()
@@ -179,9 +209,12 @@ def get_explainability(
 def get_fairness_drift(model_id: Optional[str] = Query(default=None)) -> dict:
     """Retrieve real fairness metrics and train/test drift detection analysis."""
     adapter = _resolve_adapter(model_id)
-    raw_model = compute_real_model(adapter=adapter)
-    fairness_res = compute_real_fairness(raw_model, adapter=adapter)
-    drift_res = compute_real_drift(raw_model, adapter=adapter)
+    try:
+        raw_model = compute_real_model(adapter=adapter)
+        fairness_res = compute_real_fairness(raw_model, adapter=adapter)
+        drift_res = compute_real_drift(raw_model, adapter=adapter)
+    except RESTAdapterError as exc:
+        raise _unreachable_model(model_id, exc)
     return {
         "fairness": fairness_res,
         "drift": drift_res,
@@ -237,12 +270,16 @@ def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
     already uses, now also reachable through this standalone route.
     """
     adapter = _resolve_adapter(model_id)
-    raw_model = compute_real_model(adapter=adapter)
-    # Same adapter as fairness/drift below: a compliance finding derived from
-    # another model's explanation would be a false regulatory conclusion.
-    explain_res = compute_real_explainability(raw_model, method="shap", adapter=adapter)
-    fairness_res = compute_real_fairness(raw_model, adapter=adapter)
-    drift_res = compute_real_drift(raw_model, adapter=adapter)
+    try:
+        raw_model = compute_real_model(adapter=adapter)
+        # Same adapter as fairness/drift below: a compliance finding derived
+        # from another model's explanation would be a false regulatory
+        # conclusion.
+        explain_res = compute_real_explainability(raw_model, method="shap", adapter=adapter)
+        fairness_res = compute_real_fairness(raw_model, adapter=adapter)
+        drift_res = compute_real_drift(raw_model, adapter=adapter)
+    except RESTAdapterError as exc:
+        raise _unreachable_model(model_id, exc)
     evidence_by_rule = build_evidence_by_rule()
     # Stamp the run's identity onto the result and every finding, exactly as
     # build_assurance_result() already does. The adapter is resolved above but
@@ -279,7 +316,10 @@ def get_assurance_result(model_id: Optional[str] = Query(default=None)) -> dict:
     compute are still returned.
     """
     adapter = _resolve_adapter(model_id)
-    return build_assurance_result(adapter=adapter)
+    try:
+        return build_assurance_result(adapter=adapter)
+    except RESTAdapterError as exc:
+        raise _unreachable_model(model_id, exc)
 
 
 @app.get("/mock-assurance-result", response_model=AssuranceResult, deprecated=True)

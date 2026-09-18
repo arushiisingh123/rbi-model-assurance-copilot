@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Google Fonts import kept out on purpose: the app must run inside an air-
+   gapped review environment, so it falls back to the system sans stack
+   declared in tailwind.config.js. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures keep metric columns aligned when values change. */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}

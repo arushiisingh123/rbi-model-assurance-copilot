@@ -25,12 +25,42 @@ of Done in `docs/phase4-allocation.md` §10 (22 of 22 PASS).
 pip install -r requirements.txt
 python -m app.models.train                 # creates the model artifact
 uvicorn app.api.main:app                   # API on http://127.0.0.1:8000
-streamlit run dashboard/dashboard_app.py   # dashboard (separate terminal)
 python run_assurance.py                    # end-to-end CLI summary
 ```
 
-The dashboard runs without the API: every tab falls back to clearly
-labelled mock data and the header shows the backend as unreachable.
+Optional, for the synthetic bank (a REST-served model the platform assures
+over HTTP, exactly as it would a real bank's endpoint):
+
+```bash
+uvicorn app.synthetic_bank.service:app --port 8100
+```
+
+### Frontend
+
+**React (`frontend/`) is the primary frontend.**
+
+```bash
+cd frontend
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # production bundle into frontend/dist
+```
+
+The React app talks to the real FastAPI backend and has **no mock
+fallback** — where a capability is genuinely unavailable it shows
+"unavailable" plus the backend's own reason, rather than a value that looks
+like a result. See `frontend/README.md` for the architecture, routes and the
+`VITE_API_BASE_URL` setting.
+
+The Streamlit dashboard is **retained as a reference implementation** during
+the migration and still runs:
+
+```bash
+streamlit run dashboard/dashboard_app.py
+```
+
+Unlike the React app, Streamlit falls back to clearly labelled mock data when
+the API is unreachable.
 
 ## Known limitations
 

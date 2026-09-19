@@ -13,7 +13,14 @@ import { useState } from "react";
 import { EXPLAIN_METHODS, getExplainability } from "../api/explainability";
 import { ContributionChart } from "../components/charts";
 import { IdentityBar } from "../components/IdentityBar";
-import { AsyncSection, Card, Field, StatusBadge, Unavailable } from "../components/states";
+import {
+  AsyncSection,
+  Card,
+  Explainer,
+  Field,
+  StatusBadge,
+  Unavailable,
+} from "../components/states";
 import { useAssurance } from "../hooks/AssuranceContext";
 import { useModels } from "../hooks/ModelContext";
 import { useDomainData } from "../hooks/useDomainData";
@@ -111,13 +118,16 @@ export function ExplainabilityPage() {
   return (
     <div className="space-y-6">
       <header className="flex items-start justify-between gap-6 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold">Explainability</h1>
-          <p className="mt-1 text-sm text-base-content/60 max-w-2xl">
-            Feature attribution for the selected model. The explainer is chosen
-            by the backend from the model&apos;s observable structure — this
-            page reports what it chose and on which scale.
-          </p>
+        <div className="max-w-2xl">
+          <h1 className="text-2xl font-semibold">
+            Explainability — why the model decided
+          </h1>
+          <Explainer className="mt-2">
+            This page shows which pieces of information the model leaned on,
+            and how strongly each one pushed its answer one way or the other.
+            It describes what the model <em>did</em> — it does not judge
+            whether the model was right.
+          </Explainer>
         </div>
         <MethodTabs method={method} onChange={setMethod} disabled={loading} />
       </header>
@@ -167,18 +177,74 @@ export function ExplainabilityPage() {
           data && (
             <>
               <Card
-                title="How to read these numbers"
+                title="How to read these charts"
                 right={<StatusBadge status={data.available ? "PASS" : "PENDING"} />}
               >
-                <ExplanationMeta explanation={data} />
-                <p className="mt-4 text-sm leading-relaxed text-base-content/70">
-                  Contributions are on the <strong>{unit}</strong> scale with{" "}
-                  <strong>{data.fidelity}</strong> fidelity, produced by{" "}
-                  <strong>{data.explainer}</strong>. Values on different scales
-                  are not comparable across models — an exact log-odds
-                  attribution and an approximate probability attribution answer
-                  different questions.
-                </p>
+                <div className="rounded-md border border-base-300 bg-base-200/40 p-4">
+                  <p className="text-sm font-medium">Reading a bar</p>
+                  <ul className="mt-2 space-y-1.5 text-sm text-base-content/75 leading-snug">
+                    <li className="flex gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="mt-1 inline-block w-3 h-3 rounded-sm shrink-0"
+                        style={{ background: "#b91c1c" }}
+                      />
+                      <span>
+                        A bar in this colour means that piece of information
+                        pushed the model <strong>towards</strong> the
+                        higher-risk answer for that case.
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="mt-1 inline-block w-3 h-3 rounded-sm shrink-0"
+                        style={{ background: "#0369a1" }}
+                      />
+                      <span>
+                        A bar in this colour means it pushed the model{" "}
+                        <strong>away</strong> from the higher-risk answer.
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span aria-hidden="true" className="text-base-content/40">
+                        ↔
+                      </span>
+                      <span>
+                        The longer the bar, the more weight that information
+                        carried for that case.
+                      </span>
+                    </li>
+                  </ul>
+                  <p className="mt-3 text-sm leading-relaxed text-base-content/70">
+                    A case showing strong higher-risk contributions is the
+                    model&apos;s estimate, not a decision and not a finding. On
+                    its own it does <strong>not</strong> establish that the
+                    customer did anything wrong, that a member of staff acted
+                    improperly, that a regulation was breached, or that the
+                    model is faulty. To interpret one, check whether the
+                    underlying values are correct, whether the case is unusual
+                    compared with others, and whether the score sits close to
+                    the cut-off used for decisions.
+                  </p>
+                </div>
+
+                <div className="mt-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                    Technical detail
+                  </p>
+                  <div className="mt-2">
+                    <ExplanationMeta explanation={data} />
+                  </div>
+                  <p className="mt-3 text-sm leading-relaxed text-base-content/70">
+                    Contributions are on the <strong>{unit}</strong> scale with{" "}
+                    <strong>{data.fidelity}</strong> fidelity, produced by{" "}
+                    <strong>{data.explainer}</strong>. Values on different
+                    scales are not comparable across models — an exact log-odds
+                    attribution and an approximate probability attribution
+                    answer different questions.
+                  </p>
+                </div>
                 <Limitations limitations={data.limitations} />
               </Card>
 

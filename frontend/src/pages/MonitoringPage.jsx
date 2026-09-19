@@ -18,6 +18,7 @@ import { IdentityBar } from "../components/IdentityBar";
 import {
   AsyncSection,
   Card,
+  Explainer,
   Field,
   StatusBadge,
   Unavailable,
@@ -27,6 +28,71 @@ import { useModels } from "../hooks/ModelContext";
 import { useDomainData } from "../hooks/useDomainData";
 import { SourceNotice } from "../components/SourceNotice";
 import { num, timestamp } from "../utils/format";
+
+/** Plain-language channel names, so a reader need not know the jargon. */
+const CHANNEL_LABEL = {
+  feature_drift: "The cases coming in have changed",
+  prediction_drift: "The model's answers have changed",
+  fairness: "Groups are not being treated evenly",
+};
+
+/**
+ * What to look into, for whichever channels are flagged.
+ *
+ * Every word here comes from the backend's `guidance` field
+ * (app/report/guidance.py): fixed text chosen by a lookup on the channel's
+ * existing status. Nothing is generated, and nothing names a cause -- a
+ * flagged channel is consistent with several very different explanations, and
+ * the platform cannot tell them apart from the measurement alone.
+ */
+function GuidancePanel({ guidance }) {
+  if (!guidance?.length) return null;
+
+  return (
+    <Card
+      title="What to look into"
+      subtitle="Suggested checks for the items flagged below. These are places to look, not conclusions."
+    >
+      <div className="space-y-4">
+        {guidance.map((entry) => (
+          <div
+            key={entry.channel}
+            className="rounded-md border border-base-300 bg-base-200/40 p-4"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={entry.status} size="sm" />
+              <p className="text-sm font-medium">
+                {CHANNEL_LABEL[entry.channel] || entry.channel}
+              </p>
+            </div>
+            <Explainer className="mt-2">{entry.means}</Explainer>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+              Suggested checks
+            </p>
+            <ul className="mt-1 space-y-1">
+              {entry.investigate.map((step) => (
+                <li
+                  key={step}
+                  className="text-sm text-base-content/75 leading-snug flex gap-2"
+                >
+                  <span aria-hidden="true" className="text-base-content/40">
+                    •
+                  </span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <Explainer className="mt-4">
+        These suggestions do not identify a cause. A flagged result can come
+        from the incoming data, the model itself, a change in policy, or a
+        process issue — working through the checks above is how you tell which.
+      </Explainer>
+    </Card>
+  );
+}
 
 function WindowCard({ label, window: win }) {
   if (!win) {
@@ -161,11 +227,19 @@ export function MonitoringPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">Monitoring</h1>
-        <p className="mt-1 text-sm text-base-content/60 max-w-2xl">
-          Feature drift, prediction/output drift and monitored fairness, each
-          compared between a reference and a current window.
-        </p>
+        <h1 className="text-2xl font-semibold">Monitoring — what has changed</h1>
+        <Explainer className="mt-2 max-w-3xl">
+          This page compares a recent period against an earlier baseline period
+          and reports what has moved. It looks at three things separately: the
+          kind of cases coming in (<em>feature drift</em>), the answers the
+          model is giving (<em>prediction drift</em>), and whether groups are
+          still being treated evenly (<em>fairness</em>).
+        </Explainer>
+        <Explainer className="mt-2 max-w-3xl">
+          Keeping them separate matters: the incoming data changing and the
+          model's behaviour changing are different problems with different
+          causes, and they lead to different places to look.
+        </Explainer>
       </header>
 
       <IdentityBar
@@ -200,6 +274,8 @@ export function MonitoringPage() {
       >
         {result && (
           <>
+            <GuidancePanel guidance={data?.guidance} />
+
             <Card
               title="Monitoring run"
               right={<StatusBadge status={result.monitoring_status} size="lg" />}

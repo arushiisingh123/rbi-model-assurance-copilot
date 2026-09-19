@@ -13,7 +13,9 @@ import { IdentityBar } from "../components/IdentityBar";
 import {
   AsyncSection,
   Card,
+  Explainer,
   Field,
+  MetricField,
   StatusBadge,
   Unavailable,
 } from "../components/states";
@@ -50,17 +52,36 @@ function FairnessBody({ fairness }) {
   return (
     <div className="space-y-6">
       <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Field label="Protected attribute" value={fairness.protected_attribute} mono />
-        <Field
+        <MetricField
+          label="Protected attribute"
+          term="protected attribute"
+          value={fairness.protected_attribute}
+          mono
+        />
+        <MetricField
           label="Demographic parity difference"
+          term="demographic parity difference"
           value={num(fairness.demographic_parity_diff)}
         />
-        <Field
+        <MetricField
           label="Disparate impact ratio"
+          term="disparate impact ratio"
           value={num(fairness.disparate_impact_ratio)}
         />
-        <Field label="Groups" value={fairness.groups?.length ?? 0} />
+        <MetricField
+          label="Groups compared"
+          help="How many distinct groups of the protected attribute were found in this data."
+          value={fairness.groups?.length ?? 0}
+        />
       </dl>
+
+      <Explainer>
+        The disparate impact ratio compares the group least likely to receive a
+        favourable decision against the group most likely to.{" "}
+        <strong>1.00 means every group is treated equally</strong>; the further
+        below 1.00, the wider the gap. This model scored{" "}
+        <strong>{num(fairness.disparate_impact_ratio, 2)}</strong>.
+      </Explainer>
 
       {fairness.groups?.length ? (
         <>
@@ -70,9 +91,11 @@ function FairnessBody({ fairness }) {
               <thead>
                 <tr className="text-xs uppercase tracking-wide">
                   <th>Group</th>
-                  <th className="text-right">Records</th>
-                  <th className="text-right">Favourable outcomes</th>
-                  <th className="text-right">Selection rate</th>
+                  <th className="text-right">Cases</th>
+                  <th className="text-right">Favourable decisions</th>
+                  <th className="text-right" title="The share of this group that received a favourable decision.">
+                    Share receiving a favourable decision
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -129,11 +152,20 @@ export function FairnessPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">Fairness</h1>
-        <p className="mt-1 text-sm text-base-content/60 max-w-2xl">
-          Group fairness metrics for the selected model, with the
-          feature-drift result the backend returns alongside them.
-        </p>
+        <h1 className="text-2xl font-semibold">
+          Fairness — are groups treated evenly?
+        </h1>
+        <Explainer className="mt-2 max-w-3xl">
+          This page checks whether the model&apos;s favourable decisions are
+          spread evenly across different groups of people. The group
+          characteristic is the one your organisation declared as protected —
+          the platform never picks one itself.
+        </Explainer>
+        <Explainer className="mt-2 max-w-3xl">
+          A gap between groups is a prompt to investigate, not proof of
+          discrimination. Small groups in particular can show large gaps from
+          very few cases.
+        </Explainer>
       </header>
 
       <IdentityBar
@@ -162,7 +194,7 @@ export function FairnessPage() {
         {data && (
           <>
             <Card
-              title="Fairness assessment"
+              title="Fair treatment across groups"
               right={<StatusBadge status={fairness?.status} size="lg" />}
             >
               {fairness ? (
@@ -176,22 +208,32 @@ export function FairnessPage() {
             </Card>
 
             <Card
-              title="Feature drift (reference vs current)"
-              subtitle="Input-distribution drift. This is not prediction drift — see the Monitoring page for that."
+              title="Have the incoming cases changed?"
+              subtitle="Compares the kind of cases in this data against an earlier baseline. This is about the incoming data, not the model's answers — for those, see Monitoring."
               right={<StatusBadge status={drift?.status} size="lg" />}
             >
               {drift ? (
                 <div className="space-y-5">
                   <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <Field label="Max PSI" value={num(drift.psi)} />
-                    <Field label="Max KS statistic" value={num(drift.ks_statistic)} />
-                    <Field
-                      label="Features evaluated"
+                    <MetricField
+                      label="Largest shift (PSI)"
+                      term="population stability index"
+                      value={num(drift.psi)}
+                    />
+                    <MetricField
+                      label="Largest shift (KS)"
+                      term="ks statistic"
+                      value={num(drift.ks_statistic)}
+                    />
+                    <MetricField
+                      label="Fields compared"
+                      help="How many input fields were compared between the two periods."
                       value={drift.features_evaluated?.length ?? 0}
                     />
-                    <Field
-                      label="Real computation"
-                      value={drift.is_mock ? "mock" : "yes (is_mock false)"}
+                    <MetricField
+                      label="Data source"
+                      help="Whether these figures were calculated from real model output or are sample data."
+                      value={drift.is_mock ? "sample data" : "real calculation"}
                     />
                   </dl>
 

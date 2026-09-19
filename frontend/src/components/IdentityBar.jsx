@@ -10,23 +10,44 @@
  * `runId` is only rendered when the backend actually returned one -- an
  * invented or placeholder run id would defeat the purpose.
  */
-import { Field } from "./states";
+import { MetricField } from "./states";
+
+/** Plain wording for how a model is reached. */
+const INTEGRATION_LABEL = {
+  in_process: "Runs inside this platform",
+  rest: "Runs in your environment (reached over a connection)",
+};
 
 export function IdentityBar({ modelId, modelType, modelVersion, runId, integrationType, extra }) {
   return (
     <div className="bg-base-200/70 border border-base-300 rounded-lg px-5 py-3">
       <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Field label="Model" value={modelId} mono />
-        <Field
+        <MetricField
+          label="Model"
+          help="The model these findings describe. Every figure on this page belongs to this model and no other."
+          value={modelId}
+          mono
+        />
+        <MetricField
           label="Type / version"
+          help="The kind of model and which version of it was checked. A different version is a different model for assurance purposes."
           value={
             modelType
               ? `${modelType}${modelVersion ? ` · v${modelVersion}` : ""}`
               : null
           }
         />
-        <Field label="Integration" value={integrationType} />
-        <Field label="Assurance run" value={runId} mono />
+        <MetricField
+          label="Where it runs"
+          help="Whether the model runs inside this platform, or stays in your own environment and is reached over a connection. Either way the model itself is never copied or changed."
+          value={INTEGRATION_LABEL[integrationType] || integrationType}
+        />
+        <MetricField
+          label="Assessment reference"
+          term="assurance run"
+          value={runId}
+          mono
+        />
       </dl>
       {extra}
     </div>

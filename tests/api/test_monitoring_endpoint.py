@@ -45,7 +45,7 @@ def test_the_monitoring_endpoint_exists_and_returns_a_result():
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"result", "evidence", "protected_attribute"}
+    assert set(body) == {"result", "evidence", "protected_attribute", "guidance"}
     assert body["result"]["monitoring_status"] in VALID_STATUSES
 
 
@@ -307,3 +307,54 @@ def test_an_internal_error_is_not_disguised_as_an_external_outage(monkeypatch):
     response = client.get("/monitoring")
 
     assert response.status_code != 502
+
+
+# ---------------------------------------------------------------------------
+# Investigation guidance (surfaced in the UI as "What to look into")
+# ---------------------------------------------------------------------------
+
+
+def test_guidance_is_returned_for_channels_needing_attention():
+    """The response says what to investigate, not just that something moved.
+
+    Guidance is a lookup on statuses the analytical modules already assigned
+    (app/report/guidance.py). It is fixed text, so it can never disagree with
+    the result it accompanies.
+    """
+    body = client.get("/monitoring").json()
+    channel_status = body["result"]["channel_status"]
+
+    actionable = {
+        channel
+        for channel, status in channel_status.items()
+        if status in ("WARNING", "FAIL")
+    }
+    guided = {entry["channel"] for entry in body["guidance"]}
+
+    assert guided == actionable
+    for entry in body["guidance"]:
+        # It echoes the channel's existing status -- never its own verdict.
+        assert entry["status"] == channel_status[entry["channel"]]
+        assert entry["means"]
+        assert entry["investigate"]
+
+
+def test_guidance_never_covers_a_passing_or_unmeasured_channel():
+    """A PASS needs no action, and a PENDING channel was never measured."""
+    body = client.get("/monitoring").json()
+    channel_status = body["result"]["channel_status"]
+
+    for entry in body["guidance"]:
+        assert channel_status[entry["channel"]] not in ("PASS", "PENDING")
+
+
+def test_guidance_names_no_cause_and_recommends_no_retraining():
+    """It proposes what to check. It must never assert why, or blame anyone."""
+    body = client.get("/monitoring").json()
+    text = " ".join(
+        entry["means"] + " " + " ".join(entry["investigate"])
+        for entry in body["guidance"]
+    ).lower()
+
+    for forbidden in ("retrain", "root cause is", "caused by", "employee error"):
+        assert forbidden not in text

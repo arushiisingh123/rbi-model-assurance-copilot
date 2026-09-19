@@ -11,6 +11,7 @@ import { IdentityBar } from "../components/IdentityBar";
 import {
   AsyncSection,
   Card,
+  Explainer,
   Field,
   StatusBadge,
   Unavailable,
@@ -205,11 +206,20 @@ export function CompliancePage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">RBI Compliance</h1>
-        <p className="mt-1 text-sm text-base-content/60 max-w-2xl">
-          Technical findings mapped against RBI rules by the deterministic rule
-          engine, with the regulatory evidence retrieved for each rule.
-        </p>
+        <h1 className="text-2xl font-semibold">
+          RBI Compliance — rule checks and requirements
+        </h1>
+        <Explainer className="mt-2 max-w-3xl">
+          This page shows two separate things. First, a set of rule checks run
+          against what the assessment measured. Second, a small number of
+          verified RBI requirements, with whether each one applies to your
+          organisation and whether the evidence to satisfy it is available.
+        </Explainer>
+        <Explainer className="mt-2 max-w-3xl">
+          Neither is a statement of legal compliance. Where a requirement needs
+          records only your organisation holds, the platform says so rather
+          than guessing.
+        </Explainer>
       </header>
 
       <IdentityBar

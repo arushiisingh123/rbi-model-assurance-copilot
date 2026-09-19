@@ -376,6 +376,12 @@ class MonitoringAssuranceResult(BaseModel):
     result: MonitoringResult
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     protected_attribute: Optional[str] = None
+    # Additive. One entry per channel currently at WARNING or FAIL, each with
+    # fixed, hand-written text saying what that channel means and what to
+    # investigate. Produced by app/report/guidance.py -- a lookup on the
+    # channel's EXISTING status, never a new verdict, never an LLM call, and
+    # never a statement of cause. Empty when nothing needs attention.
+    guidance: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # =============================================================================

@@ -9,7 +9,14 @@
 import { getModelHealth } from "../api/models";
 import { getModelResult } from "../api/model";
 import { IdentityBar } from "../components/IdentityBar";
-import { AsyncSection, Card, Field, StatusBadge, Unavailable } from "../components/states";
+import {
+  AsyncSection,
+  Card,
+  Explainer,
+  Field,
+  StatusBadge,
+  Unavailable,
+} from "../components/states";
 import { useModels } from "../hooks/ModelContext";
 import { useApiResource } from "../hooks/useApiResource";
 import { num } from "../utils/format";
@@ -65,11 +72,13 @@ export function ModelsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">Model Registry</h1>
-        <p className="mt-1 text-sm text-base-content/60 max-w-2xl">
-          Every model registered with the assurance platform. The registry is
-          the source of truth — this page lists whatever it holds.
-        </p>
+        <h1 className="text-2xl font-semibold">Models available to assess</h1>
+        <Explainer className="mt-2 max-w-3xl">
+          The models this platform can assess. A model can run inside the
+          platform or stay in your own environment and be reached over a secure
+          connection — either way the model itself is never copied or changed.
+          Pick one on the left to assess it.
+        </Explainer>
       </header>
 
       <Card title="Registered models">

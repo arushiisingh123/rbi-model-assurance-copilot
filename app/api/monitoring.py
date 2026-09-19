@@ -199,7 +199,19 @@ def _run(
         kwargs["current_window_id"] = current.window_id
 
     try:
-        return run_monitoring(adapter, **kwargs)
+        outcome = run_monitoring(adapter, **kwargs)
+        # Attach the deterministic investigation guidance for whichever
+        # channels came back WARNING or FAIL. This is a lookup on statuses the
+        # analytical modules already assigned -- app/report/guidance.py
+        # computes no metric, calls no model, and names no root cause. Without
+        # it the API reports that something moved but never what to do about
+        # it, which is the question a manager actually asks.
+        from app.report.guidance import investigation_guidance
+
+        outcome["guidance"] = investigation_guidance(
+            outcome["result"].get("channel_status", {})
+        )
+        return outcome
     except RESTAdapterError as exc:
         # A REST-backed model lives in another process. When that process is
         # down no window can be scored, so there is no partial monitoring

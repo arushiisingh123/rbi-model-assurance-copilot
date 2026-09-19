@@ -11,14 +11,26 @@ import { getApiHealth } from "../api/models";
 import { ModelSelector } from "../components/ModelSelector";
 import { useApiResource } from "../hooks/useApiResource";
 
+/**
+ * Each item carries a one-line description of what the page answers.
+ *
+ * The technical name stays as the label -- it is the term the rest of the
+ * organisation uses -- with the plain-language purpose underneath, so a
+ * first-time reader does not have to already know what "Explainability" or
+ * "Drift" means in order to navigate.
+ */
 const NAV = [
-  { to: "/", label: "Dashboard", end: true },
-  { to: "/models", label: "Models" },
-  { to: "/explainability", label: "Explainability" },
-  { to: "/fairness", label: "Fairness" },
-  { to: "/monitoring", label: "Monitoring" },
-  { to: "/compliance", label: "RBI Compliance" },
-  { to: "/report", label: "Assurance Report" },
+  { to: "/", label: "Dashboard", hint: "Overall status and what needs attention", end: true },
+  { to: "/models", label: "Models", hint: "Which models can be assessed" },
+  {
+    to: "/explainability",
+    label: "Explainability",
+    hint: "Why the model decided what it did",
+  },
+  { to: "/fairness", label: "Fairness", hint: "Are groups treated evenly?" },
+  { to: "/monitoring", label: "Monitoring", hint: "What has changed since before?" },
+  { to: "/compliance", label: "RBI Compliance", hint: "Rule checks and requirements" },
+  { to: "/report", label: "Assurance Report", hint: "The written summary" },
 ];
 
 function BackendHealth() {
@@ -27,19 +39,33 @@ function BackendHealth() {
     [],
   );
 
+  // Plain wording, and a text glyph so the state does not depend on the dot's
+  // colour alone.
   let tone = "bg-base-content/30";
-  let text = "checking backend…";
+  let glyph = "…";
+  let text = "Checking connection…";
+  let help = "Checking whether the assurance service is reachable.";
   if (!loading && error) {
     tone = "bg-error";
-    text = "backend unreachable";
+    glyph = "✕";
+    text = "Service unavailable";
+    help =
+      "The assurance service is not responding, so no results can be loaded. Nothing shown on screen is out of date — there is simply nothing to show.";
   } else if (!loading && data) {
     tone = "bg-success";
-    text = "backend connected";
+    glyph = "✓";
+    text = "Connected";
+    help = "The assurance service is reachable and results can be loaded.";
   }
 
   return (
-    <div className="flex items-center gap-2 px-4 py-3 border-t border-base-300 text-xs text-base-content/60">
-      <span className={`inline-block w-2 h-2 rounded-full ${tone}`} />
+    <div
+      className="flex items-center gap-2 px-4 py-3 border-t border-base-300 text-xs text-base-content/60"
+      title={help}
+      aria-label={`${text}. ${help}`}
+    >
+      <span className={`inline-block w-2 h-2 rounded-full ${tone}`} aria-hidden="true" />
+      <span aria-hidden="true">{glyph}</span>
       <span>{text}</span>
     </div>
   );
@@ -62,20 +88,26 @@ export function AppLayout() {
           <ModelSelector />
         </div>
 
-        <nav className="flex-1 py-3">
+        <nav className="flex-1 py-3" aria-label="Sections">
           <ul className="menu menu-sm px-2 gap-0.5">
             {NAV.map((item) => (
               <li key={item.to}>
                 <NavLink
                   to={item.to}
                   end={item.end}
+                  aria-label={`${item.label} — ${item.hint}`}
                   className={({ isActive }) =>
-                    isActive
-                      ? "active font-medium"
-                      : "text-base-content/70 hover:text-base-content"
+                    `flex flex-col items-start gap-0 leading-tight py-2 ${
+                      isActive
+                        ? "active font-medium"
+                        : "text-base-content/70 hover:text-base-content"
+                    }`
                   }
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  <span className="text-[11px] font-normal text-base-content/45 leading-snug">
+                    {item.hint}
+                  </span>
                 </NavLink>
               </li>
             ))}

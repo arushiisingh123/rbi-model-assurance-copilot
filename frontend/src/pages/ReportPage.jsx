@@ -20,6 +20,7 @@ import { IdentityBar } from "../components/IdentityBar";
 import {
   AsyncSection,
   Card,
+  Explainer,
   Field,
   StatusBadge,
   Unavailable,
@@ -224,11 +225,16 @@ export function ReportPage() {
     <div className="space-y-6">
       <header className="flex items-start justify-between gap-6 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold">Assurance Report</h1>
-          <p className="mt-1 text-sm text-base-content/60 max-w-2xl">
-            The backend&apos;s three-layer report: computed findings, retrieved
-            RBI evidence, and the narrative generated from them.
-          </p>
+          <h1 className="text-2xl font-semibold">
+            Assurance Report — the written summary
+          </h1>
+          <Explainer className="mt-2 max-w-3xl">
+            A written summary of the assessment, built in three separate
+            layers: what was measured, which verified regulatory sources were
+            found, and a written explanation of the two. The written
+            explanation can never change a result or decide whether something
+            passed.
+          </Explainer>
         </div>
         <div className="flex gap-2">
           <button

@@ -968,11 +968,21 @@ def predict_batch(
     # part of the abstract ModelAdapter contract -- adapters that don't
     # define it (LR, RF, and any adapter written before this existed) are
     # unaffected and keep reporting DEFAULT_DATASET_PATH exactly as before.
+    #
+    # An adapter that DEFINES the attribute but leaves it None has not declared
+    # its provenance, which is treated the same as not defining it at all.
     meta_trained_on = (
-        getattr(adapter, "trained_on", DEFAULT_DATASET_PATH)
-        if adapter is not None
-        else DEFAULT_DATASET_PATH
-    )
+        getattr(adapter, "trained_on", None) if adapter is not None else None
+    ) or DEFAULT_DATASET_PATH
+
+    # Label semantics follow the same rule. They are the model's own statement
+    # about what its 0/1 outputs MEAN, and fairness reads
+    # ``favorable_outcome_label`` from them -- so a model whose polarity
+    # differs from the in-process default must be able to say so rather than
+    # inheriting another model's semantics silently.
+    meta_label_semantics = (
+        getattr(adapter, "label_semantics", None) if adapter is not None else None
+    ) or LABEL_SEMANTICS
 
     return {
         "predictions": predictions,
@@ -984,7 +994,7 @@ def predict_batch(
             "version": meta_model_version,
             "trained_on": meta_trained_on,
             "feature_names": list(scored_features.columns),
-            "label_semantics": LABEL_SEMANTICS,
+            "label_semantics": meta_label_semantics,
         },
         "is_mock": False,
     }

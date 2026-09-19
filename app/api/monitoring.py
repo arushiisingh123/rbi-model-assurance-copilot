@@ -51,6 +51,7 @@ from app.api.orchestration import (
 )
 from app.api.schemas import MonitoringAssuranceResult
 from app.models import ModelAdapter, ModelNotFoundError, get_default_registry
+from app.models.rest_adapter import RESTAdapterError
 from app.monitoring import WINDOW_PROVENANCE_VALUES, run_monitoring
 
 router = APIRouter(tags=["monitoring"])
@@ -199,6 +200,25 @@ def _run(
 
     try:
         return run_monitoring(adapter, **kwargs)
+    except RESTAdapterError as exc:
+        # A REST-backed model lives in another process. When that process is
+        # down no window can be scored, so there is no partial monitoring
+        # result to salvage. 502 names the actual problem -- the model's own
+        # service is unreachable -- and tells the operator what to do, where a
+        # 500 would imply a defect in this backend and send them to read a
+        # traceback instead. This matches what every other model-facing route
+        # already returns for the same failure.
+        #
+        # Caught by TYPE, not as a broad Exception: a genuine programming
+        # error here must still surface as a 500 rather than being relabelled
+        # as somebody else's outage.
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Model service for '{adapter.model_id}' could not be reached, "
+                f"so no monitoring window could be scored: {exc}"
+            ),
+        )
     except ValueError as exc:
         # Every ValueError out of the monitoring lane is a caller-input
         # problem: a misaligned window, an invalid bound, or a model with no

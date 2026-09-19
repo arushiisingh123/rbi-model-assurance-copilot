@@ -151,12 +151,64 @@ class ComplianceFinding(BaseModel):
     assurance_run_id: Optional[str] = None
 
 
+class VerifiedRequirementFinding(BaseModel):
+    """One verified RBI requirement, its applicability and its evidence status.
+
+    A DIFFERENT layer from ``ComplianceFinding`` above, and deliberately kept
+    separate rather than folded into it:
+
+    - ``ComplianceFinding`` reports the six-rule engine against technical
+      findings, using the four analytical statuses (PASS/WARNING/FAIL/PENDING).
+    - This reports a clause read from an official RBI instrument, using the
+      requirement vocabulary (``app/rbi/requirements.py``), which additionally
+      distinguishes EVIDENCE_MISSING, NOT_ASSESSED and APPLICABILITY_UNCLEAR.
+
+    Collapsing the two would force those three distinctions into PENDING and
+    lose exactly the information a reviewer needs: whether a requirement did
+    not apply, or applied and could not be evidenced.
+
+    ``status`` is intentionally a free string rather than the four-value
+    ``Status`` literal, because this layer's vocabulary is the requirement one.
+    Every value is produced deterministically by
+    ``app.rbi.verified_requirements``; none is ever set by an LLM.
+    """
+
+    evidence_type: str
+    requirement_id: str
+    document_id: str
+    document_title: Optional[str] = None
+    clause: str
+    requirement: str
+    quote: Optional[str] = None
+    source_url: str
+    instrument_type: str
+    regulatory_status: str
+    assessment_mode: str
+    applicability: str
+    applicability_reasons: list[str] = Field(default_factory=list)
+    status: str
+    reason: Optional[str] = None
+    limitation: Optional[str] = None
+    verified_on: Optional[str] = None
+    is_mock: bool = False
+    model_id: Optional[str] = None
+    model_version: Optional[str] = None
+    assurance_run_id: Optional[str] = None
+
+
 class ComplianceResult(BaseModel):
     """Output payload from the Compliance/Rule Engine module."""
     findings: list[ComplianceFinding]
     is_mock: bool
     model_id: Optional[str] = None
     assurance_run_id: Optional[str] = None
+    # Additive. Empty unless the caller declares an entity profile, because an
+    # undeclared profile makes every requirement's applicability UNCLEAR and
+    # there is nothing useful to report. Never merged into ``findings``: these
+    # are verified regulatory clauses, not rule-engine outputs.
+    verified_requirements: list[VerifiedRequirementFinding] = Field(
+        default_factory=list
+    )
 
 
 class AssuranceResult(BaseModel):

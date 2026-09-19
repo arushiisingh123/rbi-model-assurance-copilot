@@ -261,7 +261,27 @@ def get_drift_comparison() -> dict:
 
 
 @app.get("/compliance", response_model=ComplianceResult)
-def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
+def get_compliance(
+    model_id: Optional[str] = Query(default=None),
+    entity_type: Optional[str] = Query(
+        default=None,
+        description=(
+            "Declared regulated-entity type, e.g. 'NBFC'. Never inferred from "
+            "the model or its data."
+        ),
+    ),
+    nbfc_layer: Optional[str] = Query(
+        default=None, description="Declared NBFC layer, e.g. 'Middle'."
+    ),
+    digital_lending: Optional[bool] = Query(
+        default=None, description="Whether the entity undertakes digital lending."
+    ),
+    microfinance: Optional[bool] = Query(default=None),
+    uses_external_model_vendor: Optional[bool] = Query(
+        default=None,
+        description="Whether the model is hosted/served by an external vendor.",
+    ),
+) -> dict:
     """Retrieve RBI compliance findings mapped against real technical checks.
 
     Each finding's evidence_chunks is populated from a real, live RAG
@@ -289,15 +309,47 @@ def get_compliance(model_id: Optional[str] = Query(default=None)) -> dict:
     # labelling findings with the model it *believes* it asked for) would make
     # a wrong-model result indistinguishable from a correct one, which is the
     # failure mode this platform exists to prevent.
-    return compute_real_compliance(
+    run_id = mint_assurance_run_id()
+    result = compute_real_compliance(
         raw_model,
         explain_res,
         fairness_res,
         drift_res,
         model_id=adapter.model_id if adapter is not None else None,
-        assurance_run_id=mint_assurance_run_id(),
+        assurance_run_id=run_id,
         evidence_by_rule=evidence_by_rule,
     )
+
+    # Verified RBI requirement register (app/rbi/verified_requirements.py),
+    # attached HERE rather than inside evaluate_compliance() so the rule
+    # engine's output shape is untouched -- its key set is asserted exactly by
+    # tests/compliance/test_evaluate_compliance.py.
+    #
+    # The entity profile is whatever the CALLER declared. Nothing is inferred
+    # from the model, its features or its data: an undeclared dimension leaves
+    # every dependent requirement APPLICABILITY_UNCLEAR, which is the honest
+    # answer rather than an assumed one.
+    from app.rbi.verified_requirements import (
+        EntityProfile,
+        assess_verified_requirements,
+    )
+
+    profile = EntityProfile(
+        entity_type=entity_type,
+        nbfc_layer=nbfc_layer,
+        digital_lending=digital_lending,
+        microfinance=microfinance,
+        uses_external_model_vendor=uses_external_model_vendor,
+    )
+    return {
+        **result,
+        "verified_requirements": assess_verified_requirements(
+            profile,
+            model_id=adapter.model_id if adapter is not None else None,
+            model_version=adapter.model_version if adapter is not None else None,
+            assurance_run_id=run_id,
+        ),
+    }
 
 
 @app.get("/assurance-result", response_model=AssuranceResult)
@@ -333,7 +385,20 @@ def mock_assurance_result() -> dict:
 
 
 @app.get("/report", response_model=ReportResult)
-def get_report(model_id: Optional[str] = Query(default=None)) -> dict:
+def get_report(
+    model_id: Optional[str] = Query(default=None),
+    entity_type: Optional[str] = Query(
+        default=None,
+        description=(
+            "Declared regulated-entity type, e.g. 'NBFC'. Never inferred. "
+            "Drives which verified RBI requirements are applicable."
+        ),
+    ),
+    nbfc_layer: Optional[str] = Query(default=None),
+    digital_lending: Optional[bool] = Query(default=None),
+    microfinance: Optional[bool] = Query(default=None),
+    uses_external_model_vendor: Optional[bool] = Query(default=None),
+) -> dict:
     """Retrieve the LLM model assurance report for the requested model.
 
     ``model_id`` is additive: omitted, the default in-process path runs exactly
@@ -383,12 +448,35 @@ def get_report(model_id: Optional[str] = Query(default=None)) -> dict:
             model_id=resolved_model_id,
             assurance_run_id=assurance_run_id,
         )
+        # Verified RBI clauses, assessed by the RBI lane against the entity
+        # profile the CALLER declared. Assessed here and passed in as finished
+        # evidence so the report layer never retrieves or evaluates an RBI
+        # requirement itself.
+        from app.rbi.verified_requirements import (
+            EntityProfile,
+            assess_verified_requirements,
+        )
+
+        verified = assess_verified_requirements(
+            EntityProfile(
+                entity_type=entity_type,
+                nbfc_layer=nbfc_layer,
+                digital_lending=digital_lending,
+                microfinance=microfinance,
+                uses_external_model_vendor=uses_external_model_vendor,
+            ),
+            model_id=resolved_model_id,
+            model_version=adapter.model_version if adapter is not None else None,
+            assurance_run_id=assurance_run_id,
+        )
+
         evidence_records = build_evidence_records(
             raw_model,
             explain_res,
             method="shap",
             model_id=resolved_model_id,
             assurance_run_id=assurance_run_id,
+            verified_requirements=verified,
         )
         from app.report import generate_report
         return generate_report(

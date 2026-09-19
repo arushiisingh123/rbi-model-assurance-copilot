@@ -978,7 +978,13 @@ screen.
 The Phase 4 implementation has been merged into main and the checkpoint is
 APPROVED BY MANAS for this project review; see docs/decisions.md, "Phase 4
 checkpoint sign-off", including "Level of approval" for exactly what that
-covers. Phase 5 has not begun.
+covers.
+
+NOTE (2026-09-19): the Phase-4 framing below is historical. Phase 5
+(model-agnostic assurance), the monitoring lane, and the React frontend have
+all since been delivered and merged. See the CURRENT POSITION block later in
+this section, plus docs/regulatory-grounding.md and docs/bank-integration.md,
+for the verified present state.
 
 Now in scope — Phase 4:
 
@@ -1019,18 +1025,37 @@ A broader approved RBI corpus
 instance_id on the GET /explainability response (the explainability panel
   labels records by position and says so on screen)
 
-Still out of scope until the team explicitly begins the relevant phase —
-FUTURE / PHASE 5, none of it designed or implemented:
+SUPERSEDED — the paragraph below described the position before Phase 5. It is
+retained only so the change is visible, and must not be read as current:
 
-Team-wide cross-testing, debugging, and demo preparation
-Any external-bank / model-adapter architecture. The system currently
-  supports exactly one model: the scikit-learn pipeline in app/models/
-  trained on the UCI German Credit dataset. Arbitrary external models are
-  NOT supported.
-The LLM provider decision. Report generation currently calls Groq and falls
-  back to a clearly labelled mock when GROQ_API_KEY is absent or generation
-  fails.
-A Phase 5 Definition of Done, which does not exist yet.
+  "Any external-bank / model-adapter architecture ... the system currently
+  supports exactly one model ... Arbitrary external models are NOT supported."
+
+CURRENT POSITION (verified 2026-09-19):
+
+Phase 5 was delivered. The model-adapter architecture EXISTS and three models
+are registered and routable end to end through every analytical endpoint:
+
+  german-credit-logistic-regression   scikit-learn, in-process
+  german-credit-random-forest         scikit-learn, in-process
+  synthetic-bank-credit-v1            XGBoost, served over HTTP via RESTAdapter
+
+Each adapter declares its own model_id, model_version, feature_names,
+capabilities, protected_attribute, trained_on and label_semantics. None of
+these is inferred. Monitoring, prediction drift, and a monitoring API and
+dashboard were delivered after Phase 4 as well.
+
+Still genuinely out of scope, and not implemented:
+
+Authentication and authorization
+Persistence / audit storage
+Production deployment artifacts
+Employee-level compliance (no user or actor concept exists anywhere)
+Transaction-level compliance determination
+A broader RBI corpus — see docs/regulatory-grounding.md for the counted
+  position (19 declared, 0 present, 1 indexed historical document)
+The LLM provider decision. Report generation calls Groq and falls back to a
+  clearly labelled mock when GROQ_API_KEY is absent or generation fails.
 
 Analytical thresholds (fairness, drift) have a single authoritative
 location and must not be independently defined per module. See

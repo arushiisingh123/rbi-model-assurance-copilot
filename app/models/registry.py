@@ -98,9 +98,15 @@ def _build_synthetic_bank_adapter() -> RESTAdapter:
     from app.synthetic_bank.data_generator import (
         CATEGORICAL_FEATURES,
         FEATURE_COLUMNS,
+        LABEL_SEMANTICS,
         generate_customers,
     )
-    from app.synthetic_bank.model import MODEL_ID, MODEL_TYPE, MODEL_VERSION
+    from app.synthetic_bank.model import (
+        MODEL_ID,
+        MODEL_TYPE,
+        MODEL_VERSION,
+        TRAINED_ON,
+    )
 
     endpoint_url = os.environ.get("SYNTHETIC_BANK_URL", "http://127.0.0.1:8100")
     input_schema = {
@@ -134,6 +140,14 @@ def _build_synthetic_bank_adapter() -> RESTAdapter:
             "explainability": False,
         },
         background=background,
+        # The bank model's OWN provenance and label semantics, declared by the
+        # module that trained it rather than inherited from the in-process
+        # German Credit default. Without these the platform reports an XGBoost
+        # model trained on generated bank data as though it were trained on the
+        # German Credit CSV -- a false statement about model provenance, and
+        # exactly the kind of metadata a model-risk reviewer relies on.
+        trained_on=TRAINED_ON,
+        label_semantics=LABEL_SEMANTICS,
     )
 
 

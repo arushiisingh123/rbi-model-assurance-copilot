@@ -276,6 +276,8 @@ def build_evidence_records(
     method: str = "shap",
     model_id: Optional[str] = None,
     assurance_run_id: Optional[str] = None,
+    monitoring_result: Optional[Dict[str, Any]] = None,
+    verified_requirements: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Assemble the Phase 3 evidence records for one assurance run.
 
@@ -290,8 +292,35 @@ def build_evidence_records(
     to the right report section. Instance-level and population-level evidence
     are produced by separate calls and are never merged into one record.
 
-    Drift evidence is deliberately absent: no drift evidence builder exists,
-    and inventing one is explicitly out of C3 scope.
+    ``monitoring_result`` is additive and optional. Supplied (a
+    ``monitor_run()`` output, normally from
+    ``app.monitoring.run_monitoring()["result"]``), this appends that run's
+    monitoring evidence -- feature drift, both prediction-drift channels,
+    monitored fairness and the run summary -- via the monitoring lane's OWN
+    producer. Omitted, every existing caller is byte-identical to before this
+    parameter existed.
+
+    Nothing is recalculated here: ``monitoring_evidence()`` copies values the
+    analytical modules already produced, and each record keeps the model
+    identity, window identifiers and provenance its own run carried. The
+    dependency direction stays monitoring -> evidence -> orchestration ->
+    report; the report layer never reaches back into monitoring.
+
+    Callers must pass the monitoring result for THE SAME model as
+    ``model_dict``. Mixing them would put two models' findings in one evidence
+    list under one identity, which is precisely what the per-record identity
+    exists to prevent.
+
+    ``verified_requirements`` is additive and optional. Supplied (the output of
+    ``app.rbi.verified_requirements.assess_verified_requirements()``), those
+    records are appended verbatim so verified RBI clauses reach the report as
+    structured, traceable evidence. Nothing is re-assessed here and the report
+    layer never retrieves or evaluates an RBI requirement itself.
+
+    Those records are deliberately excluded from the LLM prompt by
+    ``app.report.generate._PROMPT_EXCLUDED_EVIDENCE_TYPES``: they carry verbatim
+    clause text and an evidence status, and a narrative model must never be
+    given the opportunity to turn that into a compliance claim.
 
     model_id / assurance_run_id are additive (Phase 5D): threaded
     to all three evidence producers below. Omitted, every producer
@@ -331,6 +360,22 @@ def build_evidence_records(
             assurance_run_id=assurance_run_id,
         )
     )
+
+    if monitoring_result is not None:
+        # Produced by the monitoring lane's own builder, not re-derived here.
+        from app.monitoring import monitoring_evidence
+
+        records.extend(monitoring_evidence(monitoring_result))
+
+    if verified_requirements:
+        # Already-assessed records from
+        # app.rbi.verified_requirements.assess_verified_requirements().
+        # Appended verbatim: no requirement is re-assessed, no applicability is
+        # re-decided and no status is re-derived here. The report layer must
+        # never retrieve or evaluate RBI requirements itself, so they arrive
+        # fully formed from the RBI lane and this function only carries them.
+        records.extend(verified_requirements)
+
     return records
 
 

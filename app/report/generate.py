@@ -394,6 +394,12 @@ EVIDENCE_SECTION_BY_TYPE = {
     # score/label distribution rather than an input distribution) but it
     # answers the same "has the population shifted" question, so it belongs in
     # the drift narrative alongside feature drift.
+    # Verified RBI requirement register (app/rbi/verified_requirements.py).
+    # Routed to the compliance section because these are regulatory clauses,
+    # not analytical findings. Kept as its own evidence_type rather than reusing
+    # "rbi_requirement_finding" so the two producers stay distinguishable: every
+    # record of THIS type is attestation-mode and can never carry a PASS.
+    "rbi_verified_requirement": "compliance",    # app/rbi/verified_requirements.py
     "feature_drift_summary": "drift",            # app/monitoring/evidence.py
     "prediction_drift_label": "drift",           # app/monitoring/evidence.py
     "prediction_drift_score": "drift",           # app/monitoring/evidence.py
@@ -411,12 +417,25 @@ EVIDENCE_SECTION_BY_TYPE = {
     "rbi_requirement_finding": "compliance",     # app/rbi/service.py
 }
 
-# Evidence types that are unbounded in size (one record per instance per
-# feature). They are carried in the report for traceability but kept OUT of the
-# LLM prompt: including them would need a sampling policy, and inventing one is
+# Evidence types that are carried in the report for traceability but kept OUT
+# of the LLM prompt.
+#
+# "instance_contribution" is excluded for SIZE: it is unbounded (one record per
+# instance per feature) and including it would need a sampling policy, which is
 # out of C3 scope. Population- and dataset-level records are bounded by the
 # number of groups/features and are included.
-_PROMPT_EXCLUDED_EVIDENCE_TYPES = frozenset({"instance_contribution"})
+#
+# "rbi_verified_requirement" is excluded for a different and stronger reason:
+# SAFETY. Those records carry verbatim RBI clause text plus an applicability and
+# an evidence status. Handing them to a narrative model invites it to write that
+# the entity complies with a named clause -- a regulatory conclusion the model
+# is never permitted to reach, and one no analytic in this platform supports
+# (every such requirement is attestation-mode and can only be evidenced by the
+# regulated entity). They therefore reach the report as structured, traceable
+# evidence and never as prompt context.
+_PROMPT_EXCLUDED_EVIDENCE_TYPES = frozenset(
+    {"instance_contribution", "rbi_verified_requirement"}
+)
 
 
 def _route_evidence_records(

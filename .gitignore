@@ -11,3 +11,8 @@ __pycache__/
 Thumbs.db
 app/models/artifacts/
 app/synthetic_bank/artifacts/
+
+# Local environment files (may hold GROQ_API_KEY or other credentials).
+.env
+.env.*
+!.env.example

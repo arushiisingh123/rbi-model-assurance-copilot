@@ -73,11 +73,24 @@ the API is unreachable.
   that no RBI rule exists. This is not complete regulatory coverage.
 - **Report generation falls back to a labelled mock** when `GROQ_API_KEY`
   is absent or live generation fails.
-- **Drift is not production monitoring.** It compares the development
-  training split with the held-out test split of one static dataset.
-- **One model only.** The system supports the scikit-learn pipeline in
-  `app/models/` trained on the UCI German Credit dataset. Support for
-  arbitrary external models is not implemented and is not designed.
+- **Drift is not production monitoring.** By default it compares the
+  development training split with the held-out test split of one static
+  dataset. `POST /monitoring` accepts caller-supplied windows, but the
+  platform never collects, schedules or stores them.
+- **No authentication, no persistence.** Every endpoint is open and nothing is
+  written to a database. Records are processed in memory and discarded.
+- **No employee-level or transaction-level compliance.** There is no user or
+  actor concept in the codebase. Per-instance explanations exist; a
+  per-transaction compliance determination does not.
+
+Three models are registered and routable end to end — two scikit-learn models
+on German Credit and an XGBoost model served over HTTP through `RESTAdapter`.
+Each declares its own identity, feature space, protected attribute, training
+provenance and label semantics.
+
+See [`docs/regulatory-grounding.md`](docs/regulatory-grounding.md) for the
+counted corpus position and [`docs/bank-integration.md`](docs/bank-integration.md)
+for the integration, data-handling and use-case detail.
 
 ## Team
 

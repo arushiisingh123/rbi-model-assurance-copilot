@@ -1332,6 +1332,47 @@ never appear on a risk dashboard.
 > one-line change in the dashboard shell, which this lane does not own. See
 > `docs/monitoring-handoffs.md` §0.
 
+#### Verified RBI requirement register — `app/rbi/verified_requirements.py` (RBI lane)
+
+```python
+EntityProfile(entity_type=None, nbfc_layer=None, digital_lending=None,
+              microfinance=None, uses_external_model_vendor=None)
+
+assess_verified_requirements(profile, *, model_id=None, model_version=None,
+                             assurance_run_id=None) -> list[dict]
+applicable_requirements(profile) -> list[(VerifiedRequirement, applicability, reasons)]
+
+VERIFIED_SOURCES       # 5 sources: 3 with clause text, 1 unreadable, 1 superseded
+VERIFIED_REQUIREMENTS  # 8 requirements, all assessment_mode="attestation"
+```
+
+Each record carries `evidence_type="rbi_verified_requirement"`, the clause, the
+verbatim RBI quote, the official `source_url`, `verified_on`,
+`verification_method`, `instrument_type`, `regulatory_status`,
+`assessment_mode`, `applicability`, `applicability_reasons`, `status`,
+`limitation` and — when supplied — `model_id` / `model_version` /
+`assurance_run_id`.
+
+**Every field is declared, never inferred.** An undeclared profile dimension
+yields `APPLICABILITY_UNCLEAR`; it is never assumed either way. The module
+imports nothing from `app.models`, `app.drift`, `app.explainability`,
+`app.report` or `app.rag`, and makes no LLM call.
+
+**No requirement can return `PASS`** — all eight need organisational evidence
+the platform cannot observe.
+
+#### `GET /compliance` — additive `verified_requirements`
+
+Optional declared query parameters: `entity_type`, `nbfc_layer`,
+`digital_lending`, `microfinance`, `uses_external_model_vendor`. Omitted, the
+response is unchanged apart from an empty-applicability register, and existing
+callers are unaffected.
+
+The register is attached **in the route**, not inside `evaluate_compliance()`,
+whose output shape stays exactly `{findings, is_mock}`. Rule-engine `findings`
+and `verified_requirements` are never merged: they use different status
+vocabularies and answer different questions.
+
 ## Changing an interface
 
 Small additive changes (a new optional key) are low-friction. Renaming or

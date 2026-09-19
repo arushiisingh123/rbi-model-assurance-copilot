@@ -263,3 +263,47 @@ def test_the_router_names_no_dataset_feature_or_protected_attribute():
         "FEATURE_COLUMNS",
     ):
         assert forbidden not in source
+
+
+# ---------------------------------------------------------------------------
+# External-model failure semantics
+# ---------------------------------------------------------------------------
+
+
+def test_an_unreachable_external_model_is_502_not_500(monkeypatch):
+    """A model living in another process being down is not OUR server error.
+
+    Every other model-facing route already returns 502 for this; /monitoring
+    returned a bare 500, which tells an operator to go read our traceback
+    instead of starting the model service.
+
+    Caught by TYPE: RESTAdapterError specifically, so a genuine programming
+    error still surfaces as a 500 rather than being relabelled as somebody
+    else's outage.
+    """
+    from app.models.rest_adapter import RESTAdapterError
+
+    def _unreachable(*args, **kwargs):
+        raise RESTAdapterError("HTTP request error scoring row 0: connection refused")
+
+    monkeypatch.setattr("app.api.monitoring.run_monitoring", _unreachable)
+
+    response = client.get("/monitoring?model_id=synthetic-bank-credit-v1")
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "could not be reached" in detail
+    assert "synthetic-bank-credit-v1" in detail
+
+
+def test_an_internal_error_is_not_disguised_as_an_external_outage(monkeypatch):
+    """The guard must not become a catch-all that hides our own defects."""
+
+    def _boom(*args, **kwargs):
+        raise TypeError("a genuine programming error")
+
+    monkeypatch.setattr("app.api.monitoring.run_monitoring", _boom)
+
+    response = client.get("/monitoring")
+
+    assert response.status_code != 502

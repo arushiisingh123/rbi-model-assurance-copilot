@@ -37,6 +37,8 @@ class RESTAdapter(ModelAdapter):
         timeout: float = 10.0,
         background: Optional[pd.DataFrame] = None,
         protected_attribute: Optional[str] = None,
+        trained_on: Optional[str] = None,
+        label_semantics: Optional[Dict[str, Any]] = None,
     ):
         self.model_id = model_id
         self.model_version = model_version
@@ -51,6 +53,20 @@ class RESTAdapter(ModelAdapter):
         # fairness as not applicable/PENDING for this adapter, never guess a
         # protected attribute or fall back to another model's.
         self.protected_attribute = protected_attribute
+        # Training-data provenance, declared by whoever registered this model.
+        # None means "not declared", and predict_batch() then falls back to the
+        # in-process default. An externally served model trained on other data
+        # MUST declare this: reporting another dataset as its training source is
+        # a false statement about the model's provenance, which is exactly the
+        # kind of claim a model-risk reviewer relies on.
+        self.trained_on = trained_on
+        # Label semantics, declared by the model that owns them. None means
+        # "not declared" and predict_batch() falls back to the in-process
+        # default. A model whose favourable/positive class differs from the
+        # default MUST declare this -- fairness reads
+        # ``favorable_outcome_label`` from it, so a wrong polarity silently
+        # inverts every fairness verdict.
+        self.label_semantics = dict(label_semantics) if label_semantics else None
 
     @property
     def supports_probability(self) -> bool:

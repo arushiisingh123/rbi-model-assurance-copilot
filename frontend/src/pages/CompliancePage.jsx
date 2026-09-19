@@ -19,6 +19,116 @@ import { useAssurance } from "../hooks/AssuranceContext";
 import { useModels } from "../hooks/ModelContext";
 import { useDomainData } from "../hooks/useDomainData";
 import { SourceNotice } from "../components/SourceNotice";
+import {
+  DataHandlingNotice,
+  RegulatoryGroundingNotice,
+} from "../components/ScopeNotice";
+
+/**
+ * The verified RBI requirement register.
+ *
+ * A DIFFERENT layer from the rule findings above: these are clauses read from
+ * official RBI instruments, each carrying its own clause reference and source
+ * link. They are reported with their applicability and evidence status and
+ * NEVER as compliance — every one of them requires evidence only the regulated
+ * entity holds, so none can be satisfied by model analytics.
+ *
+ * The count deliberately reads "requirements assessed", never "requirements
+ * met": a reviewer must not be able to read eight rows as eight passes.
+ */
+function VerifiedRequirements({ requirements }) {
+  const rows = requirements || [];
+  if (!rows.length) return null;
+
+  const applies = rows.filter((r) => r.applicability === "APPLIES").length;
+  const unclear = rows.filter(
+    (r) => r.applicability === "APPLICABILITY_UNCLEAR",
+  ).length;
+  const instruments = new Set(rows.map((r) => r.document_id)).size;
+
+  return (
+    <Card
+      title="Verified RBI requirements"
+      subtitle="Clauses read from official RBI instruments, with their applicability and evidence status."
+    >
+      <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <Field label="Requirements assessed" value={rows.length} />
+        <Field label="RBI instruments" value={instruments} />
+        <Field label="Applicable" value={applies} />
+        <Field label="Applicability unclear" value={unclear} />
+      </dl>
+
+      <p className="mt-4 text-xs leading-relaxed text-base-content/70 bg-base-200/60 border border-base-300 rounded p-3">
+        These are <strong>not</strong> compliance results. Every requirement
+        here requires evidence held by the regulated entity — board committees,
+        contracts, due-diligence records — so none can be satisfied by model
+        analytics and none returns a pass. Applicability is decided from an
+        entity profile the caller declares; where a dimension was not declared
+        it stays <span className="font-mono">APPLICABILITY_UNCLEAR</span> rather
+        than being assumed.
+      </p>
+
+      <div className="mt-4 space-y-2">
+        {rows.map((requirement) => (
+          <details
+            key={requirement.requirement_id}
+            className="rounded-md border border-base-300 bg-base-100"
+          >
+            <summary className="cursor-pointer select-none px-4 py-3 flex flex-wrap items-center gap-3">
+              <span className="font-mono text-xs text-base-content/70">
+                {requirement.requirement_id}
+              </span>
+              <span className="text-sm flex-1 min-w-[16rem]">
+                {requirement.requirement}
+              </span>
+              <span className="badge badge-outline badge-sm">
+                {requirement.applicability}
+              </span>
+              <span className="text-xs text-base-content/50">
+                {requirement.status}
+              </span>
+            </summary>
+            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-base-300">
+              <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3">
+                <Field label="Instrument" value={requirement.document_title} />
+                <Field label="Clause" value={requirement.clause} mono />
+                <Field
+                  label="Instrument type"
+                  value={`${requirement.instrument_type} · ${requirement.regulatory_status}`}
+                />
+                <Field label="Assessment mode" value={requirement.assessment_mode} />
+                <Field label="Verified on" value={requirement.verified_on} />
+                <Field label="Model" value={requirement.model_id} mono />
+              </dl>
+              {requirement.quote && (
+                <blockquote className="text-xs italic leading-relaxed text-base-content/70 border-l-2 border-base-300 pl-3">
+                  “{requirement.quote}”
+                </blockquote>
+              )}
+              {requirement.reason && (
+                <p className="text-xs text-base-content/70">{requirement.reason}</p>
+              )}
+              {requirement.limitation && (
+                <p className="text-xs text-base-content/60">
+                  <span className="font-semibold">Limitation: </span>
+                  {requirement.limitation}
+                </p>
+              )}
+              <a
+                className="link link-primary text-xs font-mono break-all"
+                href={requirement.source_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {requirement.source_url}
+              </a>
+            </div>
+          </details>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 function FindingRow({ finding }) {
   const chunks = finding.evidence_chunks || [];
@@ -117,6 +227,11 @@ export function CompliancePage() {
         onRunAssurance={start}
       />
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <RegulatoryGroundingNotice />
+        <DataHandlingNotice />
+      </div>
+
       <AsyncSection
         loading={loading}
         error={error}
@@ -175,6 +290,8 @@ export function CompliancePage() {
                 />
               )}
             </Card>
+
+            <VerifiedRequirements requirements={data.verified_requirements} />
           </>
         )}
       </AsyncSection>

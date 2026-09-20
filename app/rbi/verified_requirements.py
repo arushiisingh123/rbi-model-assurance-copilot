@@ -197,6 +197,24 @@ VERIFIED_SOURCES: tuple[VerifiedSource, ...] = (
         regulatory_status="current",
     ),
     VerifiedSource(
+        document_id="RBI-IT-GOVERNANCE-2023",
+        title=(
+            "Reserve Bank of India (Information Technology Governance, Risk, "
+            "Controls and Assurance Practices) Directions, 2023"
+        ),
+        rbi_reference="RBI/2023-24/107",
+        issued_date="2023-11-07",
+        source_url="https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=12562",
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        notes=(
+            "Identity and clause text read from the official RBI Master "
+            "Direction page. Note this direction carries explicit entity "
+            "exclusions (see corpus_manifest.json); applicability is therefore "
+            "declared by the caller and never inferred."
+        ),
+    ),
+    VerifiedSource(
         document_id="RBI-FRAUD-NBFC-2024",
         title="Reserve Bank of India (Fraud Risk Management in NBFCs) Directions, 2024",
         rbi_reference="RBI/DOS/2024-25/120 DOS.CO.FMG.SEC.No.7/23.04.001/2024-25",
@@ -340,10 +358,15 @@ _ITO_TITLE = (
 _FRAUD_TITLE = (
     "Reserve Bank of India (Fraud Risk Management in NBFCs) Directions, 2024"
 )
+_ITGOV_TITLE = (
+    "Reserve Bank of India (Information Technology Governance, Risk, Controls "
+    "and Assurance Practices) Directions, 2023"
+)
 
 _DL_URL = "https://rbi.org.in/Scripts/NotificationUser.aspx?Id=12848"
 _ITO_URL = "https://www.rbi.org.in/scripts/BS_ViewMasDirections.aspx?id=12486"
 _FRAUD_URL = "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=12704"
+_ITGOV_URL = "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=12562"
 
 
 VERIFIED_REQUIREMENTS: tuple[VerifiedRequirement, ...] = (
@@ -574,6 +597,286 @@ VERIFIED_REQUIREMENTS: tuple[VerifiedRequirement, ...] = (
             "indicators, NOT the fraud early-warning indicators this clause "
             "requires, and must not be presented as satisfying it. Fraud "
             "analytics are an extension, not an implemented capability."
+        ),
+    ),
+    # -- Digital Lending Directions, 2025 (verified 2026-09-20) -----------
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-DL-2025-8.i",
+            "RBI-DIGITAL-LENDING-2025",
+            _DL_TITLE,
+            "8.i",
+            "A Key Fact Statement must be provided to the borrower, per the "
+            "RBI KFS circular for loans and advances.",
+            domain=("digital_lending", "customer_protection", "transparency"),
+        ),
+        source_url=_DL_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="8.i",
+        quote=(
+            "RE shall provide a Key Fact Statement (KFS), as per instructions "
+            "contained in circular no. DOR.STR.REC.13/13.03.00/2024-25 on "
+            "'Key Facts Statement (KFS) for Loans & Advances' dated April 15, "
+            "2024, as amended from time to time."
+        ),
+        applies_when={"digital_lending": True},
+        limitation=(
+            "Whether a KFS was issued to each borrower is a lending-operations "
+            "record held by the regulated entity. A model's outputs cannot "
+            "evidence it."
+        ),
+    ),
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-DL-2025-11.i",
+            "RBI-DIGITAL-LENDING-2025",
+            _DL_TITLE,
+            "11.i",
+            "Nodal grievance redressal officers must be designated by the RE "
+            "and by any LSP with a borrower interface.",
+            domain=("digital_lending", "customer_protection"),
+        ),
+        source_url=_DL_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="11.i",
+        quote=(
+            "The RE, and the LSP which has an interface with the borrower, "
+            "shall designate nodal grievance redressal officers to deal with "
+            "digital lending related complaints/issues raised by the borrower."
+        ),
+        applies_when={"digital_lending": True},
+        limitation=(
+            "Designation of a grievance officer is an organisational fact. It "
+            "is outside anything a model-assurance run can observe."
+        ),
+    ),
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-DL-2025-12.i",
+            "RBI-DIGITAL-LENDING-2025",
+            _DL_TITLE,
+            "12.i",
+            "Data collection by a Digital Lending App must be need-based, "
+            "with prior explicit borrower consent and an audit trail.",
+            domain=("digital_lending", "data_privacy", "data_governance"),
+        ),
+        source_url=_DL_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="12.i",
+        quote=(
+            "RE shall ensure that any collection of data by their DLA and DLA "
+            "of their LSP is need-based and with prior and explicit consent of "
+            "the borrower having audit trail."
+        ),
+        applies_when={"digital_lending": True},
+        limitation=(
+            "Consent capture and its audit trail live in the lending "
+            "application, not in the model. Knowing which features a model "
+            "consumes does not evidence that their collection was consented to "
+            "-- a point worth stating plainly, because feature lists can look "
+            "like data-governance evidence and are not."
+        ),
+    ),
+    # -- Outsourcing of IT Services Directions, 2023 (verified 2026-09-20) --
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-ITO-2023-18.1",
+            "RBI-IT-OUTSOURCING-2023",
+            _ITO_TITLE,
+            "18.1",
+            "Service providers must develop, maintain and test a Business "
+            "Continuity Plan and Disaster Recovery Plan for the outsourced "
+            "activity.",
+            domain=("it_outsourcing", "business_continuity", "third_party_risk"),
+        ),
+        source_url=_ITO_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="18.1",
+        quote=(
+            "REs shall require their service providers to develop and "
+            "establish a robust framework for documenting, maintaining and "
+            "testing Business Continuity Plan (BCP) and Disaster Recovery Plan "
+            "(DRP) commensurate with the nature and scope of the outsourced "
+            "activity."
+        ),
+        applies_when={"uses_external_model_vendor": True},
+        limitation=(
+            "BCP/DRP documentation and test records are held by the vendor and "
+            "the regulated entity. Model availability during an assurance run "
+            "is not evidence of a tested continuity plan."
+        ),
+    ),
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-ITO-2023-19.6",
+            "RBI-IT-OUTSOURCING-2023",
+            _ITO_TITLE,
+            "19.6",
+            "The financial and operational condition of the service provider "
+            "must be reviewed periodically.",
+            domain=("it_outsourcing", "third_party_risk", "monitoring"),
+        ),
+        source_url=_ITO_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="19.6",
+        quote=(
+            "The RE shall periodically review the financial and operational "
+            "condition of the service provider to assess its ability to "
+            "continue to meet its Outsourcing of IT Services obligations."
+        ),
+        applies_when={"uses_external_model_vendor": True},
+        limitation=(
+            "This is a review of the VENDOR as an organisation -- its finances "
+            "and operations. Monitoring the model's drift says nothing about "
+            "the vendor's solvency."
+        ),
+    ),
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-ITO-2023-22.1",
+            "RBI-IT-OUTSOURCING-2023",
+            _ITO_TITLE,
+            "22.1",
+            "The outsourcing policy must contain a clear exit strategy that "
+            "preserves business continuity during and after exit.",
+            domain=("it_outsourcing", "third_party_risk", "business_continuity"),
+        ),
+        source_url=_ITO_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="22.1",
+        quote=(
+            "The Outsourcing of IT Services policy shall contain a clear exit "
+            "strategy with regard to outsourced IT activities/ IT enabled "
+            "services, while ensuring business continuity during and after "
+            "exit."
+        ),
+        applies_when={"uses_external_model_vendor": True},
+        limitation=(
+            "An exit strategy is a policy document. The platform can show that "
+            "a model is reachable today; it cannot show what happens when the "
+            "arrangement ends."
+        ),
+    ),
+    # -- IT Governance Directions, 2023 (verified 2026-09-20) --------------
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-ITGOV-2023-4.b",
+            "RBI-IT-GOVERNANCE-2023",
+            _ITGOV_TITLE,
+            "4(b)",
+            "A robust IT Governance Framework must be in place, specifying "
+            "governance structure, Board/Board-committee and senior-management "
+            "roles, and adequate oversight mechanisms.",
+            domain=("it_governance", "model_governance", "board_oversight"),
+        ),
+        source_url=_ITGOV_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="4(b)",
+        quote=(
+            "REs shall put in place a robust IT Governance Framework based on "
+            "the aforementioned focus areas that inter alia: (1) specifies the "
+            "governance structure and processes necessary to meet the RE's "
+            "business/ strategic objectives; (2) specifies the roles "
+            "(including authority) and responsibilities of the Board of "
+            "Directors (Board) / Board level Committee and Senior Management; "
+            "and (3) includes adequate oversight mechanisms..."
+        ),
+        # Manifest-backed scope (app/rbi/corpus_manifest.json, RBI-IT-GOV-2023):
+        # applies_to includes commercial_bank AND nbfc; excluded lists
+        # nbfc_base_layer, nbfc_core_investment_company, local_area_bank and
+        # regional_rural_bank.
+        #
+        # Conditions are AND-ed, so this reads: the entity is a bank or an
+        # NBFC, and its NBFC layer is one of the non-excluded layers. For a
+        # declared NBFC that decides the question outright. For a declared
+        # BANK, nbfc_layer is undeclared and the requirement resolves to
+        # APPLICABILITY_UNCLEAR -- which is the honest answer, because
+        # "BANK" is a single value in this vocabulary and cannot distinguish
+        # a commercial bank (in scope) from a local area bank or RRB
+        # (explicitly excluded). Unclear, not applicable, and not
+        # inapplicable.
+        applies_when={
+            "entity_type": ["BANK", "NBFC"],
+            "nbfc_layer": ["Top", "Upper", "Middle"],
+        },
+        limitation=(
+            "Board composition, delegated authority and oversight minutes are "
+            "organisational records; no model run evidences them. Scope note: "
+            "this direction binds both banks and NBFCs but carries EXPLICIT "
+            "exclusions -- NBFC Base Layer, NBFC-CICs, local area banks and "
+            "RRBs. A declared NBFC layer decides the question directly. A "
+            "declared BANK resolves to APPLICABILITY_UNCLEAR, because this "
+            "vocabulary has one BANK value and cannot tell a commercial bank "
+            "(in scope) from a local area bank or RRB (excluded); the caller "
+            "must confirm which it is. Unclear is the conservative answer "
+            "here -- reporting NOT_APPLICABLE would tell a commercial bank a "
+            "binding direction does not reach it."
+        ),
+    ),
+    VerifiedRequirement(
+        requirement=_requirement(
+            "RBI-ITGOV-2023-23",
+            "RBI-IT-GOVERNANCE-2023",
+            _ITGOV_TITLE,
+            "23",
+            "A robust IT and Information Security Risk Management Framework "
+            "must be established, including information-security management, "
+            "internal controls and processes to mitigate identified risks.",
+            domain=("it_governance", "risk", "controls"),
+        ),
+        source_url=_ITGOV_URL,
+        instrument_type=INSTRUMENT_BINDING,
+        regulatory_status="current",
+        assessment_mode=ATTESTATION,
+        clause="23",
+        quote=(
+            "REs shall establish a robust IT and Information Security Risk "
+            "Management Framework covering, inter alia, the following aspects: "
+            "(a) Implementation of comprehensive Information Security "
+            "management function, internal controls and processes (including "
+            "applicable insurance covers) to mitigate/ manage identified "
+            "risks..."
+        ),
+        # Manifest-backed scope (app/rbi/corpus_manifest.json, RBI-IT-GOV-2023):
+        # applies_to includes commercial_bank AND nbfc; excluded lists
+        # nbfc_base_layer, nbfc_core_investment_company, local_area_bank and
+        # regional_rural_bank.
+        #
+        # Conditions are AND-ed, so this reads: the entity is a bank or an
+        # NBFC, and its NBFC layer is one of the non-excluded layers. For a
+        # declared NBFC that decides the question outright. For a declared
+        # BANK, nbfc_layer is undeclared and the requirement resolves to
+        # APPLICABILITY_UNCLEAR -- which is the honest answer, because
+        # "BANK" is a single value in this vocabulary and cannot distinguish
+        # a commercial bank (in scope) from a local area bank or RRB
+        # (explicitly excluded). Unclear, not applicable, and not
+        # inapplicable.
+        applies_when={
+            "entity_type": ["BANK", "NBFC"],
+            "nbfc_layer": ["Top", "Upper", "Middle"],
+        },
+        limitation=(
+            "An information-security risk framework is an organisational "
+            "control system. Model fairness and drift results are not evidence "
+            "for it and must not be offered as such. Same scope note as clause "
+            "4(b): the direction reaches banks and NBFCs alike but excludes "
+            "the NBFC Base Layer, NBFC-CICs, local area banks and RRBs, so a "
+            "declared BANK resolves to APPLICABILITY_UNCLEAR pending "
+            "confirmation of which kind of bank it is."
         ),
     ),
 )

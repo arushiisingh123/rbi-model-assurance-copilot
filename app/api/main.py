@@ -282,7 +282,18 @@ def get_compliance(
         description="Whether the model is hosted/served by an external vendor.",
     ),
 ) -> dict:
-    """Retrieve RBI compliance findings mapped against real technical checks.
+    """Two separate layers: technical assurance checks, and verified RBI clauses.
+
+    ``findings`` is the TECHNICAL ASSURANCE layer -- the rule engine's own
+    fairness/drift/explainability/model checks, against illustrative
+    thresholds. They are evidence about the model. They are NOT RBI
+    requirements and must not be presented as such.
+
+    ``verified_requirements`` is the RBI REGULATORY layer -- only clauses
+    verified against an official RBI source, each carrying its source URL and
+    exact clause reference. It is populated only when the caller declares an
+    entity profile, because applicability is never inferred.
+
 
     Each finding's evidence_chunks is populated from a real, live RAG
     retrieval per rule category (build_evidence_by_rule(), Phase 5D) rather

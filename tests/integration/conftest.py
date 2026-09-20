@@ -61,3 +61,79 @@ def real_pipeline() -> Dict[str, Any]:
 def no_groq_key(monkeypatch):
     """Ensure GROQ_API_KEY is unset for testing graceful degradation."""
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+
+# ---------------------------------------------------------------------------
+# "The model's service is unavailable" -- made TRUE, not assumed.
+#
+# Several tests assert the unreachable-upstream contract (health
+# "unreachable", /explainability 502, monitoring degrading to None + reason).
+# They used to rely on nothing listening on the registry's DEFAULT address,
+# 127.0.0.1:8100 -- an ambient property of the developer's machine that the
+# tests neither established nor checked.
+#
+# That made them pass or fail on unrelated state. Running the synthetic bank
+# for a demo (the documented way to run this project) leaves a real service on
+# 8100, the adapter reaches it, and three tests fail while the application is
+# behaving perfectly correctly.
+#
+# This fixture removes the assumption instead of the assertion: it points the
+# registry at a port confirmed to have nothing on it, so the REAL RESTAdapter
+# makes a REAL connection attempt that REALLY fails. No mock, no stub, no
+# patched transport, and the assertions are untouched -- the failure being
+# asserted is a genuine one, just one the test now causes rather than hopes
+# for.
+# ---------------------------------------------------------------------------
+
+
+def _closed_local_port(attempts: int = 20) -> int:
+    """A loopback port with nothing listening on it.
+
+    Binds port 0 so the OS picks a free one, releases it, then CONFIRMS a
+    connection is refused before handing it back. The confirmation matters:
+    without it this would be the same "probably nothing is there" assumption
+    the fixture exists to eliminate.
+    """
+    import socket
+
+    for _ in range(attempts):
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        finally:
+            probe.close()
+
+        check = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        check.settimeout(0.25)
+        try:
+            if check.connect_ex(("127.0.0.1", port)) != 0:
+                return port  # refused -- genuinely closed
+        finally:
+            check.close()
+
+    raise RuntimeError(
+        "could not obtain a confirmed-closed loopback port after "
+        f"{attempts} attempts"
+    )
+
+
+@pytest.fixture
+def unreachable_synthetic_bank(monkeypatch):
+    """Point the registry's synthetic bank at a confirmed-closed port.
+
+    Yields the endpoint URL. Restores the previous environment and rebuilds
+    the registry afterwards, so a test that needs the real service is
+    unaffected -- reset order matters, because the cached registry singleton
+    would otherwise keep holding an adapter built from this URL.
+    """
+    from app.models.registry import reset_default_registry
+
+    endpoint = f"http://127.0.0.1:{_closed_local_port()}"
+    monkeypatch.setenv("SYNTHETIC_BANK_URL", endpoint)
+    reset_default_registry()
+    try:
+        yield endpoint
+    finally:
+        monkeypatch.delenv("SYNTHETIC_BANK_URL", raising=False)
+        reset_default_registry()

@@ -382,8 +382,26 @@ def test_only_the_one_approved_local_source_is_used():
     assert [s.doc_id for s in sources] == [APPROVED_2014_ID]
     assert list(APPROVED_CORPUS.doc_ids()) == [APPROVED_2014_ID]
 
+    # The directory also holds rbi_demo_requirements.txt: a VERIFICATION
+    # BACKLOG of requirement intents awaiting clause-level verification. It is
+    # not RBI text, not a corpus document, and deliberately not registered.
+    #
+    # It is named here rather than filtered by a wildcard, so that any OTHER
+    # file appearing in this directory still fails this test. The check that
+    # actually matters is the one below it: being present on disk must not
+    # make a file a retrievable source.
+    BACKLOG = "rbi_demo_requirements.txt"
     files = sorted(p.name for p in Path("data/rbi_sources").glob("*") if p.is_file())
-    assert files == ["RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt"]
+    assert files in (
+        ["RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt"],
+        sorted(["RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt", BACKLOG]),
+    ), files
+
+    # The corpus is an explicit registry, never a directory scan. Dropping a
+    # file into this folder must not enrol it as evidence.
+    registered = {s.doc_id for s in list_sources()} | set(APPROVED_CORPUS.doc_ids())
+    assert not any(BACKLOG.rsplit(".", 1)[0] in doc_id for doc_id in registered)
+
     assert RBI_IRAC_ADVANCES_2014.resolved_path().is_file()
 
 

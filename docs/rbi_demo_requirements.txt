@@ -1,0 +1,861 @@
+# RBI MODEL ASSURANCE — DEMO REQUIREMENT SET
+
+## PURPOSE
+
+This is a curated RBI requirement set for the RBI Model Risk & Assurance Copilot.
+
+The requirements are intended for a CREDIT-SCORING / LENDING MODEL assurance scenario.
+
+IMPORTANT:
+
+* This is a curated demonstration corpus, NOT complete RBI coverage.
+* Every requirement must be mapped to a verified official RBI source before being treated as a live regulatory requirement.
+* Preserve source URL, document ID, section/paragraph, publication date, updated date and regulatory status.
+* Draft/advisory material must never be presented as a binding RBI requirement.
+* Applicability must be evaluated before assessment.
+* Missing evidence must result in NOT_ASSESSED, EVIDENCE_MISSING, NOT_FOUND or APPLICABILITY_UNCLEAR as appropriate.
+* The LLM must NEVER determine compliance status.
+* Compliance status must be produced by deterministic rules/evidence evaluation.
+* The LLM may only explain verified findings and their regulatory basis.
+
+## RECOMMENDED ASSESSMENT CONTEXT
+
+regulated_entity_type:
+BANK / NBFC / OTHER
+
+model_use_case:
+CREDIT_SCORING
+
+product:
+RETAIL_LENDING / OTHER
+
+digital_vs_physical:
+DIGITAL / PHYSICAL / HYBRID / UNKNOWN
+
+third_party_dependency:
+TRUE / FALSE
+
+data_type:
+CREDIT_DATA / CUSTOMER_DATA / OTHER
+
+customer_population:
+RETAIL / MSME / CORPORATE / OTHER
+
+loan_type:
+PERSONAL / CONSUMER / MSME / OTHER
+
+as_of_date:
+assessment date
+
+============================================================
+RULE 01 — MODEL GOVERNANCE AND ACCOUNTABILITY
+=============================================
+
+requirement_id:
+RBI-MODEL-GOV-001
+
+title:
+Model governance, accountability and oversight
+
+source_family:
+RBI model-risk / model-governance material
+
+regulatory_status:
+VERIFY_SOURCE_STATUS
+
+applicability:
+Applies to assessments where RBI model-risk/model-governance guidance is
+applicable to the regulated entity and model use case.
+
+requirement:
+The regulated entity should maintain defined governance, accountability,
+oversight and documented responsibilities for material models used in
+credit or other regulated decision-making.
+
+evidence_required:
+- model owner
+- model governance policy
+- assigned responsibilities
+- approval/oversight records
+- model inventory entry
+- governance committee or equivalent evidence
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Required governance evidence is missing or responsibilities are not
+demonstrably assigned.
+
+notes:
+If the underlying RBI source is draft/advisory rather than binding,
+classify it as advisory and do not present a failure as a statutory
+violation.
+
+============================================================
+RULE 02 — MODEL VALIDATION
+==========================
+
+requirement_id:
+RBI-MODEL-VALIDATION-001
+
+title:
+Independent model validation
+
+source_family:
+RBI model-risk / credit-model governance material
+
+regulatory_status:
+VERIFY_SOURCE_STATUS
+
+applicability:
+Credit-scoring and other material models where model validation
+requirements are applicable.
+
+requirement:
+The regulated entity should maintain appropriate model validation and
+assurance processes that are sufficiently independent from model
+development.
+
+evidence_required:
+- validation report
+- validation methodology
+- validation date
+- validator/validation function
+- identified limitations
+- remediation records where applicable
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+No appropriate validation evidence is available for a model requiring
+validation.
+
+notes:
+Do not infer independent validation merely from the existence of SHAP,
+LIME, fairness or drift analytics.
+
+============================================================
+RULE 03 — MODEL PERFORMANCE MONITORING
+======================================
+
+requirement_id:
+RBI-MODEL-MONITORING-001
+
+title:
+Ongoing model performance monitoring
+
+source_family:
+RBI model-risk / credit-risk governance material
+
+regulatory_status:
+VERIFY_SOURCE_STATUS
+
+applicability:
+Material credit/lending models.
+
+requirement:
+The regulated entity should have a process for ongoing monitoring of
+model performance and relevant changes in model/data behaviour.
+
+evidence_required:
+- monitoring policy
+- monitoring schedule
+- performance metrics
+- drift monitoring
+- threshold/escalation policy
+- monitoring results
+- remediation/escalation records
+
+assessment_mode:
+EVIDENCE_AND_ANALYTICS
+
+failure_condition:
+Required monitoring process/evidence is absent.
+
+notes:
+PSI/KS/drift values produced by this platform are model-assurance
+evidence, but a platform threshold must not automatically be described
+as an RBI threshold unless the RBI source explicitly establishes it.
+
+============================================================
+RULE 04 — MODEL DOCUMENTATION AND TRACEABILITY
+==============================================
+
+requirement_id:
+RBI-MODEL-DOC-001
+
+title:
+Model documentation and traceability
+
+source_family:
+RBI model-risk / IT governance material
+
+regulatory_status:
+VERIFY_SOURCE_STATUS
+
+applicability:
+Material models used for regulated decision-making.
+
+requirement:
+The regulated entity should maintain sufficient documentation to
+understand the model's purpose, inputs, methodology, limitations,
+ownership, version and use.
+
+evidence_required:
+- model card/model documentation
+- model version
+- model purpose
+- input/features documentation
+- limitations
+- training/development information
+- approval/change history
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Required model documentation or version traceability is unavailable.
+
+platform_evidence:
+model_id
+model_version
+assurance_run_id
+provenance
+
+============================================================
+RULE 05 — IT GOVERNANCE AND CONTROL
+===================================
+
+requirement_id:
+RBI-IT-GOV-001
+
+title:
+IT governance, risk, controls and assurance
+
+source_family:
+RBI Master Direction on Information Technology Governance,
+Risk, Controls and Assurance Practices
+
+regulatory_status:
+BINDING
+
+applicability:
+Regulated entities covered by the applicable RBI IT governance direction.
+
+requirement:
+The regulated entity should maintain appropriate governance, risk
+management, control and assurance processes for IT systems supporting
+regulated activities.
+
+evidence_required:
+- IT governance policy
+- IT risk assessment
+- control framework
+- assurance/audit evidence
+- system ownership
+- incident/risk management records
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Required organizational IT governance/control evidence is missing.
+
+notes:
+Model analytics alone do not prove compliance with organizational IT
+governance requirements.
+
+============================================================
+RULE 06 — IT OUTSOURCING RISK ASSESSMENT
+========================================
+
+requirement_id:
+RBI-IT-OUTSOURCE-001
+
+title:
+Risk assessment before IT outsourcing
+
+source_family:
+RBI Master Direction on Outsourcing of Information Technology Services,
+2023
+
+regulatory_status:
+BINDING
+
+applicability:
+third_party_dependency == TRUE
+
+requirement:
+Before outsourcing material IT services, the regulated entity should
+assess the need for outsourcing and the attendant risks and maintain
+appropriate processes to manage those risks.
+
+evidence_required:
+- outsourcing risk assessment
+- criticality assessment
+- expected outcomes
+- risk identification
+- risk mitigation
+- approval records
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Third-party model/service dependency exists but required outsourcing
+risk assessment evidence is unavailable.
+
+notes:
+The RESTAdapter proves technical integration only. It does NOT prove
+regulatory outsourcing compliance.
+
+source_reference:
+RBI/2023-24/102
+DoS.CO.CSITEG/SEC.1/31.01.015/2023-24
+April 10, 2023
+
+============================================================
+RULE 07 — IT OUTSOURCING GOVERNANCE
+===================================
+
+requirement_id:
+RBI-IT-OUTSOURCE-002
+
+title:
+Governance and accountability for outsourced IT services
+
+source_family:
+RBI Master Direction on Outsourcing of Information Technology Services,
+2023
+
+regulatory_status:
+BINDING
+
+applicability:
+third_party_dependency == TRUE
+
+requirement:
+Outsourcing should not diminish the regulated entity's obligations,
+governance responsibility or ability to oversee the outsourced activity.
+
+evidence_required:
+- Board-approved outsourcing policy
+- responsible owner
+- service provider oversight
+- monitoring process
+- review records
+- escalation process
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Outsourced model/service exists without demonstrable governance and
+oversight evidence.
+
+notes:
+Responsibility remains with the regulated entity even when a third party
+provides the model/service.
+
+============================================================
+RULE 08 — IT OUTSOURCING DATA SECURITY
+======================================
+
+requirement_id:
+RBI-IT-OUTSOURCE-003
+
+title:
+Confidentiality and integrity of customer data
+
+source_family:
+RBI Master Direction on Outsourcing of Information Technology Services,
+2023
+
+regulatory_status:
+BINDING
+
+applicability:
+third_party_dependency == TRUE AND customer/data information is exposed
+to the service provider
+
+requirement:
+The regulated entity remains responsible for appropriate confidentiality
+and integrity of customer data and should maintain suitable controls over
+service-provider access.
+
+evidence_required:
+- data access policy
+- access controls
+- data security controls
+- provider security assessment
+- confidentiality provisions
+- audit/security evidence
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Required evidence of protection/control over externally processed
+customer data is missing.
+
+notes:
+Do not infer data-security compliance from the model's prediction output.
+
+============================================================
+RULE 09 — IT OUTSOURCING EXIT AND BUSINESS CONTINUITY
+=====================================================
+
+requirement_id:
+RBI-IT-OUTSOURCE-004
+
+title:
+Outsourcing exit strategy and continuity
+
+source_family:
+RBI Master Direction on Outsourcing of Information Technology Services,
+2023
+
+regulatory_status:
+BINDING
+
+applicability:
+third_party_dependency == TRUE
+
+requirement:
+Material IT outsourcing arrangements should include appropriate
+termination, exit and business-continuity arrangements.
+
+evidence_required:
+- exit strategy
+- termination provisions
+- data retrieval/transition plan
+- business continuity plan
+- disaster recovery arrangements
+- alternate provider/transition evidence where applicable
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Required exit or continuity evidence is unavailable for a material
+outsourced service.
+
+============================================================
+RULE 10 — FINANCIAL SERVICES OUTSOURCING OVERSIGHT
+==================================================
+
+requirement_id:
+RBI-FS-OUTSOURCE-001
+
+title:
+Oversight and accountability for outsourced financial services
+
+source_family:
+RBI guidelines on Managing Risks and Code of Conduct in Outsourcing
+of Financial Services
+
+regulatory_status:
+VERIFY_CURRENT_SOURCE
+
+applicability:
+third_party_dependency == TRUE AND the outsourced activity constitutes
+financial-services outsourcing under the applicable RBI framework.
+
+requirement:
+Outsourcing arrangements should have appropriate due diligence,
+oversight, monitoring, accountability and customer-protection controls.
+
+evidence_required:
+- provider due diligence
+- contract
+- service-level requirements
+- monitoring
+- audit rights
+- customer protection controls
+- accountability records
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Required outsourcing governance evidence is missing.
+
+notes:
+Do not automatically classify every model API as financial-services
+outsourcing. Applicability must be determined from the actual outsourced
+activity and applicable RBI framework.
+
+============================================================
+RULE 11 — DIGITAL LENDING GOVERNANCE
+====================================
+
+requirement_id:
+RBI-DIGITAL-LENDING-001
+
+title:
+Governance and due diligence for digital lending service providers
+
+source_family:
+RBI (Digital Lending) Directions, 2025
+
+regulatory_status:
+BINDING
+
+applicability:
+digital_vs_physical == DIGITAL
+
+requirement:
+Where digital lending involves Lending Service Providers or other
+applicable third parties, the regulated entity should maintain
+appropriate due diligence, governance and oversight over those
+arrangements.
+
+evidence_required:
+- LSP/vendor due diligence
+- contractual arrangement
+- monitoring
+- oversight
+- responsibilities
+- customer-protection controls
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Applicable digital-lending third-party arrangement lacks required
+governance evidence.
+
+notes:
+Use the 2025 consolidated Digital Lending Directions as the primary
+source. Do not use the older 2022 digital-lending framework as the
+current consolidated source.
+
+============================================================
+RULE 12 — DIGITAL LENDING TRANSPARENCY / BORROWER PROTECTION
+============================================================
+
+requirement_id:
+RBI-DIGITAL-LENDING-002
+
+title:
+Borrower transparency and fair digital lending practices
+
+source_family:
+RBI (Digital Lending) Directions, 2025
+
+regulatory_status:
+BINDING
+
+applicability:
+digital_vs_physical == DIGITAL
+
+requirement:
+Applicable digital lending processes should provide required borrower
+information, transparency and protection relating to lending terms and
+associated digital processes.
+
+evidence_required:
+- borrower disclosures
+- loan terms
+- APR/associated charges where applicable
+- grievance mechanism
+- digital lending workflow evidence
+- applicable disclosures
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Required applicable borrower-facing evidence is missing.
+
+notes:
+A credit model's prediction/explanation does not by itself demonstrate
+borrower-transparency compliance.
+
+============================================================
+RULE 13 — CREDIT INFORMATION DATA QUALITY
+=========================================
+
+requirement_id:
+RBI-CREDIT-INFO-001
+
+title:
+Accuracy and governance of credit information
+
+source_family:
+RBI Master Direction – Credit Information Reporting Directions, 2025
+
+regulatory_status:
+BINDING
+
+applicability:
+model/data workflow uses regulated credit information or the regulated
+entity is subject to the applicable credit-information reporting
+requirements.
+
+requirement:
+Credit information supplied/reported by the regulated entity should be
+appropriately managed for accuracy, quality and applicable reporting
+requirements.
+
+evidence_required:
+- data-quality controls
+- validation checks
+- reporting controls
+- correction process
+- data lineage
+- exception handling
+- audit records
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Applicable credit-information governance evidence is missing.
+
+notes:
+Do not equate model training-data quality metrics with compliance with
+credit-information reporting requirements.
+
+============================================================
+RULE 14 — KYC / CUSTOMER DUE DILIGENCE
+======================================
+
+requirement_id:
+RBI-KYC-001
+
+title:
+KYC and customer due-diligence controls
+
+source_family:
+RBI Master Direction – Know Your Customer (KYC) Direction, 2016,
+as amended
+
+regulatory_status:
+BINDING
+
+applicability:
+customer onboarding / lending workflow involves activities covered by
+the applicable KYC framework.
+
+requirement:
+Applicable customer identification, due-diligence and ongoing customer
+monitoring requirements should be supported by appropriate controls
+and evidence.
+
+evidence_required:
+- KYC policy
+- customer identification process
+- due-diligence evidence
+- ongoing due-diligence process
+- escalation/exception records
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Applicable KYC control evidence is missing.
+
+notes:
+KYC compliance cannot be inferred from model features such as age,
+income or credit history.
+
+============================================================
+RULE 15 — FRAUD RISK GOVERNANCE
+===============================
+
+requirement_id:
+RBI-FRAUD-001
+
+title:
+Fraud risk governance and monitoring
+
+source_family:
+RBI Master Directions on Fraud Risk Management in NBFCs, 2024
+/ corresponding applicable RBI fraud-risk framework
+
+regulatory_status:
+BINDING_WHERE_APPLICABLE
+
+applicability:
+regulated_entity_type == NBFC
+AND applicable fraud-risk framework applies
+
+requirement:
+Applicable entities should maintain governance and processes for fraud
+risk management, early detection, investigation, escalation and
+reporting as required by the applicable RBI framework.
+
+evidence_required:
+- Board-approved fraud risk policy
+- fraud governance structure
+- early warning mechanism
+- monitoring
+- investigation process
+- escalation/reporting records
+
+assessment_mode:
+EVIDENCE_BASED
+
+failure_condition:
+Applicable fraud-risk governance evidence is missing.
+
+notes:
+Do NOT classify the current credit-scoring model as a fraud model merely
+because fraud-risk rules exist in the corpus.
+
+```
+This requirement must be filtered out or marked not applicable when the
+assessment concerns a credit-scoring model and the entity/context does
+not establish fraud-model applicability.
+
+The 2024 NBFC fraud directions superseded the earlier 2016 NBFC fraud
+directions.
+```
+
+============================================================
+ASSESSMENT STATUS RULES
+=======================
+
+The platform must use the following principles:
+
+## PASS
+
+Use only when required evidence is available and satisfies the deterministic
+assessment criteria.
+
+## FAIL
+
+Use only when applicable required evidence is available and demonstrably
+fails the deterministic requirement.
+
+## PARTIAL
+
+Use when some required evidence is present but coverage is incomplete.
+
+## EVIDENCE_MISSING
+
+Use when the requirement appears applicable but required evidence was not
+provided.
+
+## NOT_ASSESSED
+
+Use when there is insufficient information to perform the assessment.
+
+## APPLICABILITY_UNCLEAR
+
+Use when the available entity/model/context information is insufficient to
+determine whether the requirement applies.
+
+## NOT_APPLICABLE
+
+Use only when applicability has been deterministically established as false.
+
+IMPORTANT:
+The absence of evidence must NOT automatically become PASS.
+The absence of evidence must NOT automatically become FAIL unless the
+assessment rule explicitly establishes that failure from the available
+evidence.
+
+============================================================
+MODEL-ASSURANCE EVIDENCE MAPPING
+================================
+
+The existing assurance platform may provide:
+
+1. model_id
+2. model_version
+3. assurance_run_id
+4. model type
+5. adapter type
+6. prediction evidence
+7. SHAP explainability
+8. LIME explainability
+9. fairness metrics
+10. feature drift metrics
+11. prediction/output drift metrics
+12. model provenance
+13. integration provenance
+
+These are PLATFORM ASSURANCE EVIDENCE.
+
+They must NOT automatically be interpreted as proof of organizational,
+contractual, governance, KYC, outsourcing, borrower-protection or other
+regulatory controls.
+
+Example:
+
+SHAP available
+!=
+RBI model governance compliance proven
+
+RESTAdapter available
+!=
+RBI outsourcing compliance proven
+
+Fairness metric available
+!=
+RBI fairness compliance proven
+
+Drift metric available
+!=
+RBI monitoring requirement automatically satisfied
+
+The platform must distinguish:
+
+* technical/model evidence
+* organizational evidence
+* contractual/vendor evidence
+* regulatory evidence
+* attestation-based evidence
+
+============================================================
+CORPUS PRINCIPLES
+=================
+
+1. This corpus is intentionally CURATED and PARTIAL.
+
+2. Every production/live requirement must have:
+
+   * official RBI source
+   * document ID
+   * official source URL
+   * section/paragraph
+   * publication date
+   * latest verified update date
+   * regulatory status
+   * applicability condition
+
+3. Historical or superseded RBI documents must not silently be treated as
+   current requirements.
+
+4. Draft guidance must be clearly labelled as DRAFT/ADVISORY.
+
+5. Current applicability must be evaluated using the assessment context.
+
+6. RBI requirements must be separated from internal platform thresholds.
+
+7. The LLM is a NARRATIVE layer only.
+
+8. The LLM must never:
+
+   * invent an RBI requirement
+   * determine PASS/FAIL
+   * invent a citation
+   * invent applicability
+   * convert missing evidence into compliance
+   * treat a draft as binding
+
+9. The deterministic RBI engine is responsible for:
+
+   * applicability
+   * evidence matching
+   * status
+   * source provenance
+   * requirement identifiers
+
+10. Reports should clearly state that this is a curated demonstration
+    corpus and does not represent complete RBI regulatory coverage.
+    ============================================================

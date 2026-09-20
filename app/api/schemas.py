@@ -141,7 +141,18 @@ class FairnessDriftResult(BaseModel):
 
 
 class ComplianceFinding(BaseModel):
-    """Individual compliance evaluation finding against an RBI requirement."""
+    """One TECHNICAL ASSURANCE check -- NOT an RBI regulatory requirement.
+
+    These are the rule-engine's own fairness/drift/explainability/model
+    checks. Their thresholds are project conventions, and every one of them
+    carries ``rbi_source`` = "ILLUSTRATIVE ...". They are useful evidence
+    ABOUT a model; they are not regulatory obligations and must never be
+    labelled or displayed as RBI requirements.
+
+    The verified regulatory layer is a separate field on
+    ``ComplianceResult``: ``verified_requirements``. The two are never
+    merged -- see that field's comment for why.
+    """
     rule_id: str
     rule_description: str
     technical_finding_ref: str
@@ -198,6 +209,7 @@ class VerifiedRequirementFinding(BaseModel):
 
 class ComplianceResult(BaseModel):
     """Output payload from the Compliance/Rule Engine module."""
+    # TECHNICAL ASSURANCE layer. Illustrative rule set; not RBI requirements.
     findings: list[ComplianceFinding]
     is_mock: bool
     model_id: Optional[str] = None
@@ -206,6 +218,9 @@ class ComplianceResult(BaseModel):
     # undeclared profile makes every requirement's applicability UNCLEAR and
     # there is nothing useful to report. Never merged into ``findings``: these
     # are verified regulatory clauses, not rule-engine outputs.
+    #
+    # RBI REGULATORY layer. Every entry here has an official RBI source URL
+    # and an exact clause reference, or it is not in the register at all.
     verified_requirements: list[VerifiedRequirementFinding] = Field(
         default_factory=list
     )

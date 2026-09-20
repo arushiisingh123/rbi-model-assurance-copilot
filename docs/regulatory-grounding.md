@@ -169,6 +169,28 @@ one historical 2014 excerpt, and four of five report sections still return
 `GET /compliance`, which returns it in an additive `verified_requirements`
 field alongside — never merged into — the six rule-engine `findings`.
 
+The register currently holds **16 verified requirements** drawn from four RBI
+instruments:
+
+| Instrument | Requirements |
+|---|---|
+| Digital Lending Directions, 2025 | 6 |
+| Outsourcing of IT Services Directions, 2023 | 6 |
+| IT Governance, Risk, Controls and Assurance Practices Directions, 2023 | 2 |
+| Fraud Risk Management in NBFCs Directions, 2024 | 2 |
+
+**Coverage is partial and is meant to be read that way.** These are curated
+requirements that were each verified against the official RBI source — not the
+whole of RBI regulation. A requirement absent from this register has not been
+assessed, which is not evidence that it does not exist.
+
+The six rule-engine `findings` are **technical assurance** checks — fairness,
+drift, explainability, model metadata — against project thresholds. Every one
+carries `rbi_source` = "ILLUSTRATIVE ..." and cites no clause. They are
+evidence about a model, never RBI requirements, and the UI labels them under a
+separate "Technical assurance" heading for that reason. The separation is
+pinned by `tests/api/test_regulatory_technical_separation.py`.
+
 ### How the entity profile reaches it
 
 `GET /compliance` accepts optional, explicitly declared query parameters:
@@ -180,13 +202,13 @@ field alongside — never merged into — the six rule-engine `findings`.
 profile is never derived from the model, its features or its data, and no demo
 profile is hard-coded into production behaviour.
 
-Worked example — the same eight requirements, two declared profiles:
+Worked example — the same sixteen requirements, three declared profiles:
 
 | Profile | Result |
 |---|---|
-| (none declared) | 8 × `APPLICABILITY_UNCLEAR` |
-| NBFC, Middle Layer, digital lending, external vendor | 8 × `APPLIES` / `EVIDENCE_MISSING` |
-| NBFC, **Base** Layer, no digital lending, no vendor | 1 × `APPLIES`, 7 × `NOT_APPLICABLE` with stated reasons |
+| (none declared) | 16 × `APPLICABILITY_UNCLEAR` |
+| NBFC, Middle Layer, digital lending, external vendor | 16 × `APPLIES` / `EVIDENCE_MISSING` |
+| NBFC, **Base** Layer, no digital lending, no vendor | 1 × `APPLIES`, 15 × `NOT_APPLICABLE` with stated reasons |
 
 The Base Layer row is the point: clause 3.1.3 names "NBFCs – UL & ML", so a
 Base Layer NBFC is genuinely outside its scope. That boundary comes from the
@@ -200,7 +222,7 @@ verified clause text, not from us.
 | A condition not met | `NOT_APPLICABLE` | `NOT_ASSESSED` (+ reasons) |
 | A condition undeclared | `APPLICABILITY_UNCLEAR` | `NOT_ASSESSED` |
 
-**No requirement in this register can return `PASS`.** All eight are
+**No requirement in this register can return `PASS`.** All sixteen are
 `assessment_mode = attestation`: they need board committees, contracts and
 due-diligence records that only the regulated entity holds. A non-applicable
 requirement is still reported, with its reason — a silently dropped regulation

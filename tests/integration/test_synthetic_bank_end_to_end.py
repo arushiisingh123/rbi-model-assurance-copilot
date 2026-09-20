@@ -146,10 +146,13 @@ def test_model_health_reports_ok_when_service_is_actually_live(synthetic_bank_re
     assert response.json() == {"status": "ok"}
 
 
-def test_model_health_reports_unreachable_when_service_is_not_running():
-    # Deliberately without synthetic_bank_registered: SYNTHETIC_BANK_URL is
-    # unset here, so the registry points at the default (unreachable) address.
-    reset_default_registry()
+def test_model_health_reports_unreachable_when_service_is_not_running(
+    unreachable_synthetic_bank,
+):
+    # Deliberately without synthetic_bank_registered. The fixture points the
+    # registry at a port CONFIRMED to have nothing listening, so health() makes
+    # a real request that really fails. It previously assumed the service's
+    # default address was free, which is false whenever the bank is running.
     response = client.get(f"/models/{SYNTHETIC_BANK_MODEL_ID}/health")
     assert response.status_code == 200
     body = response.json()

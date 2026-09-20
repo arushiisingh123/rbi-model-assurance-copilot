@@ -341,15 +341,21 @@ def test_report_route_rejects_an_unknown_model():
 # ===========================================================================
 
 
-def test_unreachable_model_service_returns_a_structured_gateway_error():
+def test_unreachable_model_service_returns_a_structured_gateway_error(
+    unreachable_synthetic_bank,
+):
     """A remote model that is down is an upstream failure, stated as one.
 
-    The registry points at the service's default port, which is not running
-    in this test, so the adapter cannot reach it. That must surface as a 502
-    naming the model -- not an unexplained 500, and not mock numbers standing
-    in for a real failure.
+    That must surface as a 502 naming the model -- not an unexplained 500,
+    and not mock numbers standing in for a real failure.
+
+    The fixture points the registry at a port CONFIRMED to have nothing
+    listening, so the real RESTAdapter makes a real connection attempt that
+    really fails. This previously relied on the service's default port
+    happening to be free on the developer's machine, which made the test fail
+    whenever the bank was running for a demo -- while the application was
+    behaving correctly.
     """
-    reset_default_registry()
     response = client.get(f"/explainability?model_id={BANK_ID}")
 
     assert response.status_code == 502
@@ -379,16 +385,20 @@ def test_foreign_schema_metrics_are_null_not_a_failed_run(bank_live):
     assert result["model"]["predictions"]
 
 
-def test_monitoring_degrades_without_failing_the_whole_run():
+def test_monitoring_degrades_without_failing_the_whole_run(
+    unreachable_synthetic_bank,
+):
     """An unreachable monitoring lane must not delete the other findings.
 
-    The bank's service is not running here, so monitoring cannot score its
-    windows -- but explainability/fairness/compliance for the models that DID
-    compute must still be returned, and the monitoring gap must be stated.
+    Monitoring cannot score its windows against an unreachable service -- but
+    explainability/fairness/compliance for the models that DID compute must
+    still be returned, and the monitoring gap must be stated.
+
+    The fixture guarantees the service is unreachable (confirmed-closed port)
+    rather than assuming the default port is free.
     """
     from app.api.orchestration import _monitoring_for_assurance
 
-    reset_default_registry()
     adapter = get_default_registry().get(BANK_ID)
     monitoring, reason = _monitoring_for_assurance(
         adapter, {}, model_id=BANK_ID, assurance_run_id="run-degrade-1"

@@ -6,6 +6,7 @@
  * the registry holds. Capabilities are shown as declared by each adapter,
  * including capabilities declared false.
  */
+import { getDriftComparison } from "../api/fairness";
 import { getModelHealth } from "../api/models";
 import { getModelResult } from "../api/model";
 import { IdentityBar } from "../components/IdentityBar";
@@ -56,6 +57,91 @@ function ModelHealth({ modelId }) {
     >
       {status || "unknown"}
     </span>
+  );
+}
+
+/**
+ * Cross-model drift comparability: are two models' drift numbers safe to
+ * read side by side?
+ *
+ * GET /drift-comparison always compares the SAME fixed pair -- the default
+ * Logistic Regression and Random Forest models, both trained on German
+ * Credit -- never whichever model is currently selected elsewhere on this
+ * page. It is shown here, not tied to the selector, so it never implies a
+ * comparison that isn't actually happening.
+ */
+function DriftComparisonSummary({ comparison }) {
+  const { comparability, reason, drift_a, drift_b } = comparison;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <StatusBadge status={comparability} />
+        <p className="text-sm text-base-content/70">{reason}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="table table-sm">
+          <thead>
+            <tr className="text-xs uppercase tracking-wide">
+              <th />
+              <th>{drift_a.context.model_id}</th>
+              <th>{drift_b.context.model_id}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="text-xs text-base-content/50">Status</td>
+              <td><StatusBadge status={drift_a.result.status} size="sm" /></td>
+              <td><StatusBadge status={drift_b.result.status} size="sm" /></td>
+            </tr>
+            <tr>
+              <td className="text-xs text-base-content/50">PSI</td>
+              <td className="font-mono text-xs">{num(drift_a.result.psi)}</td>
+              <td className="font-mono text-xs">{num(drift_b.result.psi)}</td>
+            </tr>
+            <tr>
+              <td className="text-xs text-base-content/50">KS statistic</td>
+              <td className="font-mono text-xs">{num(drift_a.result.ks_statistic)}</td>
+              <td className="font-mono text-xs">{num(drift_b.result.ks_statistic)}</td>
+            </tr>
+            <tr>
+              <td className="text-xs text-base-content/50">Dataset</td>
+              <td className="text-xs break-all">{drift_a.dataset_id}</td>
+              <td className="text-xs break-all">{drift_b.dataset_id}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DriftComparisonCard() {
+  const { data, error, loading, refetch } = useApiResource(
+    ({ signal }) => getDriftComparison({ signal }),
+    [],
+  );
+  return (
+    <Card
+      title="Cross-model drift comparability"
+      subtitle="A fixed check between the two in-process registry models (Logistic Regression and Random Forest): are their drift results safe to compare side by side?"
+    >
+      <AsyncSection
+        loading={loading}
+        error={error}
+        data={data}
+        onRetry={refetch}
+        context="Drift comparison"
+        loadingLabel="Checking comparability…"
+      >
+        {data && <DriftComparisonSummary comparison={data} />}
+      </AsyncSection>
+      <p className="mt-3 text-xs text-base-content/50">
+        Comparability is the payload, not an HTTP error: two runs measured
+        over different feature spaces or datasets would resolve to{" "}
+        <span className="font-mono">NOT_COMPARABLE</span> here rather than
+        failing the request.
+      </p>
+    </Card>
   );
 }
 
@@ -147,6 +233,8 @@ export function ModelsPage() {
           </p>
         </AsyncSection>
       </Card>
+
+      <DriftComparisonCard />
 
       <IdentityBar
         modelId={selectedModelId}

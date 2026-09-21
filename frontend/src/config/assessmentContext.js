@@ -85,12 +85,62 @@ const SYNTHETIC_BANK_CONTEXT = {
 };
 
 /**
+ * The German Credit demo models, as declared by whoever set up this demo.
+ *
+ * Both `german-credit-logistic-regression` and `german-credit-random-forest`
+ * share this context: same declared institution, two candidate model types
+ * evaluated in-house. `uses_external_model_vendor: false` is literally true
+ * for these two -- both run in-process (scikit-learn), not via RESTAdapter,
+ * unlike the synthetic bank's HTTP-served model.
+ *
+ * Dimensions genuinely absent are OMITTED, never filled with a plausible
+ * guess -- `microfinance` is absent because this demo context does not state
+ * it, matching the synthetic bank context above.
+ */
+const GERMAN_CREDIT_CONTEXT = {
+  label: "German Credit demo models — declared demo assessment context",
+  note:
+    "Declared for this demo, not observed from the model or its data. " +
+    "Applicability below follows from these declarations; change them and " +
+    "the applicable requirements change with them.",
+
+  declared: [
+    { key: "regulated_entity_type", value: "NBFC", consumed: true },
+    { key: "nbfc_layer", value: "MIDDLE", consumed: true },
+    { key: "model_use_case", value: "CREDIT_SCORING", consumed: false },
+    { key: "product", value: "RETAIL_LENDING", consumed: false },
+    { key: "digital_vs_physical", value: "DIGITAL", consumed: true },
+    { key: "third_party_dependency", value: "FALSE", consumed: true },
+    { key: "data_type", value: "CREDIT_DATA", consumed: false },
+    { key: "customer_population", value: "RETAIL", consumed: false },
+    { key: "loan_type", value: "PERSONAL", consumed: false },
+  ],
+
+  // Declared context -> backend dimensions:
+  //
+  //   regulated_entity_type = NBFC      -> entity_type: "NBFC"
+  //   nbfc_layer            = MIDDLE    -> nbfc_layer: "Middle"
+  //   digital_vs_physical   = DIGITAL   -> digital_lending: true
+  //   third_party_dependency= FALSE     -> uses_external_model_vendor: false
+  //
+  // microfinance is intentionally absent -- see above.
+  profile: {
+    entity_type: "NBFC",
+    nbfc_layer: "Middle",
+    digital_lending: true,
+    uses_external_model_vendor: false,
+  },
+};
+
+/**
  * Declared contexts by model id. A model with no entry here has no declared
  * context, and its assessment stays UNCLEAR. That is the default, and it is
  * the honest one.
  */
 export const ASSESSMENT_CONTEXTS = {
   "synthetic-bank-credit-v1": SYNTHETIC_BANK_CONTEXT,
+  "german-credit-logistic-regression": GERMAN_CREDIT_CONTEXT,
+  "german-credit-random-forest": GERMAN_CREDIT_CONTEXT,
 };
 
 /** The declared context for a model, or null when none was declared. */

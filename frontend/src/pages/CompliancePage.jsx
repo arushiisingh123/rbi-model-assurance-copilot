@@ -113,63 +113,97 @@ function VerifiedRequirements({ requirements }) {
         than being assumed.
       </p>
 
-      <div className="mt-4 space-y-2">
-        {rows.map((requirement) => (
-          <details
-            key={requirement.requirement_id}
-            className="rounded-md border border-base-300 bg-base-100"
-          >
-            <summary className="cursor-pointer select-none px-4 py-3 flex flex-wrap items-center gap-3">
-              <span className="font-mono text-xs text-base-content/70">
-                {requirement.requirement_id}
-              </span>
-              <span className="text-sm flex-1 min-w-[16rem]">
-                {requirement.requirement}
-              </span>
-              <span className="badge badge-outline badge-sm">
-                {requirement.applicability}
-              </span>
-              <span className="text-xs text-base-content/50">
-                {requirement.status}
-              </span>
-            </summary>
-            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-base-300">
-              <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3">
-                <Field label="Instrument" value={requirement.document_title} />
-                <Field label="Clause" value={requirement.clause} mono />
-                <Field
-                  label="Instrument type"
-                  value={`${requirement.instrument_type} · ${requirement.regulatory_status}`}
-                />
-                <Field label="Assessment mode" value={requirement.assessment_mode} />
-                <Field label="Verified on" value={requirement.verified_on} />
-                <Field label="Model" value={requirement.model_id} mono />
-              </dl>
-              {requirement.quote && (
-                <blockquote className="text-xs italic leading-relaxed text-base-content/70 border-l-2 border-base-300 pl-3">
-                  “{requirement.quote}”
-                </blockquote>
-              )}
-              {requirement.reason && (
-                <p className="text-xs text-base-content/70">{requirement.reason}</p>
-              )}
-              {requirement.limitation && (
-                <p className="text-xs text-base-content/60">
-                  <span className="font-semibold">Limitation: </span>
-                  {requirement.limitation}
+      <div className="mt-4 space-y-3">
+        {rows.map((requirement) => {
+          // Same blue-vs-gray split the PDF export uses: APPLIES is the only
+          // applicability tone the glossary marks "info" (glossary.js), so
+          // it is the only one that earns the accent colour here too.
+          const accentClass =
+            requirement.applicability === "APPLIES"
+              ? "border-l-info"
+              : "border-l-base-300";
+          return (
+            <details
+              key={requirement.requirement_id}
+              className={`group rounded-lg border border-base-300 ${accentClass} border-l-4 bg-base-100 open:shadow-md open:border-base-content/20 transition-shadow`}
+            >
+              <summary className="cursor-pointer select-none px-4 py-3.5 hover:bg-base-200/40 rounded-r-lg group-open:rounded-b-none transition-colors [&::-webkit-details-marker]:hidden marker:content-none">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs text-base-content/60">
+                    {requirement.requirement_id}
+                  </span>
+                  <StatusBadge status={requirement.applicability} size="sm" />
+                  <StatusBadge status={requirement.status} size="sm" />
+                  <span
+                    aria-hidden="true"
+                    className="ml-auto text-base-content/40 transition-transform duration-200 group-open:rotate-90"
+                  >
+                    ▸
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-semibold text-base-content leading-snug">
+                  {requirement.requirement}
                 </p>
-              )}
-              <a
-                className="link link-primary text-xs font-mono break-all"
-                href={requirement.source_url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {requirement.source_url}
-              </a>
-            </div>
-          </details>
-        ))}
+              </summary>
+              <div className="px-5 pb-5 pt-2 space-y-5 border-t border-base-300">
+                <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3">
+                  <Field label="Instrument" value={requirement.document_title} />
+                  <Field label="Clause" value={requirement.clause} mono />
+                  <Field
+                    label="Instrument type"
+                    value={`${requirement.instrument_type} · ${requirement.regulatory_status}`}
+                  />
+                  <Field label="Assessment mode" value={requirement.assessment_mode} />
+                  <Field label="Verified on" value={requirement.verified_on} />
+                  <Field label="Model" value={requirement.model_id} mono />
+                </dl>
+                {requirement.quote && (
+                  <blockquote className="text-sm italic leading-relaxed text-base-content/70 border-l-2 border-base-300 pl-3">
+                    “{requirement.quote}”
+                  </blockquote>
+                )}
+                {requirement.reason && (
+                  <div className="border-l-2 border-base-300 pl-3 py-0.5">
+                    <h4 className="text-[0.7rem] font-bold uppercase tracking-wider text-base-content/50 mb-1">
+                      Why
+                    </h4>
+                    <p className="text-sm leading-relaxed text-base-content/80">
+                      {requirement.reason}
+                    </p>
+                  </div>
+                )}
+                {requirement.suggestion && (
+                  <div className="border-l-2 border-info pl-3 py-0.5">
+                    <h4 className="text-[0.7rem] font-bold uppercase tracking-wider text-info mb-1">
+                      Next step
+                    </h4>
+                    <p className="text-sm leading-relaxed text-base-content/80">
+                      {requirement.suggestion}
+                    </p>
+                  </div>
+                )}
+                {requirement.limitation && (
+                  <div className="border-l-2 border-base-300 pl-3 py-0.5">
+                    <h4 className="text-[0.7rem] font-bold uppercase tracking-wider text-base-content/50 mb-1">
+                      Limitation
+                    </h4>
+                    <p className="text-sm leading-relaxed text-base-content/60">
+                      {requirement.limitation}
+                    </p>
+                  </div>
+                )}
+                <a
+                  className="link link-primary text-xs font-mono break-all"
+                  href={requirement.source_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {requirement.source_url}
+                </a>
+              </div>
+            </details>
+          );
+        })}
       </div>
     </Card>
   );

@@ -99,6 +99,37 @@ _VERIFICATION_METHOD = (
     "source document is not stored in this repository."
 )
 
+# ---------------------------------------------------------------------------
+# Suggestion text -- hardcoded per applicability outcome, never LLM-generated.
+#
+# Distinct from `reason` (what is true -- why this status was reached) and
+# from `limitation` (what kind of evidence this requirement needs and why the
+# platform can't observe it). `suggestion` is the next step: what to actually
+# do about it. Keyed by `applicability`, not `status`, because
+# APPLICABILITY_UNCLEAR and NOT_APPLICABLE share the same status
+# (NOT_ASSESSED) but need different next steps -- collapsing them onto status
+# would give an unclear-applicability requirement the same instruction as one
+# already known not to apply.
+#
+# None of these assert a compliance outcome (PASS/FAIL) or predict what a
+# review would find -- each is a process step (route for attestation,
+# complete a profile field, re-assess on a declared change), not a verdict.
+# ---------------------------------------------------------------------------
+
+_SUGGESTION_EVIDENCE_MISSING = (
+    "Route this requirement to the compliance or legal function for manual "
+    "attestation, supported by the relevant documentary evidence (e.g. board "
+    "approvals, executed contracts, due-diligence records)."
+)
+_SUGGESTION_APPLICABILITY_UNCLEAR = (
+    "Complete the entity profile with the missing attribute to enable a "
+    "definitive applicability determination."
+)
+_SUGGESTION_NOT_APPLICABLE = (
+    "No action required under the current profile. Re-assess if the entity's "
+    "regulatory category, business activity, or vendor arrangements change."
+)
+
 
 # ---------------------------------------------------------------------------
 # Entity profile -- declared, never inferred
@@ -1000,7 +1031,7 @@ def assess_verified_requirements(
     Returns:
         One record per verified requirement, in register order.
     """
-    from app.rbi.applicability import APPLIES
+    from app.rbi.applicability import APPLICABILITY_UNCLEAR, APPLIES
 
     identity = {
         k: v
@@ -1022,9 +1053,15 @@ def assess_verified_requirements(
                 "holds no evidence bearing on it, so no compliance conclusion "
                 "is drawn."
             )
-        else:
+            suggestion = _SUGGESTION_EVIDENCE_MISSING
+        elif applicability == APPLICABILITY_UNCLEAR:
             status = NOT_ASSESSED
             reason = "; ".join(reasons) or "Applicability could not be established."
+            suggestion = _SUGGESTION_APPLICABILITY_UNCLEAR
+        else:  # NOT_APPLICABLE
+            status = NOT_ASSESSED
+            reason = "; ".join(reasons) or "Applicability could not be established."
+            suggestion = _SUGGESTION_NOT_APPLICABLE
 
         findings.append(
             {
@@ -1043,6 +1080,7 @@ def assess_verified_requirements(
                 "applicability_reasons": list(reasons),
                 "status": status,
                 "reason": reason,
+                "suggestion": suggestion,
                 "limitation": requirement.limitation,
                 "verified_on": requirement.verified_on,
                 "is_mock": False,

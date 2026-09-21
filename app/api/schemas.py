@@ -199,6 +199,11 @@ class VerifiedRequirementFinding(BaseModel):
     applicability_reasons: list[str] = Field(default_factory=list)
     status: str
     reason: Optional[str] = None
+    # Hardcoded per applicability outcome (never LLM-generated) -- the next
+    # step to take, distinct from `reason` (why this status was reached) and
+    # `limitation` (what evidence this requirement needs and why the
+    # platform can't observe it). Never asserts a compliance outcome.
+    suggestion: Optional[str] = None
     limitation: Optional[str] = None
     verified_on: Optional[str] = None
     is_mock: bool = False

@@ -149,6 +149,85 @@ def test_the_creditworthiness_clause_is_not_automated_from_model_features():
 
 
 # ---------------------------------------------------------------------------
+# 3a. Suggestion: a next step, keyed by applicability, never a verdict
+# ---------------------------------------------------------------------------
+
+
+def test_every_finding_carries_a_suggestion():
+    for finding in assess_verified_requirements(FULL_PROFILE):
+        assert finding["suggestion"], "every finding must say what to do next"
+
+
+def test_suggestion_is_keyed_by_applicability_not_status():
+    """APPLICABILITY_UNCLEAR and NOT_APPLICABLE share one status
+    (NOT_ASSESSED) but need different next steps -- keying on status alone
+    would give them the same instruction."""
+    unclear = assess_verified_requirements(EntityProfile())
+    assert unclear
+    assert all(f["applicability"] == APPLICABILITY_UNCLEAR for f in unclear)
+
+    narrow = assess_verified_requirements(NARROW_PROFILE)
+    not_applicable = [f for f in narrow if f["applicability"] == NOT_APPLICABLE]
+    assert not_applicable
+
+    # Both sets share status NOT_ASSESSED...
+    assert all(f["status"] == NOT_ASSESSED for f in unclear)
+    assert all(f["status"] == NOT_ASSESSED for f in not_applicable)
+    # ...but must not share the same suggestion text.
+    assert {f["suggestion"] for f in unclear} != {f["suggestion"] for f in not_applicable}
+
+
+def test_applies_suggestion_routes_to_attestation():
+    findings = assess_verified_requirements(FULL_PROFILE)
+    applicable = [f for f in findings if f["applicability"] == APPLIES]
+    assert applicable
+    for finding in applicable:
+        assert finding["status"] == EVIDENCE_MISSING
+        assert "attestation" in finding["suggestion"].lower()
+
+
+def test_unclear_suggestion_points_at_completing_the_profile():
+    for finding in assess_verified_requirements(EntityProfile()):
+        assert finding["applicability"] == APPLICABILITY_UNCLEAR
+        assert "profile" in finding["suggestion"].lower()
+
+
+def test_not_applicable_suggestion_names_no_action_and_a_reassessment_trigger():
+    findings = assess_verified_requirements(NARROW_PROFILE)
+    not_applicable = [f for f in findings if f["applicability"] == NOT_APPLICABLE]
+    assert not_applicable
+    for finding in not_applicable:
+        assert "no action" in finding["suggestion"].lower()
+        assert "re-assess" in finding["suggestion"].lower()
+
+
+def test_no_suggestion_asserts_a_compliance_outcome():
+    """A next step is not a verdict: none of the three templates may claim
+    the entity does or does not comply."""
+    forbidden = ("complies", "compliant", "non-compliant", "violat", "pass", "fail")
+    seen_suggestions = set()
+    for profile in (FULL_PROFILE, NARROW_PROFILE, EntityProfile()):
+        for finding in assess_verified_requirements(profile):
+            seen_suggestions.add(finding["suggestion"])
+    assert seen_suggestions, "expected at least one suggestion across all profiles"
+    for suggestion in seen_suggestions:
+        lowered = suggestion.lower()
+        for word in forbidden:
+            assert word not in lowered, f"{word!r} in suggestion: {suggestion!r}"
+
+
+def test_suggestion_is_a_fixed_template_not_per_requirement_text():
+    """Hardcoded per outcome state, not derived from the requirement's own
+    text -- every APPLIES finding in one profile must share identical
+    wording, regardless of which clause it is."""
+    applicable = [
+        f for f in assess_verified_requirements(FULL_PROFILE) if f["applicability"] == APPLIES
+    ]
+    assert len(applicable) > 1, "need more than one APPLIES finding to prove this"
+    assert len({f["suggestion"] for f in applicable}) == 1
+
+
+# ---------------------------------------------------------------------------
 # 4-5. Binding vs advisory; current vs superseded
 # ---------------------------------------------------------------------------
 

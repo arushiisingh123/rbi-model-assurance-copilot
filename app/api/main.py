@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,46 @@ def _resolve_adapter(model_id: Optional[str]) -> Optional[ModelAdapter]:
         return get_default_registry().get(model_id)
     except ModelNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+def _attach_verified_requirements(
+    result: dict,
+    adapter: Optional[ModelAdapter],
+    entity_type: Optional[str],
+    nbfc_layer: Optional[str],
+    digital_lending: Optional[bool],
+    microfinance: Optional[bool],
+    uses_external_model_vendor: Optional[bool],
+) -> dict:
+    """Attach compliance.verified_requirements to a build_assurance_result() dict.
+
+    Shared by GET /assurance-result and GET /report/pdf so the declared-
+    profile -> verified-requirements wiring exists in exactly one place.
+    Mutates and returns ``result``; does not touch build_assurance_result()
+    or orchestration.py, matching the reasoning in GET /compliance and
+    GET /assurance-result -- keeps build_assurance_result()'s own output
+    shape and signature untouched.
+    """
+    from app.rbi.verified_requirements import EntityProfile, assess_verified_requirements
+
+    profile = EntityProfile(
+        entity_type=entity_type,
+        nbfc_layer=nbfc_layer,
+        digital_lending=digital_lending,
+        microfinance=microfinance,
+        uses_external_model_vendor=uses_external_model_vendor,
+    )
+    compliance = result.get("compliance") or {}
+    result["compliance"] = {
+        **compliance,
+        "verified_requirements": assess_verified_requirements(
+            profile,
+            model_id=compliance.get("model_id"),
+            model_version=adapter.model_version if adapter is not None else None,
+            assurance_run_id=compliance.get("assurance_run_id"),
+        ),
+    }
+    return result
 
 
 def _unreachable_model(model_id: Optional[str], exc: Exception) -> HTTPException:
@@ -364,7 +404,27 @@ def get_compliance(
 
 
 @app.get("/assurance-result", response_model=AssuranceResult)
-def get_assurance_result(model_id: Optional[str] = Query(default=None)) -> dict:
+def get_assurance_result(
+    model_id: Optional[str] = Query(default=None),
+    entity_type: Optional[str] = Query(
+        default=None,
+        description=(
+            "Declared regulated-entity type, e.g. 'NBFC'. Never inferred from "
+            "the model or its data."
+        ),
+    ),
+    nbfc_layer: Optional[str] = Query(
+        default=None, description="Declared NBFC layer, e.g. 'Middle'."
+    ),
+    digital_lending: Optional[bool] = Query(
+        default=None, description="Whether the entity undertakes digital lending."
+    ),
+    microfinance: Optional[bool] = Query(default=None),
+    uses_external_model_vendor: Optional[bool] = Query(
+        default=None,
+        description="Whether the model is hosted/served by an external vendor.",
+    ),
+) -> dict:
     """Retrieve aggregated assurance results for the requested model.
 
     ``model_id`` is additive: omitted, the default in-process path runs exactly
@@ -377,12 +437,89 @@ def get_assurance_result(model_id: Optional[str] = Query(default=None)) -> dict:
     is unreachable, ``monitoring`` is null and
     ``monitoring_unavailable_reason`` says why, while the domains that did
     compute are still returned.
+
+    The 5 entity-profile parameters mirror GET /compliance exactly (same
+    names, same defaults, same "never inferred" behaviour) and populate
+    ``compliance.verified_requirements`` here too. Before this, an assurance
+    run's compliance slice always had ``verified_requirements: []`` --
+    build_assurance_result() never called assess_verified_requirements() --
+    so any page reading compliance FROM a run (rather than calling
+    GET /compliance directly) silently lost the verified-requirements
+    register the moment a run existed. Attached here, after
+    build_assurance_result() returns, rather than inside orchestration.py:
+    same reasoning as GET /compliance -- keeps build_assurance_result()'s own
+    output shape and signature untouched.
     """
     adapter = _resolve_adapter(model_id)
     try:
-        return build_assurance_result(adapter=adapter)
+        result = build_assurance_result(adapter=adapter)
     except RESTAdapterError as exc:
         raise _unreachable_model(model_id, exc)
+
+    return _attach_verified_requirements(
+        result, adapter, entity_type, nbfc_layer, digital_lending,
+        microfinance, uses_external_model_vendor,
+    )
+
+
+@app.get("/report/pdf")
+def get_report_pdf(
+    model_id: Optional[str] = Query(default=None),
+    entity_type: Optional[str] = Query(
+        default=None,
+        description=(
+            "Declared regulated-entity type, e.g. 'NBFC'. Never inferred from "
+            "the model or its data."
+        ),
+    ),
+    nbfc_layer: Optional[str] = Query(
+        default=None, description="Declared NBFC layer, e.g. 'Middle'."
+    ),
+    digital_lending: Optional[bool] = Query(
+        default=None, description="Whether the entity undertakes digital lending."
+    ),
+    microfinance: Optional[bool] = Query(default=None),
+    uses_external_model_vendor: Optional[bool] = Query(
+        default=None,
+        description="Whether the model is hosted/served by an external vendor.",
+    ),
+) -> Response:
+    """Download the assurance evidence report as a PDF.
+
+    A second, additive rendering of exactly what GET /assurance-result
+    already returns -- same data, same entity-profile parameters, same
+    verified_requirements wiring (via _attach_verified_requirements, shared
+    with GET /assurance-result so that wiring exists in one place). No new
+    computation happens for this route: build_assurance_result() and
+    assess_verified_requirements() are the only sources of the numbers in
+    the document. GET /report and its JSON shape are untouched by this
+    route.
+
+    Status display labels in the PDF (e.g. EVIDENCE_MISSING -> "Awaiting
+    Organizational Evidence") are read from app/report/status_meaning.py,
+    which loads the same frontend/src/utils/statusMeaning.json the web
+    app's glossary.js imports -- one authored file, two readers.
+    """
+    adapter = _resolve_adapter(model_id)
+    try:
+        result = build_assurance_result(adapter=adapter)
+    except RESTAdapterError as exc:
+        raise _unreachable_model(model_id, exc)
+
+    result = _attach_verified_requirements(
+        result, adapter, entity_type, nbfc_layer, digital_lending,
+        microfinance, uses_external_model_vendor,
+    )
+
+    from app.report.pdf_report import build_pdf_report
+
+    pdf_bytes = build_pdf_report(result)
+    run_id = result.get("assurance_run_id") or "assurance-report"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="assurance-report-{run_id}.pdf"'},
+    )
 
 
 @app.get("/mock-assurance-result", response_model=AssuranceResult, deprecated=True)

@@ -21,6 +21,7 @@
  *     available, because a model-risk reviewer needs the precise term and a
  *     business stakeholder needs the plain one. They get both.
  */
+import statusMeaningData from "./statusMeaning.json";
 
 /**
  * One entry per status token the backend can emit.
@@ -29,125 +30,15 @@
  *   meaning  one sentence answering "what does this tell me?"
  *   glyph    a text symbol, so status is never carried by colour alone
  *   tone     which visual treatment applies
+ *
+ * The data itself lives in statusMeaning.json, NOT inline here. That file is
+ * the single source of truth for status labels across both renderers this
+ * platform has -- this web app AND the PDF assurance report
+ * (app/report/status_meaning.py loads the same JSON file directly). A label
+ * change belongs in the JSON only; changing it here would silently leave
+ * the PDF on the old wording.
  */
-export const STATUS_MEANING = {
-  // ---- analytical statuses (thresholds in app/config/thresholds.py) -------
-  PASS: {
-    label: "Passed",
-    meaning: "This check was carried out and the result is within the agreed limits.",
-    glyph: "✓",
-    tone: "pass",
-  },
-  WARNING: {
-    label: "Needs review",
-    meaning:
-      "This check was carried out and the result is outside the comfortable range, but not far enough to be treated as a failure. Someone should look at it.",
-    glyph: "!",
-    tone: "warning",
-  },
-  FAIL: {
-    label: "Action needed",
-    meaning:
-      "This check was carried out and the result is outside the agreed limits. It needs investigation.",
-    glyph: "✕",
-    tone: "fail",
-  },
-  PENDING: {
-    label: "Not measured",
-    meaning:
-      "This check could not be carried out, so there is no result. This is not a pass — nothing has been verified.",
-    glyph: "◔",
-    tone: "neutral",
-  },
-
-  // ---- regulatory requirement statuses (app/rbi/requirements.py) ----------
-  EVIDENCE_MISSING: {
-    label: "Evidence needed",
-    meaning:
-      "This regulatory requirement applies, but proving it needs records only your organisation holds — for example board minutes, contracts or due-diligence files. The platform cannot see those, so it makes no judgement.",
-    glyph: "◔",
-    tone: "neutral",
-  },
-  NOT_ASSESSED: {
-    label: "Not assessed",
-    meaning:
-      "No assessment was made. Either the requirement does not apply here, or not enough was declared to decide.",
-    glyph: "◔",
-    tone: "neutral",
-  },
-  APPLICABILITY_UNCLEAR: {
-    label: "Applicability unclear",
-    meaning:
-      "We cannot tell whether this requirement applies to you, because the organisation details it depends on were not provided. Nothing is assumed either way.",
-    glyph: "?",
-    tone: "neutral",
-  },
-  NOT_APPLICABLE: {
-    label: "Does not apply",
-    meaning:
-      "Based on the organisation details provided, this requirement does not apply to you. It is listed so nothing is silently hidden.",
-    glyph: "–",
-    tone: "neutral",
-  },
-  APPLIES: {
-    label: "Applies to you",
-    meaning:
-      "Based on the organisation details provided, this requirement applies to you.",
-    glyph: "•",
-    tone: "info",
-  },
-  PARTIAL: {
-    label: "Partly met",
-    meaning: "Some, but not all, of what this requirement asks for was evidenced.",
-    glyph: "!",
-    tone: "warning",
-  },
-
-  // ---- retrieval / evidence statuses -------------------------------------
-  RETRIEVED: {
-    label: "Source found",
-    meaning: "A verified regulatory source was found and is quoted alongside this section.",
-    glyph: "✓",
-    tone: "pass",
-  },
-  NOT_FOUND: {
-    label: "No source found",
-    meaning:
-      "No verified regulatory source was found in the material currently loaded. This does not mean no rule exists — it means we will not quote one we have not verified.",
-    glyph: "◔",
-    tone: "neutral",
-  },
-
-  // ---- cross-model comparison --------------------------------------------
-  COMPARABLE: {
-    label: "Safe to compare",
-    meaning: "These two results were measured the same way, so comparing them is meaningful.",
-    glyph: "✓",
-    tone: "pass",
-  },
-  NOT_COMPARABLE: {
-    label: "Not safe to compare",
-    meaning:
-      "These two results were measured over different things, so putting them side by side would be misleading. The comparison is withheld rather than shown with a caveat.",
-    glyph: "–",
-    tone: "neutral",
-  },
-
-  // ---- availability -------------------------------------------------------
-  computed: {
-    label: "Measured",
-    meaning: "This value was calculated from real model output.",
-    glyph: "✓",
-    tone: "pass",
-  },
-  unavailable_no_scores: {
-    label: "Not available",
-    meaning:
-      "This model does not produce probability scores, so this particular measure could not be calculated. The other measures were still taken.",
-    glyph: "◔",
-    tone: "neutral",
-  },
-};
+export const STATUS_MEANING = statusMeaningData;
 
 /** Visual treatment per tone. Colour is a reinforcement, never the only signal. */
 const TONE_STYLES = {

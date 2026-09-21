@@ -15,11 +15,13 @@
  * No report content is generated here. The download button serialises exactly
  * what the backend returned.
  */
-import { getReport } from "../api/report";
+import { useState } from "react";
+import { getReport, getReportPdf } from "../api/report";
 import { IdentityBar } from "../components/IdentityBar";
 import {
   AsyncSection,
   Card,
+  ErrorState,
   Explainer,
   Field,
   StatusBadge,
@@ -219,6 +221,34 @@ export function ReportPage() {
     URL.revokeObjectURL(url);
   }
 
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState(null);
+
+  async function downloadPdf() {
+    setPdfError(null);
+    setPdfLoading(true);
+    try {
+      // A DIFFERENT render of the backend's computed results (technical
+      // checks, explainability/fairness/drift, verified RBI requirements)
+      // via GET /report/pdf -- not this page's LLM-narrated JSON. Its own
+      // filename (from Content-Disposition) carries that PDF's own
+      // assurance_run_id, which is why this ignores `data.report_id`.
+      const { blob, filename } = await getReportPdf({ modelId: selectedModelId });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setPdfError(err);
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
   const coverage = data?.evidence_coverage;
 
   return (
@@ -253,8 +283,20 @@ export function ReportPage() {
           >
             Download report (JSON)
           </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={downloadPdf}
+            disabled={!selectedModelId || pdfLoading}
+          >
+            {pdfLoading ? "Generating PDF…" : "Download PDF"}
+          </button>
         </div>
       </header>
+
+      {pdfError && (
+        <ErrorState error={pdfError} context="PDF download" onRetry={downloadPdf} />
+      )}
 
       <IdentityBar
         modelId={data?.model_id ?? selectedModelId}

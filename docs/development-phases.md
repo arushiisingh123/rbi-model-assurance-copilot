@@ -41,9 +41,15 @@ carried from the data/model boundary through to the report. The Phase 3
 integration work is implemented and merged into `main`; the formal checkpoint
 sign-off is recorded in `docs/decisions.md`, "Phase 3 checkpoint sign-off".
 
-**Evidence coverage limitation.** The approved RBI corpus currently contains
+**Evidence coverage limitation.** *(The sentence below described Phase 3, when
+the corpus held only the 2014 excerpt. Six current RBI Directions have since
+been obtained and indexed, and real retrieval now grounds all 5 report
+sections. The caveat that follows still applies to REGULATORY coverage: six
+instruments out of 23 declared is not complete coverage.)*
+
+At Phase 3 the approved RBI corpus contained
 one 2014 excerpt (`is_excerpt: True`, `is_current: False`), so real retrieval
-grounds 1 of the 5 report sections and the other 4 return `NOT_FOUND`.
+grounded 1 of the 5 report sections and the other 4 returned `NOT_FOUND`.
 `NOT_FOUND` means no verified evidence was retrieved from the indexed corpus
 — never that no RBI rule exists. Phase 3 sign-off is an engineering and
 integration milestone, not complete regulatory coverage.

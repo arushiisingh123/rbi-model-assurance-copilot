@@ -55,7 +55,7 @@ IRRELEVANT_QUERY = "quantum chromodynamics photosynthesis basketball tournament 
 
 @pytest.fixture(scope="module")
 def default_retriever() -> RBIRetriever:
-    return build_default_retriever()
+    return build_default_retriever(APPROVED_CORPUS)
 
 
 @pytest.fixture(scope="module")
@@ -270,7 +270,7 @@ def test_scope_caveat_from_the_source_is_carried_through_unchanged(handoff):
 
 def test_handoff_is_deterministic():
     def run():
-        retriever = build_default_retriever()
+        retriever = build_default_retriever(APPROVED_CORPUS)
         result = retriever.retrieve(RELEVANT_QUERY, top_k=3)
         return [e.to_dict() for e in build_evidence(result)]
 
@@ -292,7 +292,7 @@ def test_whole_handoff_runs_without_network(monkeypatch):
 
     monkeypatch.setattr(socket.socket, "connect", _blocked, raising=True)
 
-    retriever = build_default_retriever()
+    retriever = build_default_retriever(APPROVED_CORPUS)
     evidence = build_evidence(retriever(query=RELEVANT_QUERY))
     assert evidence and evidence[0].doc_id == APPROVED_2014_ID
     assert build_evidence(retriever(query=IRRELEVANT_QUERY)) == []

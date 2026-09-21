@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.rag.chunking import chunk_document, chunk_documents
-from app.rag.corpus import RBISourceMetadata
+from app.rag.corpus import APPROVED_CORPUS, RBISourceMetadata
 from app.rag.ingestion import LoadedDocument, load_by_id
 from app.rag.vector_store import ChunkVectorStore
 from app.rag.retrieval import (
@@ -63,7 +63,7 @@ def real_2014_doc() -> LoadedDocument:
 
 @pytest.fixture(scope="module")
 def default_retriever() -> RBIRetriever:
-    return build_default_retriever()
+    return build_default_retriever(APPROVED_CORPUS)
 
 
 # ======================================================================
@@ -183,11 +183,11 @@ def test_top_k_limits_the_number_of_results(default_retriever):
 
 def test_default_top_k_is_used_when_not_specified():
     assert DEFAULT_TOP_K == 3
-    r1 = build_default_retriever(default_top_k=1)
+    r1 = build_default_retriever(APPROVED_CORPUS, default_top_k=1)
     assert r1.default_top_k == 1
     assert len(r1(query="non performing asset overdue")["results"]) == 1
 
-    r2 = build_default_retriever(default_top_k=2)
+    r2 = build_default_retriever(APPROVED_CORPUS, default_top_k=2)
     assert len(r2.retrieve("non performing asset overdue account")["results"]) <= 2
 
 
@@ -336,7 +336,7 @@ def test_call_requires_the_query_keyword(default_retriever):
 
 
 def test_build_default_retriever_returns_a_working_retrieval_fn():
-    fn = build_default_retriever()
+    fn = build_default_retriever(APPROVED_CORPUS)
     out = fn(query="what is a non performing asset")
     assert callable(fn)
     assert out["evidence_status"] in (EVIDENCE_RETRIEVED, NO_VERIFIED_EVIDENCE)

@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 # Constants
 DEFAULT_MODEL_NAME = "openai/gpt-oss-120b"
 DEFAULT_PROVIDER_LABEL = "Groq (openai/gpt-oss-120b)"
-INTERIM_SOURCE_LABEL = "INTERIM SINGLE-DOC: RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt"
 
 # Regulatory claim detection regex
 REGULATORY_CLAIM_PATTERN = re.compile(
@@ -44,21 +43,90 @@ SAFE_RETRIEVED_FALLBACK_TEMPLATE = (
     "Detailed regulatory interpretation was withheld because generated text went beyond the retrieved evidence excerpt."
 )
 
-# Domain keywords required for retrieved text to clear genuine Python relevance bar
+# Domain keywords required for retrieved text to clear a genuine Python
+# relevance bar, ON TOP OF the retriever's own distance/overlap gate.
+#
+# WHY EACH LIST HAS TWO HALVES
+#     RBI does not legislate in machine-learning vocabulary. Its Directions
+#     never say "SHAP", "disparate impact" or "population stability index" --
+#     they say "risk management framework", "grievance redressal", "periodic
+#     assessment". A gate that only looked for analytics terms could never
+#     pass a real RBI clause, which is exactly what happened when the corpus
+#     grew from one 2014 excerpt to six current Directions: every section went
+#     NOT_FOUND.
+#
+#     So each list now names the ANALYTICS topic the report section reports on,
+#     AND the REGULATORY topic RBI writes about for that same subject. Both
+#     halves are kept: the analytics terms still match a corpus that uses them
+#     (the 2014 excerpt, and any future ML-specific guidance such as the draft
+#     Model Risk Management directions), and the regulatory terms match the
+#     instruments actually indexed today.
+#
+#     Every regulatory phrase below was taken from text actually retrieved out
+#     of the stored PDFs, not invented. The phrases are deliberately multi-word:
+#     a bare "audit" or "policy" appears on nearly every page of every
+#     Direction and would turn this gate into a rubber stamp.
+#     tests/report/test_section_relevance.py asserts the gates still tell the
+#     sections apart.
 SECTION_RELEVANCE_KEYWORDS = {
-    "model": ["model risk", "model validation", "governance framework", "algorithm validation", "scoring model"],
-    "explainability": ["explainability", "interpretability", "shap", "lime", "feature importance"],
-    "fairness": ["disparate impact", "demographic parity", "protected group", "discrimination", "adverse impact"],
-    "drift": ["population stability index", "distribution shift", "data drift", "kolmogorov-smirnov", "ks statistic"],
-    "compliance": ["non-performing", "non performing", "npa", "advances", "classification", "provisioning", "prudential"],
+    "model": [
+        # analytics
+        "model risk", "model validation", "algorithm validation", "scoring model",
+        # regulatory: RBI treats model governance as risk/IT governance.
+        # NOT "board approved policy" -- every Direction requires one of those
+        # for every subject, so it identifies nothing. Caught by
+        # tests/report/test_section_relevance.py.
+        "governance framework", "governance structure", "risk management framework",
+        "risk management policy",
+    ],
+    "explainability": [
+        # analytics
+        "explainability", "interpretability", "shap", "lime", "feature importance",
+        # regulatory: borrower-facing transparency about how a decision was made
+        "key fact statement", "key facts statement", "disclosures to borrowers",
+        "disclosure to the borrower",
+    ],
+    "fairness": [
+        # analytics
+        "disparate impact", "demographic parity", "protected group",
+        "discrimination", "adverse impact",
+        # regulatory: fair conduct and customer protection
+        "fair conduct", "fairness in conduct", "grievance redressal",
+        "customer protection", "cooling-off period",
+    ],
+    "drift": [
+        # analytics
+        "population stability index", "distribution shift", "data drift",
+        "kolmogorov-smirnov", "ks statistic",
+        # regulatory: ongoing monitoring and periodic re-assessment
+        "periodic assessment", "periodic review", "early warning",
+        "ongoing monitoring", "continuous monitoring",
+    ],
+    "compliance": [
+        # the 2014 excerpt's subject, retained so the regression fixture and
+        # any future prudential source still clear the bar
+        "non-performing", "non performing", "npa", "advances", "provisioning",
+        "prudential",
+        # regulatory: compliance with the regulator's own requirements
+        "regulatory requirement", "statutory and regulatory", "supervisory",
+        "compliance with all applicable", "regulatory and supervisory",
+    ],
 }
 
+# The text put to the retriever for each section.
+#
+# Phrased in the vocabulary of the INSTRUMENTS, not of the analytics. A query
+# reading "population stability index distribution shift" cannot match an RBI
+# Direction, because no RBI Direction contains those words; a query about
+# periodic assessment and monitoring can. The analytics question each section
+# answers is unchanged -- only the words used to go looking for the regulation
+# that governs it.
 SECTION_QUERIES = {
-    "model": "model risk management governance documentation validation records credit scoring",
-    "explainability": "model explainability global feature importance transparency decisions shap lime",
-    "fairness": "fairness non-discrimination disparate impact protected demographic parity selection rate",
-    "drift": "data drift population stability index distribution shift ks statistic",
-    "compliance": "What is a non performing asset prudential norms classification advances",
+    "model": "risk management framework governance board approved policy validation of systems",
+    "explainability": "disclosures to borrowers key facts statement transparency of terms",
+    "fairness": "fair conduct with borrowers and customer protection obligations",
+    "drift": "monitoring review periodic assessment of performance",
+    "compliance": "compliance with all applicable statutory and regulatory requirements audit",
 }
 
 
@@ -322,11 +390,37 @@ def _retrieve_section_evidence(
         return RetrievedEvidence(evidence_status="NOT_FOUND", citations=[])
 
     retrieved_text = outcome.get("retrieved_text", "")
-    text_lower = retrieved_text.lower()
 
-    # Apply genuine Python relevance bar
+    # Apply a genuine Python relevance bar, against the retrieved text AND the
+    # PDF-native heading the text sits under.
+    #
+    # WHY THE HEADING COUNTS
+    #     The bar matches literal phrases, and a chunk is a fixed-width window
+    #     that frequently starts after its clause's heading. Clause 8 of the
+    #     2025 Digital Lending Directions is headed "Disclosures to borrowers"
+    #     -- which IS one of this section's keywords -- yet its continuation
+    #     chunks say "KFS" rather than "Key Fact Statement" and were rejected.
+    #     The evidence was relevant; only the wording of that particular
+    #     window was not.
+    #
+    #     ``section_title`` is not a loosening of the vocabulary: it is the
+    #     document's own short heading for the passage, extracted verbatim by
+    #     app/rag/pdf_extract.py, and the SAME keyword list is applied to it.
+    #     Measured over all 1,264 indexed chunks, admitting the heading moves
+    #     the share of the corpus any section will accept from 1.4% to 2.2%,
+    #     and every one of the additional chunks sits under a heading on that
+    #     section's own topic -- "Disclosures to borrowers", "Grievance
+    #     redressal", "Periodic review of IT related risks". Generic RBI
+    #     governance prose and unrelated text are still rejected by all five
+    #     sections.
+    #
+    #     Only the TOP hit is considered, unchanged. Searching further down
+    #     the ranking was measured too and never once engaged: the accepted
+    #     hit is rank 1 for every section, so it would have been dead code.
     keywords = SECTION_RELEVANCE_KEYWORDS.get(section_key, [])
-    is_relevant = any(kw in text_lower for kw in keywords)
+    section_title = (outcome.get("provenance") or {}).get("section_title") or ""
+    haystack = f"{retrieved_text}\n{section_title}".lower()
+    is_relevant = any(kw in haystack for kw in keywords)
 
     if not is_relevant or not retrieved_text.strip():
         return RetrievedEvidence(evidence_status="NOT_FOUND", citations=[])
@@ -353,23 +447,19 @@ def _retrieve_section_evidence(
             top_evidence = rbi_evidence[0]
 
     if top_evidence is not None:
-        citation = Citation(
-            source=f"INTERIM SINGLE-DOC: {top_evidence.title or source_doc}",
-            locator=f"chunk #{top_evidence.chunk_index}",
-            quote=top_evidence.text.strip(),
-            provenance="interim_single_document",
-            source_url=top_evidence.source_url,
-            publication_date=top_evidence.publication_date,
-            document_type=top_evidence.document_type,
-            is_excerpt=top_evidence.is_excerpt,
-            is_current=top_evidence.is_current,
-        )
+        # One shared builder, so the report and the compliance route cannot
+        # disagree about what a citation contains.
+        from app.rag.citations import citation_from_evidence
+
+        citation = citation_from_evidence(top_evidence)
     else:
+        # A retrieval double that returns only the flat shape. It carries no
+        # page or clause, and none is manufactured for it.
         citation = Citation(
-            source=f"INTERIM SINGLE-DOC: {source_doc}",
+            source=source_doc,
             locator=f"chunk #{chunk_idx}",
             quote=retrieved_text.strip(),
-            provenance="interim_single_document",
+            provenance="interim_multi_document",
         )
     return RetrievedEvidence(evidence_status="RETRIEVED", citations=[citation])
 

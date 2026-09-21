@@ -352,8 +352,37 @@ def get_compliance(
         microfinance=microfinance,
         uses_external_model_vendor=uses_external_model_vendor,
     )
+
+    # Structured citations for the evidence the rule engine already received.
+    #
+    # Attached HERE rather than inside evaluate_compliance() for the same
+    # reason verified_requirements is: the engine's output shape is asserted
+    # exactly by tests/compliance/test_evaluate_compliance.py, and its
+    # evidence_chunks list (chunk ids) is part of that contract. This is the
+    # same evidence, expressed as something a reviewer can open -- document,
+    # page, the clause the PDF prints, and the register's cross-reference
+    # where one exists.
+    #
+    # It changes no status. Every finding's status was already decided by the
+    # rule engine from technical findings alone, before this line runs.
+    from app.rag.citations import citations_from_evidence
+
+    findings = [
+        {
+            **finding,
+            "citations": [
+                citation.model_dump()
+                for citation in citations_from_evidence(
+                    evidence_by_rule.get(finding["rule_id"])
+                )
+            ],
+        }
+        for finding in result["findings"]
+    ]
+
     return {
         **result,
+        "findings": findings,
         "verified_requirements": assess_verified_requirements(
             profile,
             model_id=adapter.model_id if adapter is not None else None,

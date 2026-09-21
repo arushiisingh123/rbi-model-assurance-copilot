@@ -236,3 +236,100 @@ def test_corpus_path_matches_the_phase0_smoke_test_document():
     assert RBI_IRAC_ADVANCES_2014.resolved_path() == (
         Path(__file__).resolve().parents[2] / DOCUMENT_PATH
     ).resolve()
+
+
+# ---------------------------------------------------------------------------
+# 7. Phase A: the manifest as the canonical corpus registry
+# ---------------------------------------------------------------------------
+
+
+def test_corpus_from_manifest_returns_only_downloaded_documents():
+    """A document nobody obtained must not enter the corpus.
+
+    A corpus entry for an absent document is a citation waiting to happen:
+    everything downstream treats corpus membership as "we have this".
+    """
+    from app.rbi.manifest import load_manifest
+    from app.rag.corpus import corpus_from_manifest
+
+    manifest = load_manifest()
+    corpus = corpus_from_manifest(manifest)
+
+    assert set(corpus.doc_ids()) == {d.document_id for d in manifest.citable()}
+    assert len(corpus) < len(manifest), "not every declared document is present"
+
+
+def test_corpus_from_manifest_files_all_exist_on_disk():
+    from app.rag.corpus import corpus_from_manifest
+
+    for source in corpus_from_manifest():
+        assert source.resolved_path().is_file(), source.doc_id
+
+
+def test_manifest_corpus_excludes_the_2014_regression_fixture():
+    """The fixture is not a manifest document and must not become one.
+
+    It exists to prove the non-PDF ingestion path still works. Folding it
+    into the manifest corpus would mean a manifest edit could silently
+    remove that proof.
+    """
+    from app.rag.corpus import corpus_from_manifest
+
+    assert RBI_IRAC_ADVANCES_2014.doc_id not in corpus_from_manifest()
+    # ...and it is still reachable where it always was.
+    assert APPROVED_CORPUS.get(RBI_IRAC_ADVANCES_2014.doc_id) is not None
+
+
+def test_approved_corpus_is_unchanged_by_the_manifest_work():
+    assert list_sources() == [RBI_IRAC_ADVANCES_2014]
+    assert len(APPROVED_CORPUS) == 1
+
+
+def test_manifest_metadata_is_copied_not_inferred():
+    """Currency is read from the entry, never derived from its status.
+
+    The NBFC outsourcing circular is recorded is_current=false while its
+    regulatory_status is a manifest-vocabulary value. Deriving one from the
+    other would silently promote an unverified document to "in force".
+    """
+    from app.rag.corpus import corpus_from_manifest
+
+    source = corpus_from_manifest().get("RBI-FS-OUTSOURCE-NBFC-2017")
+
+    assert source is not None
+    assert source.is_current is False
+    assert source.is_verified_current_regulation is False
+    assert source.reference_number == "RBI/2017-18/87; DNBR.PD.CC.No.090/03.10.001/2017-18"
+    assert source.issuing_authority == "Reserve Bank of India (RBI)"
+
+
+def test_a_downloaded_entry_missing_required_metadata_is_rejected():
+    """Silence about issuing authority must fail loudly, not default."""
+    from app.rbi.manifest import RBIDocument
+    from app.rag.corpus import ManifestSourceError, source_from_manifest_document
+
+    document = RBIDocument(
+        document_id="X", source="RBI", title="T", circular_number=None,
+        issued_date=None, effective_date=None, last_updated=None,
+        priority="tier_1", regulatory_status="current", source_url=None,
+        source_status="downloaded", local_path="data/x.pdf", storage_dir=None,
+        applies_to=(), excluded=(), applicability_verified=False,
+        applicability_note=None, requires_conditions={}, domain=(),
+        supersedes=(), superseded_by=(), related_documents=(),
+        project_mappings=(), retrieval_concepts=(), provisional=False,
+        provisional_note=None, scope_limit=None, raw={},
+    )
+
+    with pytest.raises(ManifestSourceError) as excinfo:
+        source_from_manifest_document(document)
+    assert "issuing_authority" in str(excinfo.value)
+
+
+def test_an_undownloaded_entry_cannot_become_a_source():
+    from app.rbi.manifest import load_manifest
+    from app.rag.corpus import ManifestSourceError, source_from_manifest_document
+
+    absent = load_manifest().unresolved()[0]
+
+    with pytest.raises(ManifestSourceError):
+        source_from_manifest_document(absent)

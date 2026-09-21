@@ -24,10 +24,20 @@ The one indexed document is
 Master Circular on Income Recognition, Asset Classification and Provisioning.
 It is **historical**, and it is an **excerpt**, and the platform labels it as
 both (`is_current: False`, `is_excerpt: True`, provenance
-`interim_single_document`).
+`interim_multi_document`).
 
-**Consequence, stated plainly:** of the report's five sections, one can be
-grounded in a retrieved citation. The other four return `NOT_FOUND`.
+**Superseded.** The above described the corpus when it held only that one
+excerpt. Six current RBI Directions have since been obtained and indexed, and
+the 2014 excerpt is no longer part of the production retrieval corpus -- it is
+kept on disk and in `APPROVED_CORPUS` purely as the regression fixture that
+proves the non-PDF ingestion path still works.
+
+**Current position:** all five report sections retrieve evidence from the
+current Directions. That is coverage of the report's five SECTIONS, not
+coverage of RBI regulation: the corpus is six instruments out of the
+twenty-three the manifest declares, and a topic absent from those six still
+returns `NOT_FOUND`, which means no verified evidence was retrieved -- never
+that no RBI rule exists.
 
 `NOT_FOUND` means *no verified source was retrieved from the indexed corpus*.
 It does **not** mean no RBI rule exists. The platform does not fill the gap from
@@ -253,9 +263,18 @@ Status of each, checked against the repository:
 | IT Governance, Risk, Controls & Assurance Practices, 2023 | Yes — `RBI-IT-GOV-2023` | **No** | No | `current` — binding, where applicable |
 | Fair Practices Code / legacy | Yes — `RBI-FPC-LENDERS` (`historical`) and `RBI-FPC-INTEREST-2024` (`current`) | **No** | No | mixed |
 
+**SUPERSEDED (2026-09-22).** The table above records the position when this
+section was written: none of the five was present. Since then the RBI (Digital
+Lending) Directions, 2025 and the IT Governance Directions, 2023 HAVE been
+obtained, indexed, and are cited with page and PDF-native clause. The NBFC
+Scale Based Regulation Directions, 2023 and the FREE-AI Committee Report remain
+absent. See section 1 for the current corpus.
+
+The principle below still holds exactly, and applies to every document that is
+still absent:
+
 **No requirement text, paragraph number, clause reference or citation has been
-taken from any of these five**, because none of the five documents is present in
-the repository. Doing so would have meant inventing regulatory content, which is
+taken from a document that is not present in the repository.** Doing so would have meant inventing regulatory content, which is
 the one thing a compliance platform must never do.
 
 Two specific cautions recorded rather than resolved:

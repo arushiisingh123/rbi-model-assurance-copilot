@@ -22,3 +22,7 @@ joblib
 pydantic
 groq==1.7.0
 xgboost
+# Reads the RBI source PDFs in data/rbi_sources/. Chosen over pdfplumber and
+# PyMuPDF because it is pure Python (no system binaries), permissively
+# licensed, and preserves the line breaks that RBI clause numbering sits on.
+pypdf

@@ -38,6 +38,7 @@ import { useAssurance } from "../hooks/AssuranceContext";
 import { useModels } from "../hooks/ModelContext";
 import { useDomainData } from "../hooks/useDomainData";
 import { SourceNotice } from "../components/SourceNotice";
+import { SourceCitationList } from "../components/SourceCitation";
 import {
   DataHandlingNotice,
   RegulatoryGroundingNotice,
@@ -248,6 +249,7 @@ function DeclaredContext({ context }) {
 }
 
 function FindingRow({ finding }) {
+  const citations = finding.citations || [];
   const chunks = finding.evidence_chunks || [];
   return (
     <details className="rounded-md border border-base-300 bg-base-100">
@@ -256,7 +258,7 @@ function FindingRow({ finding }) {
         <span className="font-mono text-xs text-base-content/70">{finding.rule_id}</span>
         <span className="text-sm flex-1 min-w-[16rem]">{finding.rule_description}</span>
         <span className="text-xs text-base-content/50">
-          {chunks.length} evidence chunk{chunks.length === 1 ? "" : "s"}
+          {citations.length} source{citations.length === 1 ? "" : "s"} cited
         </span>
       </summary>
       <div className="px-4 pb-4 pt-1 space-y-4 border-t border-base-300">
@@ -274,23 +276,27 @@ function FindingRow({ finding }) {
 
         <div>
           <h4 className="text-xs uppercase tracking-wide text-base-content/50 mb-2">
-            Retrieved RBI evidence
+            RBI sources discussing this topic
           </h4>
-          {chunks.length ? (
-            <ul className="space-y-1.5">
-              {chunks.map((chunk, index) => (
-                <li
-                  key={index}
-                  className="font-mono text-xs bg-base-200/60 border border-base-300 rounded px-3 py-2 break-all"
-                >
-                  {chunk}
-                </li>
-              ))}
-            </ul>
+          <p className="mb-3 text-xs leading-relaxed text-base-content/60">
+            Retrieved from the indexed RBI Directions because they cover the
+            same subject as this check. They show you where the regulation can
+            be read. They did <strong>not</strong> decide the result above —
+            that comes from the model analytics alone.
+          </p>
+          {citations.length ? (
+            <>
+              <SourceCitationList citations={citations} />
+              {chunks.length ? (
+                <p className="mt-2 text-xs text-base-content/40 font-mono break-all">
+                  trace: {chunks.join(", ")}
+                </p>
+              ) : null}
+            </>
           ) : (
             <Unavailable
-              title="No RBI evidence attached to this finding"
-              reason="The retrieval layer returned no supporting chunk for this rule. The finding's status is still the rule engine's own deterministic evaluation — but it is not grounded in retrieved regulatory text, so it must not be cited as such."
+              title="No RBI source retrieved for this check"
+              reason="Retrieval found no passage in the indexed Directions covering this topic. The finding's status is still the rule engine's own deterministic evaluation — but it is not accompanied by regulatory text, so it must not be presented as regulatory evidence. It does not mean no RBI rule exists."
             />
           )}
         </div>

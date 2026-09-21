@@ -393,14 +393,72 @@ def test_F_no_requirement_text_is_invented_for_unresolved_documents():
         assert requirements_for_document(document) == []
 
 
-def test_F_assessment_states_that_nothing_could_be_assessed():
+def test_F_document_obtained_but_requirements_unmapped_says_so():
+    """The corpus HAS documents and still assessed nothing. It must say which.
+
+    "We do not have the document" and "we have it but have not mapped its
+    requirements" both yield zero assessed requirements, and both are honest.
+    They are not the same statement: the first is fixed by obtaining a
+    source, the second by building extraction. A reader who cannot tell them
+    apart cannot tell which.
+    """
     assessment = assess_rbi_requirements(
         {}, context=build_assessment_context(regulated_entity_type="nbfc")
     )
     joined = " ".join(assessment.notes).lower()
 
-    assert "no source document" in joined
+    assert assessment.corpus_coverage["citable_documents"] > 0
+    assert "have been obtained" in joined
+    assert "no requirement has been extracted or mapped" in joined
     assert "not a statement of compliance" in joined
+    # It names them, so the reader knows what is actually held.
+    assert "rbi-it-outsource-2023" in joined
+
+    # The wrong explanation must NOT fire: documents were obtained.
+    assert "no source document in the rbi corpus has been obtained" not in joined
+
+
+def test_F_empty_corpus_still_says_nothing_was_obtained():
+    """The original message must survive for a corpus with no documents.
+
+    Exercised against a manifest whose entries are all unobtained, so the
+    first branch is reachable again once the real corpus has content.
+    """
+    manifest = load_manifest()
+    absent = RBIManifest(
+        [d for d in manifest.all() if not d.is_citable()]
+    )
+
+    assessment = assess_rbi_requirements(
+        {},
+        context=build_assessment_context(regulated_entity_type="nbfc"),
+        manifest=absent,
+    )
+    joined = " ".join(assessment.notes).lower()
+
+    assert assessment.corpus_coverage["citable_documents"] == 0
+    assert "no source document in the rbi corpus has been obtained" in joined
+    assert "not a statement of compliance" in joined
+    # And not the other explanation, which would be false here.
+    assert "have been obtained" not in joined
+
+
+def test_F_neither_reporting_branch_changes_a_status():
+    """This was a reporting fix. NOT_ASSESSED must mean what it always did."""
+    manifest = load_manifest()
+    absent = RBIManifest([d for d in manifest.all() if not d.is_citable()])
+    context = build_assessment_context(regulated_entity_type="nbfc")
+
+    with_docs = assess_rbi_requirements({}, context=context)
+    without_docs = assess_rbi_requirements({}, context=context, manifest=absent)
+
+    for assessment in (with_docs, without_docs):
+        assert assessment.findings
+        assert {f.status for f in assessment.findings} == {"NOT_ASSESSED"}
+        for finding in assessment.findings:
+            assert finding.requirement_id.endswith(":UNASSESSED")
+            assert finding.reason
+        assert assessment.corpus_coverage["corpus_ready_for_compliance"] is False
 
 
 def test_F_applicability_still_filters_the_real_corpus():

@@ -266,8 +266,99 @@ class RBIRetriever:
         }
 
 
+# Built indexes, keyed by the corpus they were built from. See
+# _index_for_corpus() for why this is safe and what it deliberately does not
+# cache.
+_INDEX_CACHE: dict[tuple, ChunkVectorStore] = {}
+
+
+def _cache_key(corpus: RBICorpus, repo_root: Optional[Any]) -> tuple:
+    """Identity of a built index: which documents, from where.
+
+    Keyed on doc_ids and local paths rather than the corpus object, so two
+    equivalent corpora share one index and a corpus whose contents changed
+    gets a new one.
+    """
+    return (
+        tuple(sorted((s.doc_id, s.local_path) for s in corpus.all())),
+        str(repo_root) if repo_root is not None else None,
+    )
+
+
+def _index_for_corpus(
+    corpus: RBICorpus, repo_root: Optional[Any]
+) -> ChunkVectorStore:
+    """The index for ``corpus``, built once per process.
+
+    WHY CACHE AT ALL
+        Every /compliance request built a fresh index. Over the 2014 excerpt
+        that was 26 chunks and imperceptible. Over the real corpus it is
+        ~1,300 chunks across six PDFs, re-extracted and re-embedded per
+        request, which is not viable.
+
+    WHY THIS IS SAFE
+        The cached object is a READ-ONLY index. Every caller still gets its
+        own ``RBIRetriever``, and a retriever holds no mutable state -- the
+        same query against the same corpus returns the same evidence whether
+        or not another retriever exists. That is asserted directly by
+        tests/rag/test_rag_model_agnostic_isolation.py, which exists to catch
+        exactly this kind of shared-state regression.
+
+    WHAT IS NOT CACHED
+        Nothing per-model, per-run or per-request. The key is the corpus's
+        own identity, so a cache hit can only ever return an index over the
+        same documents read from the same paths.
+    """
+    key = _cache_key(corpus, repo_root)
+    store = _INDEX_CACHE.get(key)
+    if store is None:
+        store = ChunkVectorStore.in_memory()
+        store.rebuild_from_corpus(corpus, repo_root=repo_root)
+        _INDEX_CACHE[key] = store
+    return store
+
+
+def clear_index_cache() -> None:
+    """Drop every cached index.
+
+    For tests that change what is on disk under a corpus and need the next
+    build to read it again.
+    """
+    _INDEX_CACHE.clear()
+
+
+def default_corpus() -> RBICorpus:
+    """The corpus production retrieval runs over: the manifest's documents.
+
+    The manifest is the canonical registry of what this project actually
+    holds, so retrieval reads it rather than a second hardcoded list.
+
+    THE 2014 EXCERPT IS DELIBERATELY NOT HERE
+        It remains on disk and remains registered in ``APPROVED_CORPUS``, and
+        the ingestion and retrieval tests still run against it -- it is the
+        regression fixture that proves the non-PDF path works.
+
+        It is not in the LIVE corpus because it is a partial 2014 excerpt of a
+        superseded circular about asset classification (``is_excerpt=True``,
+        ``is_current=False``), with nothing to say about model assurance.
+        While the report's section queries were still written around it, it
+        had to stay indexed or report coverage fell to zero; now that those
+        queries ask about the obligations the current Directions actually
+        impose, keeping a historical excerpt in the retrievable set only
+        creates the chance of citing it.
+
+    Falls back to ``APPROVED_CORPUS`` when the manifest yields nothing, so a
+    deployment with no downloaded document still gets a working retriever
+    instead of an exception.
+    """
+    from app.rag.corpus import corpus_from_manifest
+
+    corpus = corpus_from_manifest()
+    return corpus if len(corpus) else APPROVED_CORPUS
+
+
 def build_default_retriever(
-    corpus: RBICorpus = APPROVED_CORPUS,
+    corpus: Optional[RBICorpus] = None,
     *,
     repo_root: Optional[Any] = None,
     max_distance: float = DEFAULT_MAX_DISTANCE,
@@ -275,14 +366,19 @@ def build_default_retriever(
     content_word_min_length: int = DEFAULT_CONTENT_WORD_MIN_LENGTH,
     default_top_k: int = DEFAULT_TOP_K,
 ) -> RBIRetriever:
-    """Build an in-memory index over ``corpus`` and return a retriever for it.
+    """Build (or reuse) an index over ``corpus`` and return a retriever for it.
 
-    Convenience for callers that just want "retrieval over the approved RBI
-    corpus" without wiring the store themselves. Offline and deterministic
-    (uses ``ChunkVectorStore.in_memory()`` and the deterministic embedding).
+    ``corpus`` defaults to ``default_corpus()`` -- the manifest's downloaded
+    documents. Pass ``APPROVED_CORPUS`` explicitly to retrieve over the 2014
+    text excerpt instead; several tests do exactly that, because they exercise
+    retrieval mechanics against a fixture rather than the real corpus.
+
+    Offline and deterministic (deterministic embedding, in-memory index). The
+    index is cached per corpus identity; the returned retriever is always a
+    fresh, stateless object.
     """
-    store = ChunkVectorStore.in_memory()
-    store.rebuild_from_corpus(corpus, repo_root=repo_root)
+    corpus = default_corpus() if corpus is None else corpus
+    store = _index_for_corpus(corpus, repo_root)
     return RBIRetriever(
         store,
         max_distance=max_distance,
@@ -295,6 +391,8 @@ def build_default_retriever(
 __all__ = [
     "RBIRetriever",
     "build_default_retriever",
+    "default_corpus",
+    "clear_index_cache",
     "EVIDENCE_RETRIEVED",
     "NO_VERIFIED_EVIDENCE",
     "EVIDENCE_STATUSES",

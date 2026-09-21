@@ -269,7 +269,15 @@ def test_fairness_group_records_preserve_their_fields(pipeline):
 
 
 def test_rag_provenance_survives_into_report(pipeline):
-    """Canonical source attribution must reach the citation, not be flattened."""
+    """Canonical source attribution must reach the citation, not be flattened.
+
+    The specific values moved when the live corpus did: the compliance section
+    used to cite a 2014 Master Circular excerpt and now cites one of the six
+    current Directions. The property under test is unchanged -- every
+    attribution field the retrieval layer holds must arrive intact -- so it is
+    asserted against the document the citation itself names rather than
+    against a hardcoded 2014 date.
+    """
     report = generate_report(
         **pipeline, llm_client=FakeGroqClient(), retrieval_fn=None
     )
@@ -279,37 +287,73 @@ def test_rag_provenance_survives_into_report(pipeline):
 
     citation = compliance["retrieved_evidence"]["citations"][0]
     assert citation["source_url"] and citation["source_url"].startswith("http")
-    assert citation["publication_date"] == "2014-07-01"
-    assert citation["document_type"] == "Master Circular"
-    assert citation["is_excerpt"] is True
-    assert citation["is_current"] is False
+    assert citation["publication_date"], "publication date was dropped"
+    assert citation["document_type"], "document type was dropped"
+    assert citation["is_excerpt"] is not None
+    assert citation["is_current"] is not None
+
+    # Structured location, which a reviewer can actually open.
+    assert isinstance(citation["page"], int) and citation["page"] >= 1
+    assert citation["source_clause"]
+    assert citation["reference_number"]
 
     # The original four fields remain intact.
     assert citation["quote"].strip()
-    assert "Master Circular" in citation["source"]
-    assert citation["locator"].startswith("chunk #")
-    assert citation["provenance"] == "interim_single_document"
+    assert citation["source"].strip()
+    assert citation["locator"].startswith("page ")
+    assert citation["provenance"] == "interim_multi_document"
 
 
-def test_excerpt_never_reported_as_current(pipeline):
-    """A 2014 excerpt must never be upgraded to current/binding regulation."""
+def test_a_historical_excerpt_is_never_reported_as_current(pipeline):
+    """A citation's currency must be its SOURCE's, never an upgrade.
+
+    Previously this asserted no citation was ever current -- correct when the
+    only indexed document was a 2014 excerpt, and wrong now that the corpus is
+    six Directions that genuinely ARE current. The safety property is the one
+    that matters and is unchanged: an excerpt may never be presented as
+    current, and no section may claim its regulatory basis is cited evidence.
+    """
     report = generate_report(
         **pipeline, llm_client=FakeGroqClient(), retrieval_fn=None
     )
 
     for section in report["sections"]:
         for citation in section["retrieved_evidence"]["citations"]:
-            assert citation["is_current"] is not True
-            if citation["is_excerpt"] is not None:
-                assert citation["is_excerpt"] is True
+            if citation["is_excerpt"] is True:
+                assert citation["is_current"] is not True, (
+                    "a partial excerpt was presented as current regulation"
+                )
             assert section["llm_interpretation"]["regulatory_basis"] != "cited_evidence"
+
+
+def test_the_2014_excerpt_stays_excerpt_and_non_current_when_retrieved():
+    """The regression fixture itself, retrieved directly and unchanged."""
+    from app.rag.corpus import APPROVED_CORPUS
+    from app.rag.retrieval import build_default_retriever
+
+    retriever = build_default_retriever(APPROVED_CORPUS)
+    evidence = _retrieve_section_evidence(
+        section_key="compliance",
+        query="What is a non performing asset prudential norms classification advances",
+        retrieval_fn=retriever,
+    )
+
+    assert evidence.evidence_status == "RETRIEVED"
+    citation = evidence.citations[0]
+    assert citation.is_excerpt is True
+    assert citation.is_current is False
+    # It has no pages, so it claims none.
+    assert citation.page is None
+    assert citation.source_clause is None
+    assert citation.locator.startswith("chunk #")
 
 
 def test_rag_not_found_produces_no_fabricated_evidence():
     """An irrelevant query yields no citation and no regulatory basis."""
+    from app.rag.corpus import APPROVED_CORPUS
     from app.rag.retrieval import build_default_retriever
 
-    retriever = build_default_retriever()
+    retriever = build_default_retriever(APPROVED_CORPUS)
     evidence = _retrieve_section_evidence(
         section_key="fairness",
         query=SECTION_QUERIES["fairness"],
@@ -321,18 +365,67 @@ def test_rag_not_found_produces_no_fabricated_evidence():
 
 
 def test_not_found_sections_keep_regulatory_basis_none(pipeline):
+    """A section that retrieved nothing must claim no regulatory basis.
+
+    Driven by a retriever that finds nothing, rather than by the live corpus.
+    The live corpus now clears the relevance bar for all five sections, so
+    relying on it to produce a NOT_FOUND section meant this property stopped
+    being exercised the moment retrieval improved -- and it is exactly the
+    property that must survive retrieval getting better OR worse.
+    """
+
+    def retrieves_nothing(*, query):
+        return {
+            "query": query,
+            "retrieved_text": "General administrative correspondence.",
+            "source": "irrelevant-source",
+            "chunk_index": 0,
+        }
+
     report = generate_report(
-        **pipeline, llm_client=FakeGroqClient(), retrieval_fn=None
+        **pipeline, llm_client=FakeGroqClient(), retrieval_fn=retrieves_nothing
     )
 
     not_found = [
         s for s in report["sections"]
         if s["retrieved_evidence"]["evidence_status"] == "NOT_FOUND"
     ]
-    assert not_found
+    assert len(not_found) == 5, "every section should have found nothing here"
     for section in not_found:
         assert section["retrieved_evidence"]["citations"] == []
         assert section["llm_interpretation"]["regulatory_basis"] == "none"
+
+
+def test_every_live_section_now_retrieves_current_regulation(pipeline):
+    """C1 acceptance: the report reaches the CURRENT corpus, not the fixture.
+
+    Before Phase C the report's section queries and relevance keywords were
+    written around the 2014 IRAC excerpt, so exactly one section retrieved
+    anything and that one citation was a superseded excerpt. Coverage is
+    asserted as a floor, not a fixed number, so broadening the corpus later
+    cannot fail this spuriously.
+    """
+    report = generate_report(
+        **pipeline, llm_client=FakeGroqClient(), retrieval_fn=None
+    )
+
+    retrieved = [
+        s for s in report["sections"]
+        if s["retrieved_evidence"]["evidence_status"] == "RETRIEVED"
+    ]
+    assert len(retrieved) >= 3, (
+        "the report should now reach the current RBI Directions for most "
+        "sections; before Phase C only one section retrieved anything"
+    )
+
+    for section in retrieved:
+        citation = section["retrieved_evidence"]["citations"][0]
+        # Current regulation, not the historical excerpt.
+        assert citation["is_excerpt"] is False
+        assert citation["is_current"] is True
+        # ...and locatable in the document it names.
+        assert isinstance(citation["page"], int)
+        assert citation["source_clause"]
 
 
 # ----------------------------------------------------------------------
@@ -398,7 +491,7 @@ def test_citation_new_fields_are_optional():
         source="INTERIM SINGLE-DOC: x",
         locator="chunk #0",
         quote="text",
-        provenance="interim_single_document",
+        provenance="interim_multi_document",
     )
     assert citation.source_url is None
     assert citation.publication_date is None

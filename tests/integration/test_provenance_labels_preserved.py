@@ -77,8 +77,8 @@ def test_report_endpoint_fallback_stays_mock(monkeypatch):
     assert any("FALLBACK MOCK REPORT" in d for d in body["disclaimers"])
 
 
-def test_citation_provenance_interim_single_document(real_pipeline):
-    """Verify that retrieved citations carry interim_single_document provenance and illustrative_rule_only basis."""
+def test_citation_provenance_interim_multi_document(real_pipeline):
+    """Verify that retrieved citations carry interim_multi_document provenance and illustrative_rule_only basis."""
     out = generate_report(
         model=real_pipeline["model"],
         explainability=real_pipeline["explainability"],
@@ -95,7 +95,7 @@ def test_citation_provenance_interim_single_document(real_pipeline):
         interp = s["llm_interpretation"]
         assert ev["evidence_status"] == "RETRIEVED"
         assert len(ev["citations"]) > 0
-        assert ev["citations"][0]["provenance"] == "interim_single_document"
+        assert ev["citations"][0]["provenance"] == "interim_multi_document"
         assert interp["regulatory_basis"] == "illustrative_rule_only"
         assert interp["regulatory_basis"] != "cited_evidence"
 

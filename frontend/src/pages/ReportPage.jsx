@@ -17,6 +17,7 @@
  */
 import { getReport } from "../api/report";
 import { IdentityBar } from "../components/IdentityBar";
+import { SourceCitation } from "../components/SourceCitation";
 import {
   AsyncSection,
   Card,
@@ -29,51 +30,6 @@ import { useModels } from "../hooks/ModelContext";
 import { useApiResource } from "../hooks/useApiResource";
 import { timestamp } from "../utils/format";
 
-function CitationBlock({ citation }) {
-  return (
-    <div className="rounded border border-base-300 bg-base-200/50 p-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="font-medium">{citation.source}</span>
-        {citation.locator && (
-          <span className="font-mono text-base-content/60">{citation.locator}</span>
-        )}
-        {citation.is_excerpt && (
-          <span className="badge badge-ghost border-base-300 badge-sm">excerpt</span>
-        )}
-        {citation.is_current === false && (
-          <span
-            className="badge badge-warning badge-sm"
-            title="The backend flags this source as not current."
-          >
-            not current
-          </span>
-        )}
-        {citation.document_type && (
-          <span className="text-base-content/50">{citation.document_type}</span>
-        )}
-      </div>
-      {citation.quote && (
-        <blockquote className="mt-2 border-l-2 border-base-300 pl-3 text-sm italic text-base-content/75">
-          {citation.quote}
-        </blockquote>
-      )}
-      <div className="mt-2 flex flex-wrap gap-4 text-xs text-base-content/50">
-        {citation.publication_date && <span>published {citation.publication_date}</span>}
-        {citation.provenance && <span>provenance: {citation.provenance}</span>}
-        {citation.source_url && (
-          <a
-            className="link link-primary"
-            href={citation.source_url}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            source
-          </a>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function ReportSectionCard({ section }) {
   const finding = section.technical_finding;
@@ -128,7 +84,7 @@ function ReportSectionCard({ section }) {
           ) : retrieved?.citations?.length ? (
             <div className="space-y-2">
               {retrieved.citations.map((citation, index) => (
-                <CitationBlock key={index} citation={citation} />
+                <SourceCitation key={index} citation={citation} />
               ))}
             </div>
           ) : (
@@ -179,17 +135,86 @@ function ReportSectionCard({ section }) {
         </div>
 
         {section.supporting_evidence?.length ? (
-          <details className="border-t border-base-300 pt-4">
-            <summary className="cursor-pointer select-none text-xs uppercase tracking-wide text-base-content/50">
-              Supporting evidence records ({section.supporting_evidence.length})
-            </summary>
-            <pre className="mt-2 text-xs bg-base-200/60 border border-base-300 rounded p-3 overflow-x-auto max-h-80">
-              {JSON.stringify(section.supporting_evidence, null, 2)}
-            </pre>
-          </details>
+          <SupportingEvidence records={section.supporting_evidence} />
         ) : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Traceability records carried alongside a section.
+ *
+ * These are the platform's own evidence records (fairness groups, importance
+ * values, verified RBI requirements), not retrieved regulatory text. They were
+ * previously dumped as raw JSON, which is unreadable for the people this page
+ * is for. Rendered as a table instead, with the full record still reachable
+ * for anyone who needs it.
+ *
+ * A "rbi_verified_requirement" record is a clause from the register with an
+ * applicability and an evidence status -- never a pass.
+ */
+function SupportingEvidence({ records }) {
+  const byType = records.reduce((acc, record) => {
+    const type = record.evidence_type || "unknown";
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <details className="border-t border-base-300 pt-4">
+      <summary className="cursor-pointer select-none text-xs uppercase tracking-wide text-base-content/50">
+        Traceability records ({records.length})
+      </summary>
+
+      <p className="mt-2 text-xs text-base-content/60">
+        Produced by this platform for traceability. They are not retrieved
+        regulatory text, and none of them is a statement of compliance.
+      </p>
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        {Object.entries(byType).map(([type, count]) => (
+          <span
+            key={type}
+            className="badge badge-ghost border-base-300 badge-sm font-mono"
+          >
+            {type} · {count}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-3 overflow-x-auto max-h-80">
+        <table className="table table-xs">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Reference</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {records.slice(0, 50).map((record, index) => (
+              <tr key={index}>
+                <td className="font-mono text-xs">{record.evidence_type}</td>
+                <td className="font-mono text-xs">
+                  {record.requirement_id || record.clause || record.feature ||
+                    record.group || "—"}
+                </td>
+                <td className="text-xs">
+                  {record.requirement || record.status || record.reason || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {records.length > 50 && (
+          <p className="mt-2 text-xs text-base-content/50">
+            Showing the first 50 of {records.length}. The full set is in the
+            downloaded report.
+          </p>
+        )}
+      </div>
+    </details>
   );
 }
 

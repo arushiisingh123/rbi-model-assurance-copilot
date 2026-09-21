@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.rag.chunking import chunk_documents
-from app.rag.corpus import RBISourceMetadata
+from app.rag.corpus import APPROVED_CORPUS, RBISourceMetadata
 from app.rag.ingestion import LoadedDocument
 from app.rag.retrieval import RBIRetriever, build_default_retriever
 from app.rag.vector_store import ChunkVectorStore
@@ -61,7 +61,7 @@ def _retriever_over(*docs: LoadedDocument, **kw) -> RBIRetriever:
 
 @pytest.fixture(scope="module")
 def real_retriever() -> RBIRetriever:
-    return build_default_retriever()
+    return build_default_retriever(APPROVED_CORPUS)
 
 
 @pytest.fixture(scope="module")

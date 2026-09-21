@@ -67,10 +67,14 @@ the API is unreachable.
 - **Compliance rules are illustrative.** The rule engine is real; the rules
   are not verified against binding RBI regulation, so compliance output
   carries `is_mock: True`.
-- **RAG evidence coverage is one source.** The approved corpus holds a
-  single 2014 excerpt, so real retrieval grounds 1 of 5 report sections.
-  `NOT_FOUND` means nothing was retrieved from the indexed corpus — not
-  that no RBI rule exists. This is not complete regulatory coverage.
+- **RAG evidence coverage is six instruments, not all of RBI.** The
+  production corpus is the six verified RBI Directions recorded as
+  `downloaded` in `app/rbi/corpus_manifest.json`; real retrieval grounds all
+  5 report sections from them. That is coverage of the report's five
+  SECTIONS, not of RBI regulation: the manifest declares 23 instruments and
+  17 have not been obtained. `NOT_FOUND` means nothing was retrieved from the
+  indexed corpus — not that no RBI rule exists. The 2014 excerpt is retained
+  only as a regression fixture and is excluded from production retrieval.
 - **Report generation falls back to a labelled mock** when `GROQ_API_KEY`
   is absent or live generation fails.
 - **Drift is not production monitoring.** By default it compares the

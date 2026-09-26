@@ -4,35 +4,66 @@ AI Model Risk & Assurance Copilot for RBI Compliance.
 
 ## Current Status
 
-Phase 4 — Dashboard + UX (implemented; approved by Manas 2026-09-13)
-
-Phases 0 through 3 were completed and signed off: Foundation on 2026-08-27,
+Phases 0 through 4 were completed and signed off: Foundation on 2026-08-27,
 Independent Module Development on 2026-09-05, Cross-Module Integration on
-2026-09-07, and RAG + LLM on 2026-09-11. See `docs/decisions.md` for each
-sign-off record.
+2026-09-07, RAG + LLM on 2026-09-11, and Dashboard + UX on 2026-09-13. See
+`docs/decisions.md` for each sign-off record.
 
-Phase 4 presents every analytical result the system already calculates
-through domain-owned dashboard panels under `dashboard/panels/`, one per
-module, with `dashboard/dashboard_app.py` acting as a shell that fetches
-data and delegates rendering. The implementation is merged into `main` and
-the checkpoint is **approved by Manas for this project review** — see
-`docs/decisions.md`, "Phase 4 checkpoint sign-off", and the filled Definition
-of Done in `docs/phase4-allocation.md` §10 (22 of 22 PASS).
+Delivered since Phase 4, and current:
 
-## Running it
+- **Model-agnostic assurance (Phase 5).** Three models are registered and
+  routable end to end: two in-process scikit-learn models and one XGBoost
+  model served over HTTP through a REST adapter.
+- **A monitoring lane** with two-window feature drift, prediction drift and
+  monitored fairness, plus its own API and dashboard page.
+- **The React frontend** (`frontend/`), now the primary UI.
+- **Verified RBI integration.** Six RBI Directions are downloaded, indexed
+  (1,264 chunks) and cited with the PDF page and the clause the document
+  itself prints. A separate hand-verified register holds 16 clauses read from
+  official RBI instruments.
+
+Scope limits that still hold, and must not be overstated: the corpus is a
+curated subset (6 of the 23 instruments the manifest declares), all 16
+verified requirements are attestation-only and can never report `PASS`, and
+`NOT_FOUND` means no verified evidence was retrieved — never that no RBI rule
+exists. There is no authentication, no persistence and no deployment
+tooling; those are out of scope.
+
+## Running it for a demo
+
+Three processes. Use three terminals, in this order.
+
+**1. Backend API** — required.
 
 ```bash
 pip install -r requirements.txt
-python -m app.models.train                 # creates the model artifact
-uvicorn app.api.main:app                   # API on http://127.0.0.1:8000
-python run_assurance.py                    # end-to-end CLI summary
+python -m app.models.train                 # one-off: creates the model artifact
+uvicorn app.api.main:app --port 8000       # API on http://127.0.0.1:8000
 ```
 
-Optional, for the synthetic bank (a REST-served model the platform assures
-over HTTP, exactly as it would a real bank's endpoint):
+**2. Synthetic bank model service** — required *only* if you intend to select
+`synthetic-bank-credit-v1` in the UI. It is a real model served over HTTP,
+exactly as a bank's own endpoint would be, so the platform reaches it across
+the network rather than importing it.
 
 ```bash
 uvicorn app.synthetic_bank.service:app --port 8100
+```
+
+Without this process that one model is unreachable and its pages return
+HTTP 502 naming the cause. The two `german-credit-*` models run in-process
+and need nothing extra.
+
+**3. Frontend** — see below. Open <http://localhost:5173>.
+
+First-request note: the RBI retrieval index is built in memory on first use,
+so the first Compliance or Report request takes a few seconds and every one
+after is fast. Load the Compliance page once before presenting.
+
+Optional CLI summary, no frontend needed:
+
+```bash
+python run_assurance.py
 ```
 
 ### Frontend

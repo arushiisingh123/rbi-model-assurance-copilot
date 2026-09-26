@@ -251,17 +251,57 @@ def test_generate_report_missing_api_key_raises_unavailable(sample_inputs, monke
     assert "GROQ_API_KEY" in str(exc_info.value)
 
 
-def test_report_endpoint_fallback_on_missing_key(monkeypatch):
-    """Verify /report endpoint returns HTTP 200 with mock fallback when GROQ_API_KEY is unset."""
+def test_report_endpoint_without_a_key_is_real_but_has_no_narrative(monkeypatch):
+    """No LLM provider must not mean a stored fixture.
+
+    This previously returned MOCK_REPORT_RESULT, whose disclaimers still
+    described a single 2014 excerpt and whose coverage read 1 of 5 -- while the
+    PDF generated from the same page cited six current RBI Directions. One demo
+    flow contradicted itself.
+
+    The report is now genuinely produced and simply omits the narrative layer.
+    The technical findings and retrieved RBI evidence are real; no prose is
+    invented to fill the gap.
+    """
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     client = TestClient(app)
-    response = client.get("/report")
+    response = client.get("/report?model_id=german-credit-logistic-regression")
 
     assert response.status_code == 200
-    body = response.json()
-    parsed = ReportResult(**body)
-    assert parsed.is_mock is True
-    assert any("FALLBACK MOCK REPORT" in d for d in parsed.disclaimers)
+    parsed = ReportResult(**response.json())
+
+    # Nothing is mocked, and the report names the model and run it describes.
+    assert parsed.is_mock is False
+    assert parsed.model_id == "german-credit-logistic-regression"
+    assert parsed.assurance_run_id
+
+    # The narrative layer is absent rather than fabricated.
+    assert parsed.sections
+    assert all(section.llm_interpretation is None for section in parsed.sections)
+    assert any("NO LLM NARRATIVE" in d for d in parsed.disclaimers)
+
+    # Coverage is measured, not asserted from a fixture.
+    assert parsed.evidence_coverage.total == len(parsed.sections)
+    assert (
+        parsed.evidence_coverage.retrieved + parsed.evidence_coverage.not_found
+        == parsed.evidence_coverage.total
+    )
+
+    # The stale pre-integration claims must never reappear.
+    blob = " ".join(parsed.disclaimers).lower()
+    for stale in (
+        "1 of 5",
+        "single approved rbi excerpt",
+        "irac advances 2014",
+        "single-document excerpt",
+        "upcoming verified regulatory corpus",
+    ):
+        assert stale not in blob, f"stale claim resurfaced: {stale!r}"
+
+    # The honest caveats must survive.
+    assert any("not mean no rbi rule exists" in d.lower() for d in parsed.disclaimers)
+    assert any("never establish rbi compliance" in d.lower() for d in parsed.disclaimers)
+    assert any("not evidence of the organisational controls" in d.lower() for d in parsed.disclaimers)
 
 
 def test_report_endpoint_fallback_on_groq_exception(monkeypatch, sample_inputs):

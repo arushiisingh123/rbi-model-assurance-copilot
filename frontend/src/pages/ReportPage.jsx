@@ -357,6 +357,33 @@ export function ReportPage() {
                 />
               </dl>
 
+              {/* The normal case for this project: no LLM provider configured, so
+                  the narrative layer is absent while the technical and
+                  regulatory layers are real. Stated plainly so a reader does
+                  not mistake a missing narrative for missing evidence -- or for
+                  a mock. */}
+              {!data.is_mock &&
+                data.sections?.some((section) => !section.llm_interpretation) && (
+                  <div className="mt-4 rounded border border-info/40 bg-info/10 p-4">
+                    <p className="text-sm font-semibold">
+                      No written narrative in this report
+                    </p>
+                    <p className="mt-1 text-sm text-base-content/75">
+                      No report-generation provider is configured, so the
+                      interpretation layer was not produced. Everything else on
+                      this page was computed in this run: the technical findings
+                      come from the analytical modules and the RBI evidence from
+                      the retrieval pipeline over the indexed Directions. No
+                      text has been invented to fill the gap, and nothing here
+                      is a stored fixture.
+                    </p>
+                    <p className="mt-2 text-sm text-base-content/75">
+                      The downloadable PDF remains the authoritative detailed
+                      artefact and reports the same run.
+                    </p>
+                  </div>
+                )}
+
               {data.is_mock && (
                 <div className="mt-4 rounded border border-warning/40 bg-warning/10 p-4">
                   <p className="text-sm font-semibold text-warning-content/90">

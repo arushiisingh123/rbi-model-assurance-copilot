@@ -308,6 +308,20 @@ function FindingRow({ finding }) {
           <Field label="Assurance run" value={finding.assurance_run_id} mono />
         </dl>
 
+        {/* The rule's own provenance, straight from app/rbi/rules. Shown so a
+            FAIL here can never be mistaken for a verified regulatory breach. */}
+        {finding.rbi_source && (
+          <p className="rounded border border-base-300 bg-base-200/50 p-3 text-xs leading-relaxed text-base-content/70">
+            <span className="font-semibold">Rule provenance: </span>
+            <span className="font-mono">{finding.rbi_source}</span>
+            <span className="block mt-1">
+              This check is a project-defined sample rule. Its threshold is an
+              engineering convention, not an RBI requirement, and its status
+              says nothing about regulatory compliance.
+            </span>
+          </p>
+        )}
+
         <div>
           <h4 className="text-xs uppercase tracking-wide text-base-content/50 mb-2">
             RBI sources discussing this topic

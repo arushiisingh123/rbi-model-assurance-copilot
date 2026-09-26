@@ -171,15 +171,25 @@ def test_mock_assurance_result_deprecated_endpoint():
 
 
 def test_report_endpoint():
+    """The report is produced from the live pipeline, not a stored fixture.
+
+    The coverage figures are deliberately NOT hard-coded here. They are a
+    measurement of the retrieval pipeline over the current RBI corpus, so
+    pinning them to 1-of-5 (the pre-integration fixture's values) would make
+    this test assert a stale claim and fail whenever the corpus is corrected.
+    The invariant that matters is that the parts sum to the whole.
+    """
     response = client.get("/report")
     assert response.status_code == 200
     body = response.json()
     parsed = ReportResult(**body)
-    assert parsed.is_mock is True
+    assert parsed.is_mock is False
     assert len(parsed.sections) == 5
     assert parsed.evidence_coverage.total == 5
-    assert parsed.evidence_coverage.retrieved == 1
-    assert parsed.evidence_coverage.not_found == 4
+    assert (
+        parsed.evidence_coverage.retrieved + parsed.evidence_coverage.not_found
+        == parsed.evidence_coverage.total
+    )
     assert parsed.model_version == "0.1.0"
     assert len(parsed.disclaimers) > 0
 

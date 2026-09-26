@@ -7,10 +7,12 @@
  * `register_clause` is the number our verified-requirement register uses for
  * the same provision, which it read from the RBI website.
  *
- * They disagree for six of the sixteen verified requirements: the 2023 IT
- * Outsourcing Directions letter clause 16's sub-items a) … m), while the
- * website numbers the same sub-items 16.1 … 16.13. Both are correct for their
- * own source.
+ * They disagree for fourteen of the sixteen verified requirements: the 2023
+ * IT Outsourcing Directions letter clause 16's sub-items a) … m), while the
+ * website numbers the same sub-items 16.1 … 16.13, and the register prefixes
+ * the Fraud Directions' clauses with their chapter. Only the two IT
+ * Governance clauses are numbered identically. Both forms are correct for
+ * their own source.
  *
  * So they are rendered as two separately labelled rows, never merged and never
  * shown as alternatives to each other. Displaying "16.13" against the PDF

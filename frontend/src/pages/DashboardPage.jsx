@@ -203,15 +203,24 @@ export function DashboardPage() {
         : null,
     },
     {
-      label: "RBI rule checks",
-      question: "What do the rule checks say?",
+      // NOT "RBI rule checks". These findings are the six-rule engine in
+      // app/rbi/rules, every one of which carries rbi_source =
+      // "ILLUSTRATIVE ..." and thresholds that are project conventions. The
+      // API schema for ComplianceFinding states they "must never be labelled
+      // or displayed as RBI requirements", and the Compliance page already
+      // calls them technical assurance. Calling them RBI rule checks here
+      // made a threshold FAIL read as a regulatory breach on the one screen
+      // most people start from. The verified RBI register is a separate
+      // layer, shown on the Compliance page.
+      label: "Technical assurance checks",
+      question: "What do the built-in model checks say?",
       status: complianceStatus,
       to: "/compliance",
-      caption: `${compliance?.findings?.length ?? 0} rule${
+      caption: `${compliance?.findings?.length ?? 0} illustrative sample rule${
         compliance?.findings?.length === 1 ? "" : "s"
-      } checked against this model's results.`,
+      } checked against this model's results — not RBI requirements.`,
       why: compliance?.findings?.length
-        ? "At least one rule check did not come back clean."
+        ? "At least one technical check came back outside its agreed limit. These limits are project conventions, not RBI rules."
         : null,
     },
   ];
@@ -229,8 +238,11 @@ export function DashboardPage() {
             This dashboard checks one of your organisation's decision-making
             models and reports what it found. It looks at how the model reaches
             its decisions, whether those decisions are spread evenly across
-            groups of people, whether anything has changed since an earlier
-            period, and how the results line up against RBI rule checks.
+            groups of people, and whether anything has changed since an
+            earlier period. It also runs a set of built-in technical checks.
+            Those checks use project thresholds and are <strong>not</strong>{" "}
+            RBI regulatory requirements — the verified RBI requirements are a
+            separate layer on the Compliance page.
           </Explainer>
           <Explainer className="mt-2">
             Choose a model on the left, then run an assessment. Results appear
@@ -266,7 +278,7 @@ export function DashboardPage() {
       {running && (
         <Card title="Assessment in progress">
           <Loading
-            label="Checking how the model decides, fair treatment, changes since the last period, and the RBI rule checks…"
+            label="Checking how the model decides, fair treatment, changes since the last period, and the technical assurance checks…"
             rows={4}
           />
         </Card>

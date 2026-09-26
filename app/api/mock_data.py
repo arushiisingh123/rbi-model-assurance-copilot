@@ -614,9 +614,14 @@ MOCK_REPORT_RESULT = {
         "Citations reference illustrative sample text, not verified RBI regulatory requirements.",
         "Drift detection in production compares dev train/test splits; synthetic scenarios are testing infrastructure.",
         (
-            "Evidence coverage (1 of 5 sections) mirrors the real Phase 3 retrieval path, "
-            "which indexes a single approved RBI excerpt. NOT_FOUND means no verified "
-            "evidence was retrieved from the indexed corpus - not that no RBI rule exists."
+            "This fixture's own coverage figures describe ONLY this fixture. They are NOT "
+            "a measurement of the live retrieval pipeline, which indexes the production RBI "
+            "corpus and is reported by GET /report and GET /report/pdf. Do not read the "
+            "numbers below as the system's regulatory coverage."
+        ),
+        (
+            "NOT_FOUND means no verified evidence was retrieved from the indexed corpus - "
+            "never that no RBI rule exists."
         ),
     ],
     "evidence_coverage": {

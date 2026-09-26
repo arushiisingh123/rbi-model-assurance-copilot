@@ -118,4 +118,78 @@ def citations_from_evidence(records: Any) -> list[Citation]:
     return [citation_from_evidence(record) for record in (records or [])]
 
 
-__all__ = ["citation_from_evidence", "citations_from_evidence"]
+def attach_citations_to_findings(
+    findings: Any,
+    evidence_by_rule: Any,
+    *,
+    as_dict: bool = True,
+) -> list:
+    """Return ``findings`` with structured ``citations`` attached per rule.
+
+    ONE PLACE, TWO CALLERS
+        ``GET /compliance`` and ``build_assurance_result()`` both retrieve RBI
+        evidence per rule, and both must present it the same way. Before this
+        helper only the first attached structured citations, so the same
+        finding carried a full citation on one endpoint and nothing but
+        chunk-ids on another -- and the downloadable PDF, which is built from
+        the second path, silently lost the regulatory grounding the JSON
+        already had.
+
+    The findings are COPIED, never mutated: the rule engine's own output shape
+    is asserted exactly by its tests, and this must stay additive to it.
+
+    Attaching a citation NEVER changes a status. The rule engine decides every
+    status from technical findings alone, before this is called; an empty
+    citation list means no supporting text was retrieved, not that a check
+    failed.
+
+    ``as_dict`` returns plain dicts (what a FastAPI route hands back);
+    ``False`` keeps ``Citation`` models, for a caller that wants them typed.
+    """
+    evidence_by_rule = evidence_by_rule or {}
+    out = []
+    for finding in findings or []:
+        citations = citations_from_evidence(evidence_by_rule.get(finding["rule_id"]))
+        out.append(
+            {
+                **finding,
+                "citations": [c.model_dump() for c in citations]
+                if as_dict
+                else citations,
+            }
+        )
+    return out
+
+
+__all__ = [
+    "citation_from_evidence",
+    "citations_from_evidence",
+    "attach_citations_to_findings",
+]
+
+
+def attach_rule_provenance(findings: list) -> list:
+    """Stamp each technical finding with its rule's own ``rbi_source``.
+
+    Done HERE, at the API boundary, rather than inside
+    ``app.compliance.compliance``: that module's finding dict has an approved
+    key set locked by its own tests, so it is left exactly as agreed.
+
+    Every rule in ``app/rbi/rules`` carries the ILLUSTRATIVE marker, and
+    ``ComplianceFinding``'s docstring has always said findings carry it -- but
+    the field was absent from the schema and never populated, so the API
+    reported ``None``. That left the dashboard with nothing to distinguish a
+    project-threshold FAIL from a regulatory breach. Purely additive: no
+    status, metric or citation is touched.
+    """
+    from app.rbi.rules import load_rules
+
+    source_by_rule = {
+        rule["rule_id"]: rule.get("rbi_source") for rule in load_rules()
+    }
+    stamped = []
+    for finding in findings:
+        record = dict(finding)
+        record["rbi_source"] = source_by_rule.get(record.get("rule_id"))
+        stamped.append(record)
+    return stamped

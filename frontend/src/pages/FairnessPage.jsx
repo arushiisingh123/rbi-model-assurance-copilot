@@ -27,7 +27,7 @@ import { num, pct } from "../utils/format";
 
 const NONE_DECLARED = "none_declared";
 
-function FairnessBody({ fairness }) {
+function FairnessBody({ fairness, stability }) {
   const undeclared = fairness.protected_attribute === NONE_DECLARED;
 
   if (undeclared) {
@@ -83,6 +83,46 @@ function FairnessBody({ fairness }) {
         <strong>{num(fairness.disparate_impact_ratio, 2)}</strong>.
       </Explainer>
 
+      {stability?.note && (
+        <div
+          className={`rounded border p-3 text-sm ${
+            stability.driving_groups_small
+              ? "border-warning/40 bg-warning/10"
+              : "border-base-300 bg-base-200/50"
+          }`}
+        >
+          <p className="font-semibold">
+            {stability.driving_groups_small
+              ? "Small sample — this ratio may be sensitive to individual records"
+              : "Some groups have few records"}
+          </p>
+          <p className="mt-1 text-base-content/75">{stability.note}</p>
+
+          {stability.most_favoured_group && stability.least_favoured_group && (
+            <p className="mt-2 text-xs text-base-content/60">
+              The ratio compares{" "}
+              <span className="font-mono">{stability.least_favoured_group}</span>{" "}
+              (least likely to receive a favourable decision) against{" "}
+              <span className="font-mono">{stability.most_favoured_group}</span>{" "}
+              (most likely). Only these two groups determine it.
+            </p>
+          )}
+
+          {/* The threshold behind this notice is an unvalidated project
+              convention, so the screen says so rather than implying a
+              statistical standard. */}
+          <p className="mt-2 text-xs text-base-content/50">
+            Reporting threshold: fewer than{" "}
+            <span className="font-mono">{stability.min_group_size}</span> records
+            {stability.threshold_is_project_default
+              ? " (project default — not configured by the team, and not validated by any project document or statistical method)"
+              : " (configured for this project)"}
+            . It is a reporting convention only: it changes which groups are
+            flagged here, never a metric and never the PASS/FAIL status above.
+          </p>
+        </div>
+      )}
+
       {fairness.groups?.length ? (
         <>
           <GroupRateChart groups={fairness.groups} />
@@ -96,6 +136,9 @@ function FairnessBody({ fairness }) {
                   <th className="text-right" title="The share of this group that received a favourable decision.">
                     Share receiving a favourable decision
                   </th>
+                  <th title="Groups below the configured reporting threshold are flagged here. They remain included in every calculation.">
+                    Sample size note
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -106,6 +149,22 @@ function FairnessBody({ fairness }) {
                     <td className="text-right">{group.favorable_count}</td>
                     <td className="text-right font-mono text-xs">
                       {pct(group.selection_rate)}
+                    </td>
+                    <td>
+                      {(stability?.small_groups || []).includes(
+                        group.group,
+                      ) ? (
+                        <span
+                          className="badge badge-warning badge-sm"
+                          title={`Fewer than ${
+                            stability?.min_group_size ?? "the configured"
+                          } records. This rate may be sensitive to individual records. The group is counted in full and this flag does not affect the status.`}
+                        >
+                          small sample
+                        </span>
+                      ) : (
+                        <span className="text-xs text-base-content/40">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -198,7 +257,7 @@ export function FairnessPage() {
               right={<StatusBadge status={fairness?.status} size="lg" />}
             >
               {fairness ? (
-                <FairnessBody fairness={fairness} />
+                <FairnessBody fairness={fairness} stability={data?.fairness_rate_stability} />
               ) : (
                 <Unavailable
                   title="No fairness result returned"

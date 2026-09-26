@@ -20,7 +20,11 @@ from app.explainability.evidence import (
 from app.config.thresholds import STATUS_PENDING
 from app.explainability.explain import explain
 from app.fairness.evidence import fairness_evidence
-from app.fairness.fairness import DEFAULT_PROTECTED_ATTRIBUTE, fairness_report
+from app.fairness.fairness import (
+    DEFAULT_PROTECTED_ATTRIBUTE,
+    fairness_rate_stability,
+    fairness_report,
+)
 from app.models.model import (
     MODEL_ID,
     MODEL_VERSION,
@@ -263,6 +267,30 @@ def compute_real_fairness(
         model_dict, protected_attribute
     )
     return fairness_report(
+        predictions=predictions,
+        sensitive_feature=sens_feature,
+        favorable_label=favorable_label,
+    )
+
+
+def _fairness_rate_stability_for(
+    model_dict: Dict[str, Any], adapter: Optional[Any]
+) -> Optional[Dict[str, Any]]:
+    """Group-size stability annotation for the fairness result, or None.
+
+    Returns None when no protected attribute is declared -- the same
+    condition under which the fairness channel itself is PENDING, so there is
+    no comparison whose stability could be described.
+    """
+    protected_attribute = (
+        adapter.protected_attribute if adapter is not None else DEFAULT_PROTECTED_ATTRIBUTE
+    )
+    if protected_attribute is None:
+        return None
+    predictions, sens_feature, favorable_label = _fairness_inputs(
+        model_dict, protected_attribute
+    )
+    return fairness_rate_stability(
         predictions=predictions,
         sensitive_feature=sens_feature,
         favorable_label=favorable_label,
@@ -791,6 +819,29 @@ def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
         assurance_run_id=assurance_run_id,
         evidence_by_rule=evidence_by_rule,
     )
+
+    # Structured RBI citations for the evidence just retrieved above.
+    #
+    # The retrieval has already happened -- evidence_by_rule is built a few
+    # lines up -- so this costs nothing beyond formatting. Without it the
+    # same finding carried a full citation on GET /compliance and only
+    # chunk-ids here, which meant the downloadable PDF (built from this
+    # result) lost the regulatory grounding the JSON already had.
+    #
+    # Additive: evidence_chunks is untouched, and no status changes.
+    from app.rag.citations import (
+        attach_citations_to_findings,
+        attach_rule_provenance,
+    )
+
+    compliance_res = {
+        **compliance_res,
+        "findings": attach_rule_provenance(
+            attach_citations_to_findings(
+                compliance_res["findings"], evidence_by_rule
+            )
+        ),
+    }
     monitoring_res, monitoring_unavailable = _monitoring_for_assurance(
         adapter, raw_model, model_id=model_id, assurance_run_id=assurance_run_id
     )
@@ -800,6 +851,15 @@ def build_assurance_result(adapter: Optional[Any] = None) -> Dict[str, Any]:
         "fairness_drift": {
             "fairness": fairness_res,
             "drift": drift_res,
+            # A SIBLING of "fairness", never merged into it: that dict's key
+            # set is a contract locked by its own tests, so this additive
+            # annotation sits beside it instead of widening it. It says which
+            # observed groups are too small for their selection rate to be
+            # statistically stable. No group is excluded from any metric, and
+            # nothing here influences `fairness.status`.
+            "fairness_rate_stability": _fairness_rate_stability_for(
+                raw_model, adapter
+            ),
         },
         "compliance": compliance_res,
         "note": ASSURANCE_NOTE,

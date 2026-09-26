@@ -732,6 +732,7 @@ def generate_report(
     retrieval_fn: Optional[Any] = None,
     skip_live: bool = False,
     provider_label: str = DEFAULT_PROVIDER_LABEL,
+    narrative: bool = True,
 ) -> Dict[str, Any]:
     """Generate a structured, three-layer assurance report (validating against ReportResult).
 
@@ -780,7 +781,10 @@ def generate_report(
     if skip_live:
         raise ReportGenerationUnavailable("Live generation explicitly skipped (skip_live=True).")
 
-    if llm_client is None:
+    # A provider is required only for the narrative layer. With narrative=False
+    # the caller has asked for the real technical + retrieved layers WITHOUT
+    # prose, which needs no provider and is not a fallback fixture.
+    if narrative and llm_client is None:
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key or not api_key.strip():
             raise ReportGenerationUnavailable(
@@ -842,15 +846,20 @@ def generate_report(
     routed_evidence = _route_evidence_records(evidence_records)
 
     # 3. CALL THE LLM ONCE: single Groq call
-    prompt = _build_llm_prompt(
-        findings,
-        evidence,
-        supporting_evidence={
-            key: _records_for_section(routed_evidence, key)
-            for key in ["model", "explainability", "fairness", "drift", "compliance"]
-        },
-    )
-    llm_texts = _call_groq_llm(prompt, llm_client=llm_client)
+    if narrative:
+        prompt = _build_llm_prompt(
+            findings,
+            evidence,
+            supporting_evidence={
+                key: _records_for_section(routed_evidence, key)
+                for key in ["model", "explainability", "fairness", "drift", "compliance"]
+            },
+        )
+        llm_texts = _call_groq_llm(prompt, llm_client=llm_client)
+    else:
+        # No provider call at all. Nothing is substituted for the missing prose:
+        # the section simply carries no interpretation layer.
+        llm_texts = {}
 
     # 4. ENFORCE SAFETY IN PYTHON (Critical, non-negotiable)
     section_configs = [
@@ -914,11 +923,20 @@ def generate_report(
             else:
                 final_text = raw_text
 
-        interpretation = LLMInterpretation(
-            text=final_text,
-            grounded_in=grounded_in,
-            regulatory_basis=reg_basis,
-            is_mock=False,
+        # With narrative=False the section carries NO interpretation layer.
+        # Note the placeholder default computed for raw_text above is therefore
+        # never emitted -- writing "Evaluation completed with status X" and
+        # presenting it as the report's interpretation would be fabricating the
+        # one layer the caller explicitly did not ask for.
+        interpretation = (
+            LLMInterpretation(
+                text=final_text,
+                grounded_in=grounded_in,
+                regulatory_basis=reg_basis,
+                is_mock=False,
+            )
+            if narrative
+            else None
         )
 
         report_sections.append(
@@ -938,11 +956,38 @@ def generate_report(
         total=len(section_configs),
     )
 
-    disclaimers = [
-        f"LLM-generated report text produced via {provider_label}. Technical findings are calculated by Python analytical modules and passed verbatim.",
-        "Retrieved evidence is sourced from the Phase 0 interim single-document excerpt (RBI IRAC Advances 2014), not a full verified RBI regulatory corpus.",
-        "Regulatory basis is restricted to illustrative_rule_only or none; full cited_evidence requires the upcoming verified regulatory corpus.",
-        "For sections without supporting evidence (NOT_FOUND), text is restricted to technical explanation with no regulatory claims.",
+    # Disclaimers describe the CURRENT pipeline. The two claims that used to
+    # sit here -- that retrieved evidence came from a single 2014 excerpt, and
+    # that a verified corpus was still "upcoming" -- stopped being true when
+    # the six production RBI Directions were indexed, and a live report would
+    # have carried them verbatim.
+    if narrative:
+        disclaimers = [
+            f"LLM-generated report text produced via {provider_label}. "
+            "Technical findings are calculated by Python analytical modules and passed verbatim.",
+        ]
+    else:
+        disclaimers = [
+            "NO LLM NARRATIVE: no report-generation provider is configured, so the written "
+            "interpretation layer was not produced. The technical findings and the retrieved "
+            "RBI evidence below are real and were calculated by the analytical modules and the "
+            "retrieval pipeline in this run -- nothing on this page is a stored fixture.",
+        ]
+
+    disclaimers += [
+        "Retrieved evidence is sourced from the indexed RBI Directions in the production "
+        "corpus. Each citation carries the PDF page and the clause the document itself "
+        "prints, so it can be opened and checked.",
+        "Coverage below counts this report's five SECTIONS, not RBI regulation. The corpus is "
+        "a curated subset of the declared instruments, and NOT_FOUND means no verified "
+        "evidence was retrieved -- it does NOT mean no RBI rule exists.",
+        "Regulatory basis is restricted to illustrative_rule_only or none. Retrieval shows "
+        "where a requirement can be read; it never establishes that a requirement is met.",
+        "For sections without supporting evidence (NOT_FOUND), text is restricted to technical "
+        "explanation with no regulatory claims.",
+        "Technical findings are model analytics. They are not evidence of the organisational "
+        "controls the verified RBI requirements call for, and they never establish RBI "
+        "compliance.",
     ]
 
     model_version = model.get("model_metadata", {}).get("version", "0.1.0")

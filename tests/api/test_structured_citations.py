@@ -256,3 +256,78 @@ def test_verified_requirements_are_not_merged_into_citations(compliance):
         for citation in finding["citations"]:
             assert "applicability" not in citation
             assert "assessment_mode" not in citation
+
+
+# ---------------------------------------------------------------------------
+# Integration with the PDF report path: citations must not depend on which
+# endpoint you ask
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def assurance():
+    response = client.get("/assurance-result")
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_assurance_result_carries_the_same_citations_as_compliance(
+    compliance, assurance
+):
+    """One shared builder, so the two endpoints cannot drift apart.
+
+    Before this, structured citations were attached only in the /compliance
+    route while build_assurance_result() left findings with chunk-ids alone.
+    The downloadable PDF is built from the assurance path, so it silently
+    lost the regulatory grounding the JSON already had -- the same check
+    citing an RBI page on one endpoint and nothing on another.
+    """
+    theirs = assurance["compliance"]["findings"]
+    ours = compliance["findings"]
+
+    assert [f["rule_id"] for f in theirs] == [f["rule_id"] for f in ours]
+    for a, b in zip(theirs, ours):
+        assert len(a["citations"]) == len(b["citations"]), a["rule_id"]
+
+
+def test_assurance_result_citations_are_fully_structured(assurance):
+    citations = [c for f in assurance["compliance"]["findings"] for c in f["citations"]]
+
+    assert citations, "expected the live corpus to support at least one citation"
+    for citation in citations:
+        assert citation["source"]
+        assert citation["reference_number"]
+        assert isinstance(citation["page"], int)
+        assert citation["source_clause"]
+        # The two numbering schemes stay apart here too.
+        assert "register_clause" in citation
+
+
+def test_attaching_citations_never_changes_a_status(compliance, assurance):
+    """The rule engine decides status before any citation is built."""
+    ours = {f["rule_id"]: f["status"] for f in compliance["findings"]}
+    theirs = {f["rule_id"]: f["status"] for f in assurance["compliance"]["findings"]}
+
+    assert ours == theirs
+    for status in ours.values():
+        assert status in {"PASS", "WARNING", "FAIL", "PENDING"}
+
+
+def test_the_shared_helper_copies_rather_than_mutates():
+    """The rule engine's own output shape is asserted by its tests."""
+    from app.rag.citations import attach_citations_to_findings
+
+    original = [{"rule_id": "R1", "status": "PASS"}]
+    result = attach_citations_to_findings(original, {})
+
+    assert "citations" not in original[0], "input findings were mutated"
+    assert result[0]["citations"] == []
+    assert result[0]["status"] == "PASS"
+
+
+def test_evidence_chunks_survive_alongside_citations(assurance):
+    """Additive: the engine's chunk-id list is not replaced."""
+    for finding in assurance["compliance"]["findings"]:
+        assert "evidence_chunks" in finding
+        if finding["citations"]:
+            assert len(finding["evidence_chunks"]) == len(finding["citations"])

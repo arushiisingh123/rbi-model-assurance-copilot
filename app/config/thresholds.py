@@ -7,6 +7,8 @@ requirement.
 Authoritative source: docs/thresholds.md
 """
 
+import os
+
 # Technical status values
 STATUS_PASS = "PASS"
 STATUS_WARNING = "WARNING"
@@ -19,6 +21,80 @@ VALID_STATUSES = (STATUS_PASS, STATUS_WARNING, STATUS_FAIL, STATUS_PENDING)
 # r >= 0.80 -> PASS | 0.70 <= r < 0.80 -> WARNING | r < 0.70 -> FAIL
 DI_PASS_THRESHOLD = 0.80
 DI_WARNING_THRESHOLD = 0.70
+
+# Small-group reporting threshold -- A PROJECT CONVENTION WITH NO SOURCE.
+#
+# WHAT THIS IS NOT
+#   This default is NOT established by any project document, any RBI
+#   instrument, or any statistical method this project has adopted. Unlike
+#   DI_PASS_THRESHOLD and the PSI thresholds above -- which docs/thresholds.md
+#   records as recognised industry conventions -- nothing in this repository
+#   validates this number. It was chosen only so that the warning has some
+#   default, and the team is expected to set it deliberately.
+#
+#   Because it is unvalidated it must never be described as a statistical
+#   test, a confidence bound, or a minimum sample size "requirement". It
+#   supports one descriptive statement only: the group is small, so the
+#   reported ratio may be sensitive to individual records. It does NOT support
+#   a claim that any result is "statistically unreliable" -- that would be a
+#   statistical conclusion, and this project defines no method for drawing one.
+#
+# WHAT IT DOES
+#   It marks which observed groups fall below it, so a reader can see that a
+#   headline ratio rests on few records. That is all.
+#
+# WHAT IT NEVER DOES
+#   * It never excludes a group from any calculation. Dropping small groups
+#     would hide exactly the minorities fairness analysis exists to examine,
+#     and would silently change the reported metrics.
+#   * It never changes a PASS/WARNING/FAIL status. Status comes from
+#     classify_disparate_impact() alone, using the unchanged thresholds above.
+#     The warning and the status are independent outputs.
+#
+# CONFIGURING IT
+#   Set the RBI_MIN_GROUP_SIZE environment variable, or call
+#   set_min_group_size() at runtime. A non-positive or unparseable value is
+#   rejected rather than silently defaulted, so a misconfiguration is visible.
+_DEFAULT_MIN_GROUP_SIZE = 30
+
+# True when the active value is just the unconfigured default. Surfaced to the
+# UI so the screen can say the threshold has not been set by the team.
+MIN_GROUP_SIZE_IS_PROJECT_DEFAULT = "RBI_MIN_GROUP_SIZE" not in os.environ
+
+
+def _load_min_group_size() -> int:
+    raw = os.environ.get("RBI_MIN_GROUP_SIZE")
+    if raw is None:
+        return _DEFAULT_MIN_GROUP_SIZE
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"RBI_MIN_GROUP_SIZE must be an integer, got {raw!r}."
+        ) from None
+    if value <= 0:
+        raise ValueError(
+            f"RBI_MIN_GROUP_SIZE must be a positive integer, got {value}."
+        )
+    return value
+
+
+MIN_GROUP_SIZE_FOR_STABLE_RATE = _load_min_group_size()
+
+
+def set_min_group_size(value: int) -> None:
+    """Set the small-group reporting threshold at runtime.
+
+    Provided so the team can configure this deliberately rather than inherit
+    an unvalidated default. Changing it alters only which groups are FLAGGED;
+    it cannot change a metric or a PASS/WARNING/FAIL status.
+    """
+    global MIN_GROUP_SIZE_FOR_STABLE_RATE, MIN_GROUP_SIZE_IS_PROJECT_DEFAULT
+    value = int(value)
+    if value <= 0:
+        raise ValueError(f"min group size must be positive, got {value}.")
+    MIN_GROUP_SIZE_FOR_STABLE_RATE = value
+    MIN_GROUP_SIZE_IS_PROJECT_DEFAULT = False
 
 # Population Stability Index (PSI) thresholds (credit-industry convention)
 # p < 0.10 -> PASS | 0.10 <= p <= 0.25 -> WARNING | p > 0.25 -> FAIL
@@ -107,3 +183,16 @@ def worst_status(*statuses: str) -> str:
         return STATUS_PENDING
 
     return max(measured, key=lambda s: _SEVERITY_RANK[s])
+
+
+def is_small_group(group_count: int) -> bool:
+    """Whether a group falls below the small-group reporting threshold.
+
+    Descriptive only: it reports that a group is small, not that any result is
+    unreliable. It never removes a group from a calculation and never changes
+    a status -- see ``MIN_GROUP_SIZE_FOR_STABLE_RATE``.
+
+    Reads the module attribute at call time so ``set_min_group_size()`` takes
+    effect without callers re-importing.
+    """
+    return int(group_count) < MIN_GROUP_SIZE_FOR_STABLE_RATE

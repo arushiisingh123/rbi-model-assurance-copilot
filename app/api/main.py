@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
 from app.api.monitoring import router as monitoring_router
 from app.api.orchestration import (
+    _fairness_rate_stability_for,
     build_assurance_result,
     build_drift_comparison,
     build_evidence_by_rule,
@@ -258,6 +259,12 @@ def get_fairness_drift(model_id: Optional[str] = Query(default=None)) -> dict:
     return {
         "fairness": fairness_res,
         "drift": drift_res,
+        # Sibling annotation, same as /assurance-result. Never merged into
+        # "fairness": that dict's key set is a contract locked by the
+        # fairness module's tests.
+        "fairness_rate_stability": _fairness_rate_stability_for(
+            raw_model, adapter
+        ),
     }
 
 
@@ -405,20 +412,17 @@ def get_compliance(
     #
     # It changes no status. Every finding's status was already decided by the
     # rule engine from technical findings alone, before this line runs.
-    from app.rag.citations import citations_from_evidence
+    #
+    # Shared with build_assurance_result(), so /compliance, /assurance-result
+    # and the downloadable PDF all describe the same evidence the same way.
+    from app.rag.citations import (
+        attach_citations_to_findings,
+        attach_rule_provenance,
+    )
 
-    findings = [
-        {
-            **finding,
-            "citations": [
-                citation.model_dump()
-                for citation in citations_from_evidence(
-                    evidence_by_rule.get(finding["rule_id"])
-                )
-            ],
-        }
-        for finding in result["findings"]
-    ]
+    findings = attach_rule_provenance(
+        attach_citations_to_findings(result["findings"], evidence_by_rule)
+    )
 
     return {
         **result,
@@ -594,18 +598,20 @@ def get_report(
     """
     adapter = _resolve_adapter(model_id)
 
-    if not os.getenv("GROQ_API_KEY", "").strip():
-        logger.info("GROQ_API_KEY not configured; returning mock report fallback immediately.")
-        fallback = dict(MOCK_REPORT_RESULT)
-        fallback_disclaimers = list(fallback.get("disclaimers", []))
-        disclaimer = (
-            "FALLBACK MOCK REPORT: Live report generation unavailable (ReportGenerationUnavailable). "
-            "Displaying static mock fixture."
+    # No LLM provider configured is the NORMAL case for this project, and it
+    # used to return a stored Phase 3 fixture whose disclaimers still described
+    # a single 2014 excerpt and whose model_id was null -- while the PDF
+    # generated from the same page cited six current RBI Directions. One demo
+    # flow therefore contradicted itself.
+    #
+    # The report is now built for real and simply omits the narrative layer:
+    # same analytical modules, same retrieval pipeline, same model identity and
+    # run id as every other route. Nothing is invented to fill the gap.
+    narrative = bool(os.getenv("GROQ_API_KEY", "").strip())
+    if not narrative:
+        logger.info(
+            "GROQ_API_KEY not configured; building a real report without the narrative layer."
         )
-        if disclaimer not in fallback_disclaimers:
-            fallback_disclaimers.insert(0, disclaimer)
-        fallback["disclaimers"] = fallback_disclaimers
-        return fallback
 
     try:
         resolved_model_id = adapter.model_id if adapter is not None else None
@@ -657,6 +663,7 @@ def get_report(
         )
         from app.report import generate_report
         return generate_report(
+            narrative=narrative,
             model=raw_model,
             explainability=explain_res,
             fairness=fairness_res,

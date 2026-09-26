@@ -28,8 +28,10 @@ from typing import Any
 import pandas as pd
 
 from app.config.thresholds import (
+    MIN_GROUP_SIZE_FOR_STABLE_RATE,
     STATUS_PENDING,
     classify_disparate_impact,
+    is_small_group,
 )
 from app.fairness.grouping import validate_fairness_inputs
 
@@ -61,6 +63,82 @@ def _resolve_protected_attribute_name(sensitive_feature: Any) -> str:
             return DEFAULT_PROTECTED_ATTRIBUTE
         return attr_name
     return DEFAULT_PROTECTED_ATTRIBUTE
+
+
+def _rate_stability(groups: list, driving: tuple = ()) -> dict:
+    """Which observed groups fall below the small-group reporting threshold.
+
+    DESCRIPTIVE, NOT INFERENTIAL. This reports group sizes against a
+    configurable project threshold that no project document validates (see
+    ``app.config.thresholds.MIN_GROUP_SIZE_FOR_STABLE_RATE``). It therefore
+    says only that a group is small and that the reported ratio may be
+    sensitive to individual records. It does NOT claim any result is
+    statistically unreliable: that would be a statistical conclusion, and this
+    project defines no method for drawing one.
+
+    Pure annotation over groups that have ALREADY been computed. It removes
+    nothing, re-derives nothing, and never contributes to ``status``.
+
+    ``driving`` names the groups whose rates produced the reported aggregates
+    (the most- and least-favoured group). Those are the ones worth flagging:
+    when either is small, the reported ratio rests on few records.
+    """
+    from app.config.thresholds import (
+        MIN_GROUP_SIZE_FOR_STABLE_RATE,
+        MIN_GROUP_SIZE_IS_PROJECT_DEFAULT,
+    )
+
+    threshold = MIN_GROUP_SIZE_FOR_STABLE_RATE
+    small = [g["group"] for g in groups if is_small_group(g["group_count"])]
+    driving_small = [g for g in driving if g in small]
+    sizes = {g["group"]: g["group_count"] for g in groups}
+
+    def _named(names: list) -> str:
+        return ", ".join(f"{n!r} (n={sizes[n]})" for n in names)
+
+    if not small:
+        note = None
+    elif driving_small:
+        plural = len(driving_small) > 1
+        note = (
+            "The reported ratio is determined by "
+            + _named(driving_small)
+            + (", which have" if plural else ", which has")
+            + f" fewer records than the configured reporting threshold of "
+            f"{threshold}. Small "
+            + ("groups" if plural else "group")
+            + ": the ratio may be sensitive to individual records, so a small "
+            "number of different outcomes could move it noticeably. This is a "
+            "prompt to check the underlying records, not a statistical "
+            "finding. No group was excluded from the calculation, and this "
+            "note did not affect the reported status."
+        )
+    else:
+        note = (
+            "Some observed groups have fewer records than the configured "
+            f"reporting threshold of {threshold} ("
+            + _named(small)
+            + "). They did not determine the reported ratio. No group was "
+            "excluded from the calculation, and this note did not affect the "
+            "reported status."
+        )
+
+    return {
+        "min_group_size": threshold,
+        # True when nobody has configured the threshold, so the UI can say the
+        # default is not a validated or team-agreed value.
+        "threshold_is_project_default": MIN_GROUP_SIZE_IS_PROJECT_DEFAULT,
+        "threshold_basis": (
+            "Project/analytics convention. Not an RBI requirement and not "
+            "validated by any project document or statistical method. "
+            "Configurable via RBI_MIN_GROUP_SIZE."
+        ),
+        "small_groups": small,
+        "group_sizes": sizes,
+        # Whether a group that determines the reported ratio is small.
+        "driving_groups_small": bool(driving_small),
+        "note": note,
+    }
 
 
 def _analyse_fairness(
@@ -135,16 +213,28 @@ def _analyse_fairness(
             "demographic_parity_diff": 0.0,
             "disparate_impact_ratio": 1.0,
             "status": STATUS_PENDING,
+            # No aggregate was produced, so no group drove one.
+            "rate_stability": _rate_stability(groups),
         }
 
     dp_diff = round(float(max_rate - min_rate), _ROUNDING_DP)
     di_ratio = round(float(min_rate / max_rate), _ROUNDING_DP)
+
+    # The most- and least-favoured groups are the only two the reported
+    # aggregates depend on, so they are the ones whose stability matters.
+    most_favoured = groups[selection_rates.index(max_rate)]["group"]
+    least_favoured = groups[selection_rates.index(min_rate)]["group"]
 
     return {
         "protected_attribute": attr_name,
         "groups": groups,
         "demographic_parity_diff": dp_diff,
         "disparate_impact_ratio": di_ratio,
+        "most_favoured_group": most_favoured,
+        "least_favoured_group": least_favoured,
+        "rate_stability": _rate_stability(
+            groups, driving=(most_favoured, least_favoured)
+        ),
         # Classify the reported value, not the pre-rounding value, so the ratio
         # shown in a report always matches the status shown beside it.
         "status": classify_disparate_impact(di_ratio),
@@ -241,3 +331,39 @@ def fairness_report(
         "is_mock": False,
         "groups": _report_groups(analysis),
     }
+
+
+def fairness_rate_stability(
+    predictions: Any = None,
+    sensitive_feature: Any = None,
+    favorable_label: Any = DEFAULT_FAVORABLE_LABEL,
+) -> dict:
+    """How much confidence the observed group sizes support.
+
+    A SEPARATE function rather than extra keys on ``fairness_report()``. That
+    function's return shape is a contract agreed with the API/dashboard layer
+    and locked by its own tests, so this additive information is offered
+    alongside it instead of widening it.
+
+    Arithmetic is shared: both call ``_analyse_fairness``, so the groups
+    described here are literally the groups the metrics were computed from.
+    Nothing here removes a group, alters a rate, or changes a status.
+
+    Returns:
+        min_group_size (int): the configured minimum, from
+            ``app.config.thresholds.MIN_GROUP_SIZE_FOR_STABLE_RATE``.
+        small_groups (list): observed groups below that minimum, in
+            first-observed order. They remain fully included in the metrics.
+        driving_groups_small (bool): whether the most- or least-favoured group
+            -- the two the reported ratio actually depends on -- is small.
+        note (str | None): a plain-language explanation, or None when every
+            group is large enough.
+        most_favoured_group / least_favoured_group: the groups whose rates
+            produced the reported aggregates, or None on the PENDING paths
+            where no comparison was made.
+    """
+    analysis = _analyse_fairness(predictions, sensitive_feature, favorable_label)
+    stability = dict(analysis["rate_stability"])
+    stability["most_favoured_group"] = analysis.get("most_favoured_group")
+    stability["least_favoured_group"] = analysis.get("least_favoured_group")
+    return stability

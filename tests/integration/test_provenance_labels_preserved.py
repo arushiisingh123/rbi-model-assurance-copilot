@@ -63,8 +63,20 @@ def test_mock_fixtures_stay_is_mock_true():
         assert s["technical_finding"]["provenance"] == "mock"
 
 
-def test_report_endpoint_fallback_stays_mock(monkeypatch):
-    """Verify GET /report returns fallback mock data when GROQ_API_KEY is absent."""
+def test_report_without_a_key_labels_its_provenance_honestly(monkeypatch):
+    """Absent an LLM provider, provenance must still say what the data really is.
+
+    This used to assert the endpoint returned the stored fixture with
+    ``is_mock: True``. That fixture's disclaimers described a single 2014
+    excerpt and its coverage read 1 of 5, contradicting the PDF generated from
+    the same page. The report is now produced for real and omits only the
+    narrative layer.
+
+    The invariant this file exists to protect is unchanged and is what is
+    checked here: a label never overstates or understates the data behind it.
+    Real analytical output must be labelled ``observed``, and a report built
+    from real output must not call itself mock.
+    """
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     client = TestClient(app)
     response = client.get("/report")
@@ -73,8 +85,34 @@ def test_report_endpoint_fallback_stays_mock(monkeypatch):
     body = response.json()
     validated = ReportResult(**body)
     assert validated is not None
-    assert body["is_mock"] is True
-    assert any("FALLBACK MOCK REPORT" in d for d in body["disclaimers"])
+
+    # Real analytical findings -> honest provenance, and not labelled mock.
+    assert body["is_mock"] is False
+
+    provenance = {
+        section["heading"]: section["technical_finding"]["provenance"]
+        for section in body["sections"]
+    }
+
+    # The four ANALYTICAL sections are computed from real model output.
+    for heading, label in provenance.items():
+        if "Compliance" in heading:
+            continue
+        assert label == "observed", f"{heading} should be observed, got {label}"
+
+    # The COMPLIANCE section is legitimately "mock", and that is the point of
+    # this file: the six rules it maps are illustrative sample rules, so the
+    # section must not borrow the "observed" label from the real measurements
+    # those rules read. A real input does not make an invented rule real.
+    compliance_labels = [v for k, v in provenance.items() if "Compliance" in k]
+    assert compliance_labels == ["mock"], compliance_labels
+
+    # The narrative layer is absent rather than invented, in every section.
+    for section in body["sections"]:
+        assert section["llm_interpretation"] is None
+
+    # And the absence is stated rather than left for the reader to infer.
+    assert any("NO LLM NARRATIVE" in d for d in body["disclaimers"])
 
 
 def test_citation_provenance_interim_multi_document(real_pipeline):

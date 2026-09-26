@@ -714,9 +714,13 @@ Abridged below — one section is shown to illustrate the three-layer shape.
 The section shown uses `RETRIEVED` for illustration; in the actual
 `MOCK_REPORT_RESULT` fixture the single `RETRIEVED` section is "RBI Compliance
 Rules Mapping", and the model, explainability, fairness, and drift sections
-are `NOT_FOUND` with zero citations and `regulatory_basis: "none"`. That
-mirrors real retrieval coverage against the current one-source corpus. See
+are `NOT_FOUND` with zero citations and `regulatory_basis: "none"`. See
 `app/api/mock_data.py`.
+
+That 1-of-5 shape is the FIXTURE's, and no longer mirrors real retrieval:
+against the six-document corpus the live path grounds all five sections. The
+fixture is returned only when `GROQ_API_KEY` is absent, and carries a
+`FALLBACK MOCK REPORT` disclaimer saying so.
 
 ```json
 {
@@ -767,6 +771,41 @@ mirrors real retrieval coverage against the current one-source corpus. See
   "is_mock": true
 }
 ```
+
+### `GET /report/pdf` (PDF assurance report)
+
+Returns the assurance run as a downloadable PDF (`application/pdf`,
+`Content-Disposition: attachment`). Built by `app/report/pdf_report.py` from
+the **same** `build_assurance_result()` data as `GET /assurance-result`, with
+`compliance.verified_requirements` attached through the shared
+`_attach_verified_requirements()` helper — so the declared-profile wiring
+exists in exactly one place and the two endpoints cannot disagree.
+
+It is a different document from `GET /report`, not a rendering of it:
+`GET /report` is the LLM-narrated three-layer report, while the PDF is the
+assurance summary (model, explainability, fairness, drift, technical checks,
+RBI requirements). Both draw their RBI grounding from the same place.
+
+**RBI grounding in the PDF.** The "Technical Assurance Checks" table is
+followed by "RBI Sources Consulted", listing the passages retrieved for those
+checks with four columns: INSTRUMENT, PAGE, **SOURCE CLAUSE** and **REGISTER
+CLAUSE**. The two clause numbers are separate columns for the same reason
+they are separate fields on `Citation`: `source_clause` is what the cited
+document prints, `register_clause` is how
+`app/rbi/verified_requirements.py` refers to the same provision, and they
+differ for fourteen of the sixteen verified requirements. Printing the
+register's number against the document would name a clause that document
+does not contain.
+
+Those citations are produced by `app.rag.citations.attach_citations_to_findings()`,
+the same helper `GET /compliance` uses, so a finding carries identical
+evidence on both endpoints and in the PDF.
+
+Status labels come from `frontend/src/utils/statusMeaning.json` via
+`app/report/status_meaning.py`, shared with the dashboard.
+
+Errors match the other model-facing routes: `404` for an unknown `model_id`,
+`502` when a REST-backed model's service is unreachable.
 
 ### Phase 3 additive report fields (implemented, C3 — 2026-09-11)
 

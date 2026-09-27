@@ -57,7 +57,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://rbi-model-assurance-copilot-xi.vercel.app",
+        "https://rbi-model-assurance-copilot-9h0io34en-manas-projects-776f0ffe.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],

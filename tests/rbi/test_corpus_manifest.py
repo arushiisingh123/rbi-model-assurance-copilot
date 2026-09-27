@@ -68,9 +68,33 @@ def manifest() -> RBIManifest:
 # ===========================================================================
 
 
-def test_manifest_contains_19_documents(manifest):
-    """The corpus specification defines exactly 19 SOURCE DOCUMENTS."""
-    assert len(manifest) == 19
+# The corpus specification defined 19 source documents. Four have been added
+# since, each a genuinely distinct instrument rather than an edit to an
+# existing entry:
+#
+#   RBI-FS-OUTSOURCE-NBFC-2017     vs the 2006 bank circular, which excludes
+#                                  NBFCs while this one is addressed to them
+#   RBI-DIGITAL-LENDING-2025       vs the 2022 Guidelines, which it repeals
+#   RBI-FRAUD-NBFC-2024            the NBFC one of three parallel Directions
+#   RBI-NBFC-CREDIT-INFO-...-2025  vs the generic Jan-2025 instrument
+#
+# Separate entries in every case, so a citation can never attribute one
+# document's requirements to the other.
+EXPECTED_DOCUMENTS = 23
+
+# The documents actually obtained. Nothing else may be cited from.
+DOWNLOADED_DOCUMENT_IDS = {
+    "RBI-IT-GOV-2023",
+    "RBI-IT-OUTSOURCE-2023",
+    "RBI-FS-OUTSOURCE-NBFC-2017",
+    "RBI-DIGITAL-LENDING-2025",
+    "RBI-FRAUD-NBFC-2024",
+    "RBI-NBFC-CREDIT-INFO-REPORTING-2025",
+}
+
+
+def test_manifest_contains_the_expected_documents(manifest):
+    assert len(manifest) == EXPECTED_DOCUMENTS
 
 
 def test_manifest_documents_are_not_rules(manifest):
@@ -97,9 +121,17 @@ def test_every_manifest_document_has_required_metadata(manifest):
 
 
 def test_manifest_tiers_match_the_specification(manifest):
-    assert len(manifest.by_tier(TIER_0)) == 8
-    assert len(manifest.by_tier(TIER_1)) == 10
+    # tier_0 gained the 2025 Digital Lending Directions; tier_1 gained the
+    # NBFC outsourcing, fraud-risk and credit-information instruments.
+    assert len(manifest.by_tier(TIER_0)) == 9
+    assert len(manifest.by_tier(TIER_1)) == 13
     assert len(manifest.by_tier(TIER_2)) == 1
+    assert (
+        len(manifest.by_tier(TIER_0))
+        + len(manifest.by_tier(TIER_1))
+        + len(manifest.by_tier(TIER_2))
+        == EXPECTED_DOCUMENTS
+    ), "every document must sit in exactly one tier"
 
 
 def test_manifest_statuses_are_from_the_declared_vocabularies(manifest):
@@ -138,16 +170,79 @@ def test_duplicate_document_id_is_rejected():
 # ===========================================================================
 
 
-def test_no_document_is_marked_downloaded(manifest):
-    """None of the 19 sources has been obtained, and the manifest says so."""
-    assert manifest.citable() == []
-    assert len(manifest.unresolved()) == 19
+def test_only_the_obtained_documents_are_marked_downloaded(manifest):
+    """Exactly the six obtained documents are citable -- and no others.
+
+    The point of the assertion is not the number. It is that citability is
+    driven by whether the file was actually obtained, so a document cannot
+    become quotable by having its identity recorded more confidently.
+    """
+    assert {d.document_id for d in manifest.citable()} == DOWNLOADED_DOCUMENT_IDS
+    assert len(manifest.unresolved()) == EXPECTED_DOCUMENTS - len(
+        DOWNLOADED_DOCUMENT_IDS
+    )
 
 
-def test_no_document_claims_a_source_url(manifest):
-    """An invented URL looks resolvable and is not. None is asserted."""
-    for document in manifest.all():
-        assert document.source_url is None
+def test_every_downloaded_document_has_a_local_file_that_exists(manifest):
+    """'downloaded' must mean the bytes are on disk, not that we meant to."""
+    repo_root = MANIFEST_PATH.parents[2]
+    for document in manifest.citable():
+        assert document.local_path, document.document_id
+        path = repo_root / document.local_path
+        assert path.is_file(), f"{document.document_id}: missing {path}"
+        assert path.stat().st_size > 0
+
+
+def test_no_document_that_was_not_obtained_claims_a_source_url(manifest):
+    """An invented URL looks resolvable and is not.
+
+    A URL is allowed only where the document was actually obtained and the
+    URL verified against it. For everything else the honest value is null --
+    a plausible-looking link could send an ingestion run at the wrong
+    instrument, which is worse than having no link at all.
+    """
+    for document in manifest.unresolved():
+        assert document.source_url is None, document.document_id
+
+
+def test_the_two_outsourcing_instruments_are_kept_distinct(manifest):
+    """The bank and NBFC outsourcing circulars must never be merged.
+
+    They are separate instruments eleven years apart, and their entity scope
+    is not merely different but opposite: the 2006 one explicitly excludes
+    NBFCs, the 2017 one is addressed to them. Collapsing them would let a
+    finding against an NBFC cite a document that says it does not apply to
+    NBFCs -- and it would look perfectly well-sourced.
+    """
+    banks = manifest.get("RBI-FINANCIAL-SERVICES-OUTSOURCE")
+    nbfcs = manifest.get("RBI-FS-OUTSOURCE-NBFC-2017")
+
+    assert banks is not None and nbfcs is not None
+    assert banks.issued_date != nbfcs.issued_date
+    assert "nbfc" in banks.excluded
+    assert "nbfc" in nbfcs.applies_to
+    assert "nbfc" not in banks.applies_to
+    # Only the one actually obtained may be cited.
+    assert nbfcs.is_citable() is True
+    assert banks.is_citable() is False
+
+
+def test_the_nbfc_outsourcing_circular_is_not_claimed_to_be_current(manifest):
+    """A 2017 circular is not current merely because we have the file.
+
+    Whether it is still the operative NBFC outsourcing instrument has not
+    been verified, so it is recorded non-operative in both vocabularies. The
+    manifest has no "unverified" status, and of the values it does have,
+    only a non-current one cannot outrank a genuinely current source.
+    """
+    document = manifest.get("RBI-FS-OUTSOURCE-NBFC-2017")
+
+    assert document.is_operative() is False
+    assert document.raw["is_current"] is False
+    assert document.raw.get("regulatory_status_note"), (
+        "a conservatively-assigned status must say it was assigned "
+        "conservatively, or a later reader will take it as established"
+    )
 
 
 def test_documents_with_unresolved_exact_urls_are_flagged(manifest):
@@ -179,11 +274,19 @@ def test_unresolved_documents_are_not_citable(manifest):
 
 
 def test_coverage_report_does_not_claim_readiness(manifest):
+    """Three of twenty is progress, and still nowhere near ready.
+
+    Three tier_0 documents are now citable, which is exactly the kind of
+    partial progress that could be misreported as coverage. The report must
+    keep saying the corpus is not ready, because six tier_0 documents are
+    still missing.
+    """
     report = manifest.coverage_report()
-    assert report["total_documents"] == 19
-    assert report["citable_documents"] == 0
+    assert report["total_documents"] == EXPECTED_DOCUMENTS
+    assert report["citable_documents"] == len(DOWNLOADED_DOCUMENT_IDS)
+    assert report["tier_0_citable"] == 3
+    assert report["tier_0_total"] == 9
     assert report["corpus_ready_for_compliance"] is False
-    assert report["tier_0_citable"] == 0
 
 
 def test_draft_source_is_marked_provisional(manifest):

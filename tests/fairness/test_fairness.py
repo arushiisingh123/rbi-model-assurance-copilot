@@ -647,3 +647,191 @@ def test_groups_agree_with_evidence_on_pending_inputs_too():
         assert reported["count"] == evidenced["group_count"]
         assert reported["favorable_count"] == evidenced["favorable_count"]
         assert reported["selection_rate"] == evidenced["selection_rate"]
+
+
+# ---------------------------------------------------------------------------
+# Small-group stability annotation (app.config.thresholds)
+# ---------------------------------------------------------------------------
+
+
+def test_small_groups_are_flagged_but_never_excluded():
+    """A small group is annotated, counted, and left in every calculation.
+
+    Dropping small groups would hide exactly the minorities fairness analysis
+    exists to examine, so the flag must be pure annotation.
+    """
+    import pandas as pd
+
+    from app.config.thresholds import MIN_GROUP_SIZE_FOR_STABLE_RATE
+    from app.fairness.fairness import fairness_rate_stability, fairness_report
+
+    # 'tiny' gets 2 of 5 favourable; 'big' gets 40 of 40.
+    preds = pd.Series([0, 0, 1, 1, 1] + [0] * 40)
+    sens = pd.Series(["tiny"] * 5 + ["big"] * 40)
+
+    report = fairness_report(preds, sens, favorable_label=0)
+
+    by_group = {g["group"]: g for g in report["groups"]}
+
+    # Still counted in full -- nothing was filtered out.
+    assert by_group["tiny"]["count"] == 5
+    assert by_group["big"]["count"] == 40
+    assert sum(g["count"] for g in report["groups"]) == 45
+
+    # The aggregates reflect the small group's real rate (2/5 = 0.4).
+    assert by_group["tiny"]["selection_rate"] == 0.4
+    assert report["disparate_impact_ratio"] == 0.4
+
+    stability = fairness_rate_stability(preds, sens, favorable_label=0)
+    assert stability["min_group_size"] == MIN_GROUP_SIZE_FOR_STABLE_RATE
+    assert stability["small_groups"] == ["tiny"]
+    assert stability["driving_groups_small"] is True
+    assert "No group was excluded from the calculation" in stability["note"]
+    # Descriptive, not inferential: no statistical conclusion is asserted.
+    assert "statistically unreliable" not in stability["note"]
+    assert "sensitive to individual records" in stability["note"]
+
+
+def test_stability_annotation_does_not_change_status():
+    """The flag is not a classifier: status still comes from the DI ratio."""
+    import pandas as pd
+
+    from app.config.thresholds import classify_disparate_impact
+    from app.fairness.fairness import fairness_rate_stability, fairness_report
+
+    # Two small groups, but equal rates -> ratio 1.0 -> PASS.
+    preds = pd.Series([0] * 5 + [0] * 5)
+    sens = pd.Series(["a"] * 5 + ["b"] * 5)
+
+    report = fairness_report(preds, sens, favorable_label=0)
+
+    assert report["disparate_impact_ratio"] == 1.0
+    assert report["status"] == classify_disparate_impact(1.0) == "PASS"
+    # Flagged as small, yet still a PASS -- the annotation did not downgrade it.
+    stability = fairness_rate_stability(preds, sens, favorable_label=0)
+    assert stability["small_groups"] == ["a", "b"]
+
+
+def test_no_warning_when_every_group_is_large_enough():
+    import pandas as pd
+
+    from app.fairness.fairness import fairness_rate_stability
+
+    preds = pd.Series([0] * 30 + [1] * 30)
+    sens = pd.Series(["a"] * 30 + ["b"] * 30)
+
+    stability = fairness_rate_stability(preds, sens, favorable_label=0)
+
+    assert stability["small_groups"] == []
+    assert stability["driving_groups_small"] is False
+    assert stability["note"] is None
+
+
+def test_most_and_least_favoured_groups_are_reported():
+    import pandas as pd
+
+    from app.fairness.fairness import fairness_rate_stability
+
+    preds = pd.Series([0] * 40 + [0] * 20 + [1] * 20)
+    sens = pd.Series(["high"] * 40 + ["low"] * 40)
+
+    stability = fairness_rate_stability(preds, sens, favorable_label=0)
+
+    assert stability["most_favoured_group"] == "high"
+    assert stability["least_favoured_group"] == "low"
+
+
+def test_rate_stability_does_not_alter_the_agreed_report_shape():
+    """The agreed fairness_report() contract is untouched by this addition."""
+    import pandas as pd
+
+    from app.fairness.fairness import fairness_report
+
+    preds = pd.Series([0, 1, 0, 1])
+    sens = pd.Series(["A", "A", "B", "B"])
+
+    report = fairness_report(preds, sens, favorable_label=0)
+
+    assert "rate_stability" not in report
+    for entry in report["groups"]:
+        assert set(entry.keys()) == GROUPS_FIELD_KEYS
+
+
+def test_small_group_threshold_is_configurable_and_labelled_a_convention():
+    """The threshold is a project convention, not a validated standard.
+
+    Nothing in this repository establishes the default value, so it must be
+    configurable and must describe itself honestly. Changing it may change
+    which groups are FLAGGED; it must never change a metric or a status.
+    """
+    import pandas as pd
+
+    from app.config import thresholds as T
+    from app.fairness.fairness import fairness_rate_stability, fairness_report
+
+    # 'mid' has 20 records, 'big' has 60.
+    preds = pd.Series([0] * 10 + [1] * 10 + [0] * 60)
+    sens = pd.Series(["mid"] * 20 + ["big"] * 60)
+
+    before = fairness_report(preds, sens, favorable_label=0)
+    original = T.MIN_GROUP_SIZE_FOR_STABLE_RATE
+    try:
+        T.set_min_group_size(10)
+        low = fairness_rate_stability(preds, sens, favorable_label=0)
+        assert low["min_group_size"] == 10
+        assert low["small_groups"] == []          # 20 >= 10, so nothing flagged
+        assert low["threshold_is_project_default"] is False
+
+        T.set_min_group_size(50)
+        high = fairness_rate_stability(preds, sens, favorable_label=0)
+        assert high["min_group_size"] == 50
+        assert high["small_groups"] == ["mid"]    # 20 < 50, now flagged
+    finally:
+        T.set_min_group_size(original)
+
+    # The metrics and the status are identical regardless of the threshold.
+    after = fairness_report(preds, sens, favorable_label=0)
+    assert after == before
+
+
+def test_threshold_basis_states_it_is_not_validated():
+    import pandas as pd
+
+    from app.fairness.fairness import fairness_rate_stability
+
+    stability = fairness_rate_stability(
+        pd.Series([0, 1, 0, 1]), pd.Series(["A", "A", "B", "B"]), favorable_label=0
+    )
+    basis = stability["threshold_basis"].lower()
+    assert "convention" in basis
+    assert "not an rbi requirement" in basis
+    assert "not validated" in basis
+
+
+def test_group_sizes_are_exposed_for_every_group():
+    """A reader can check the numbers rather than trusting the flag."""
+    import pandas as pd
+
+    from app.fairness.fairness import fairness_rate_stability
+
+    stability = fairness_rate_stability(
+        pd.Series([0] * 5 + [1] * 40), pd.Series(["s"] * 5 + ["l"] * 40),
+        favorable_label=0,
+    )
+    assert stability["group_sizes"] == {"s": 5, "l": 40}
+
+
+def test_rejects_a_non_positive_threshold():
+    import pytest
+
+    from app.config import thresholds as T
+
+    original = T.MIN_GROUP_SIZE_FOR_STABLE_RATE
+    try:
+        with pytest.raises(ValueError):
+            T.set_min_group_size(0)
+        with pytest.raises(ValueError):
+            T.set_min_group_size(-5)
+        assert T.MIN_GROUP_SIZE_FOR_STABLE_RATE == original
+    finally:
+        T.set_min_group_size(original)

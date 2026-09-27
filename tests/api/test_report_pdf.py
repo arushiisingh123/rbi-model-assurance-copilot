@@ -101,3 +101,47 @@ def test_report_pdf_content_matches_assurance_result_json():
     assert len(verified_requirements) == 16
     applicabilities = {r["applicability"] for r in verified_requirements}
     assert applicabilities == {"APPLIES", "NOT_APPLICABLE"}
+
+
+def test_report_pdf_renders_when_only_some_rows_were_explained():
+    """A sampled explainer must not break the PDF.
+
+    per_instance is not guaranteed to be parallel to the model's prediction
+    arrays. The in-process scikit-learn adapters explain every held-out row,
+    but the REST-served XGBoost adapter explains only a few of them, because
+    KernelExplainer is too expensive to run per row over HTTP. The
+    explainability section used to index per_instance with a position taken
+    from the probabilities array, which raised IndexError and failed the
+    whole route with a 500 rather than rendering the rows it did have.
+
+    Each per_instance record carries the row it explains, so the section is
+    driven by row_index here instead of by position.
+    """
+    from app.api.orchestration import build_assurance_result
+    from app.report.pdf_report import build_pdf_report
+
+    result = build_assurance_result()
+    explained = result["explainability"]["per_instance"]
+    assert len(explained) > 3, "fixture expects a fully explained baseline"
+
+    # Keep three explanations out of a much longer prediction array, exactly
+    # the shape a sampling adapter produces.
+    result["explainability"]["per_instance"] = explained[:3]
+    assert len(result["model"]["probabilities"]) > 3
+
+    pdf_bytes = build_pdf_report(result)
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 1000
+
+
+def test_report_pdf_renders_when_no_row_was_explained():
+    """An adapter that declares no explainability must still yield a PDF."""
+    from app.api.orchestration import build_assurance_result
+    from app.report.pdf_report import build_pdf_report
+
+    result = build_assurance_result()
+    result["explainability"]["per_instance"] = []
+
+    pdf_bytes = build_pdf_report(result)
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 1000

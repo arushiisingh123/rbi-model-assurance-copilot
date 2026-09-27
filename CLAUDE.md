@@ -1008,12 +1008,27 @@ docs/decisions.md, "Phase 4 checkpoint sign-off", under "Level of approval".
 
 Evidence coverage limitation — do not overstate it:
 
-The approved RBI corpus currently contains a single 2014 excerpt
-(is_excerpt: True, is_current: False). Real retrieval therefore grounds
-1 of the 5 report sections; the other 4 return NOT_FOUND. NOT_FOUND means
-no verified evidence was retrieved from the indexed corpus — it does NOT
-mean that no RBI rule exists. Phase 3 completion must never be described as
-complete regulatory coverage.
+SUPERSEDED (2026-09-22) — the paragraph below described Phase 3, when the
+corpus held only the 2014 excerpt. It is retained so the change is visible.
+
+  "The approved RBI corpus currently contains a single 2014 excerpt
+  (is_excerpt: True, is_current: False). Real retrieval therefore grounds
+  1 of the 5 report sections; the other 4 return NOT_FOUND."
+
+CURRENT POSITION: six verified RBI Directions are downloaded and indexed
+(IT Governance 2023, IT Outsourcing 2023, Financial Services Outsourcing by
+NBFCs 2017, Digital Lending 2025, Fraud Risk Management in NBFCs 2024, and
+NBFC Credit Information Reporting 2025). Real retrieval grounds all 5 report
+sections, each citation carrying the PDF page and the clause the document
+itself prints. The 2014 excerpt is retained as a regression fixture and is
+excluded from production retrieval.
+
+The caveat is UNCHANGED and must not be weakened: that is coverage of the
+report's five SECTIONS, not of RBI regulation. The manifest declares 23
+instruments and 17 have not been obtained. NOT_FOUND means no verified
+evidence was retrieved from the indexed corpus — it does NOT mean that no
+RBI rule exists. This must never be described as complete regulatory
+coverage.
 
 Carried forward and NOT yet implemented — see docs/decisions.md, "Phase 3
 checkpoint sign-off" and "Phase 4 checkpoint sign-off":

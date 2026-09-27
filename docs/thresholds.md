@@ -194,6 +194,52 @@ and no RBI source setting one has been identified. It is reported for
 transparency and comparison across groups, and it may inform human
 review, but it does not drive an automated status.
 
+### 4.3 Small-group reporting threshold
+
+`MIN_GROUP_SIZE_FOR_STABLE_RATE` (default 30) marks which observed
+fairness groups have few records. It is **not** a status threshold and
+belongs in this section rather than section 3, because it classifies
+nothing.
+
+**Status of this value: a project/analytics convention with no source.**
+Unlike the disparate-impact and PSI thresholds in section 3, which are
+recognised industry conventions, **nothing in this repository establishes
+the value 30**. No project decision, no RBI instrument, and no statistical
+method adopted by this project validates it. It exists so the warning has
+a default, and the team is expected to set it deliberately.
+
+**What it may be used to say:** that a group is small, and that the
+reported ratio may therefore be sensitive to individual records.
+
+**What it must NOT be used to say:** that any result is "statistically
+unreliable", "statistically unstable", or outside a confidence bound.
+Those are statistical conclusions, and this project defines no method for
+drawing one. Describing the value as a minimum sample-size *requirement*
+would be equally wrong.
+
+**Three separate things, never conflated:**
+
+| | What it is | Can it change PASS/FAIL? |
+|---|---|---|
+| Fairness result | `demographic_parity_diff`, `disparate_impact_ratio` | — |
+| Fairness status | PASS/WARNING/FAIL from section 3.1 | Yes — this is the only source |
+| Small-sample warning | This advisory annotation | **No, never** |
+
+**Guarantees:**
+
+- No group is ever excluded from a calculation because of it. Dropping
+  small groups would hide exactly the minorities fairness analysis exists
+  to examine and would silently change the reported metrics.
+- It never changes a metric or a status. Changing the threshold alters
+  only which groups are flagged.
+
+**Configuring it:** set the `RBI_MIN_GROUP_SIZE` environment variable, or
+call `app.config.thresholds.set_min_group_size()`. A non-positive or
+unparseable value is rejected rather than silently defaulted. The API
+reports `threshold_is_project_default: true` while it remains unset, so
+the dashboard can say on screen that the default is not a team-agreed
+value.
+
 ---
 
 ## 5. Where these live in code

@@ -15,8 +15,30 @@ from app.report.generate import (
 from tests.report.test_generate_report import FakeGroqClient
 
 
+def _finds_nothing(*, query):
+    """A retriever that always returns text no section's relevance bar accepts."""
+    return {
+        "query": query,
+        "retrieved_text": "General administrative correspondence of no regulatory content.",
+        "source": "irrelevant-source",
+        "chunk_index": 0,
+    }
+
+
 def test_not_found_safe_failure_end_to_end(real_pipeline, monkeypatch):
-    """Test full real retrieval path triggering NOT_FOUND safe-failure and regulatory claim stripping."""
+    """A section that retrieved nothing must strip the model's regulatory claim.
+
+    Driven by a retriever that finds nothing, rather than by the live corpus.
+    This previously relied on the corpus being a single 2014 IRAC excerpt, in
+    which ML governance vocabulary does not appear, so four of five sections
+    were NOT_FOUND as a side effect. The corpus is now six current RBI
+    Directions and the section queries ask about the obligations they impose,
+    so all five sections retrieve -- and this property stopped being exercised
+    at exactly the moment retrieval got better.
+
+    The property itself is unchanged and is the one that matters: when there
+    is no evidence, a hallucinated regulatory claim must not survive.
+    """
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     hallucinated = {
@@ -24,7 +46,6 @@ def test_not_found_safe_failure_end_to_end(real_pipeline, monkeypatch):
         for k in ["model", "explainability", "fairness", "drift", "compliance"]
     }
 
-    # retrieval_fn=None uses the real IsolatedRAGRetriever against the actual IRAC document
     out = generate_report(
         model=real_pipeline["model"],
         explainability=real_pipeline["explainability"],
@@ -32,7 +53,7 @@ def test_not_found_safe_failure_end_to_end(real_pipeline, monkeypatch):
         drift=real_pipeline["drift"],
         compliance=real_pipeline["compliance"],
         llm_client=FakeGroqClient(canned_response_dict=hallucinated),
-        retrieval_fn=None,
+        retrieval_fn=_finds_nothing,
     )
 
     validated = ReportResult(**out)
@@ -42,18 +63,7 @@ def test_not_found_safe_failure_end_to_end(real_pipeline, monkeypatch):
         s for s in out["sections"]
         if s["retrieved_evidence"]["evidence_status"] == "NOT_FOUND"
     ]
-    # In the real IRAC document, ML governance keywords (model, explainability,
-    # fairness, drift) do not exist, so exactly those four are NOT_FOUND while
-    # the compliance/NPA section does retrieve. Asserted as a set rather than
-    # ">= 1": all five being NOT_FOUND was the C1 symptom (retrieval raising
-    # TypeError into the broad fallback), and a loose count could not tell the
-    # two situations apart.
-    assert {s["heading"] for s in not_found_sections} == {
-        "Credit Scoring Model Evaluation",
-        "Feature Explainability (SHAP)",
-        "Fairness Evaluation",
-        "Data & Prediction Drift Detection",
-    }
+    assert len(not_found_sections) == 5, "every section should have found nothing here"
 
     for s in not_found_sections:
         ev = s["retrieved_evidence"]
@@ -67,12 +77,45 @@ def test_not_found_safe_failure_end_to_end(real_pipeline, monkeypatch):
         assert "§" not in interp["text"]
 
     coverage = out["evidence_coverage"]
-    assert coverage["not_found"] >= 1
+    assert coverage["not_found"] == 5
     assert coverage["retrieved"] + coverage["not_found"] == coverage["total"] == 5
 
-    # No section may have "cited_evidence" (Phase 3 regulatory corpus is interim only)
+    # No section may have "cited_evidence" (the regulatory corpus is curated,
+    # not complete, so a narrative is never presented as regulatory authority)
     for s in out["sections"]:
         assert s["llm_interpretation"]["regulatory_basis"] != "cited_evidence"
+
+
+def test_the_live_corpus_now_grounds_the_report(real_pipeline, monkeypatch):
+    """The C1 counterpart: against the real corpus, sections DO retrieve.
+
+    Guards the symptom the previous version of the test above was written for
+    -- every section NOT_FOUND because retrieval was broken -- now that a
+    healthy result is no longer "four of five NOT_FOUND".
+    """
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    out = generate_report(
+        model=real_pipeline["model"],
+        explainability=real_pipeline["explainability"],
+        fairness=real_pipeline["fairness"],
+        drift=real_pipeline["drift"],
+        compliance=real_pipeline["compliance"],
+        llm_client=FakeGroqClient(),
+        retrieval_fn=None,
+    )
+
+    assert out["evidence_coverage"]["retrieved"] >= 3, (
+        "the report should reach the current RBI Directions for most sections"
+    )
+    for section in out["sections"]:
+        for citation in section["retrieved_evidence"]["citations"]:
+            # Structured, and pointing at a place in a real document.
+            assert citation["page"] is not None
+            assert citation["source_clause"]
+            assert citation["reference_number"]
+        # Retrieval still never becomes regulatory authority.
+        assert section["llm_interpretation"]["regulatory_basis"] != "cited_evidence"
 
 
 def test_retrieval_exception_fails_safe(real_pipeline):

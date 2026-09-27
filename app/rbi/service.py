@@ -238,6 +238,10 @@ def assess_rbi_requirements(
     decisions: list[ApplicabilityDecision] = []
     findings: list[RequirementFinding] = []
     notes: list[str] = []
+    # Documents that ARE present and DO apply, yet yielded no requirement.
+    # Counted separately from absent documents because the two say different
+    # things about the corpus and call for different remedies.
+    obtained_but_unmapped: list[str] = []
 
     # Authority order first, so that when several documents cover the same
     # ground the current one is assessed (and reported) ahead of a draft or
@@ -253,6 +257,8 @@ def assess_rbi_requirements(
         requirements = list(requirement_source(document))
 
         if not requirements:
+            if document.is_citable():
+                obtained_but_unmapped.append(document.document_id)
             if include_unassessable:
                 findings.append(
                     blocked_finding(
@@ -277,11 +283,35 @@ def assess_rbi_requirements(
             )
 
     coverage = manifest.coverage_report()
+
+    # TWO DIFFERENT EMPTY STATES, REPORTED DIFFERENTLY
+    #
+    # "we do not have the document" and "we have the document but have not
+    # mapped its requirements" both produce zero assessed requirements, and
+    # both are honest. They are not the same statement, and a reader who
+    # cannot tell them apart cannot tell whether the remedy is to obtain a
+    # source or to build extraction.
+    #
+    # Before this, only the first was reported, gated on the corpus having no
+    # citable document at all. Obtaining the first PDFs silently switched the
+    # note off while requirement extraction still did not exist -- so the
+    # assessment stopped explaining itself at exactly the point the
+    # explanation became least obvious. Neither branch changes a status:
+    # every affected finding is NOT_ASSESSED either way.
     if not coverage.get("citable_documents"):
         notes.append(
             "No source document in the RBI corpus has been obtained, so no "
             "regulatory requirement could be extracted or cited. Every finding "
             "below records why it could not be assessed. This is not a "
+            "statement of compliance."
+        )
+    elif obtained_but_unmapped:
+        notes.append(
+            f"{len(obtained_but_unmapped)} applicable source document(s) have "
+            "been obtained, but no requirement has been extracted or mapped "
+            "from them yet, so none could be assessed: "
+            f"{', '.join(sorted(obtained_but_unmapped))}. Holding a document "
+            "is not the same as having mapped its requirements. This is not a "
             "statement of compliance."
         )
 

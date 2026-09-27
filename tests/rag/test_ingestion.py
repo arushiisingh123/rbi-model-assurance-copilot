@@ -292,3 +292,80 @@ def test_ingestion_does_not_import_the_phase0_smoke_test():
     assert not any("smoke_test" in name for name in imported), (
         f"ingestion must not import the Phase 0 smoke test; imports: {sorted(imported)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase A: PDF sources, and the text path that must not have moved
+# ---------------------------------------------------------------------------
+
+
+def test_the_2014_text_source_is_still_read_byte_for_byte():
+    """The regression that guards the pre-PDF ingestion path.
+
+    Adding PDF support put a branch in load_source(). This asserts the other
+    side of that branch is untouched: the stored excerpt's text must still be
+    exactly the file, with no normalising, trimming or re-encoding, and with
+    no structure attached -- a text file genuinely has no pages.
+    """
+    loaded = load_source(RBI_IRAC_ADVANCES_2014)
+
+    assert loaded.text == loaded.path.read_text(encoding="utf-8")
+    assert loaded.structure is None
+    assert loaded.is_paginated is False
+
+
+def test_a_text_source_cannot_anchor_a_page_citation():
+    """No page is better than a page that was assumed."""
+    loaded = load_source(RBI_IRAC_ADVANCES_2014)
+
+    assert loaded.structure is None, (
+        "a .txt source must never acquire page structure; a page number "
+        "invented for it would look checkable and resolve to nothing"
+    )
+
+
+def _downloaded_sources():
+    from app.rag.corpus import corpus_from_manifest
+
+    return list(corpus_from_manifest())
+
+
+def test_every_downloaded_pdf_loads_with_page_structure():
+    for source in _downloaded_sources():
+        loaded = load_source(source)
+
+        assert loaded.is_paginated, f"{source.doc_id} lost its structure"
+        assert loaded.structure.page_count > 0
+        assert loaded.text == loaded.structure.text
+        assert loaded.text.strip()
+
+
+def test_a_pdf_that_is_not_a_pdf_fails_as_an_ingestion_error(tmp_path):
+    """Extraction failure surfaces as IngestionError, like any unreadable source.
+
+    Callers already handle IngestionError; leaking PDFExtractionError would
+    make a corrupt PDF crash a path that a corrupt text file does not.
+    """
+    from app.rag.corpus import RBISourceMetadata
+
+    decoy = tmp_path / "data" / "broken.pdf"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("not a PDF at all", encoding="utf-8")
+
+    source = RBISourceMetadata(
+        doc_id="broken-pdf",
+        title="Broken",
+        issuing_authority="Reserve Bank of India (RBI)",
+        document_type="Master Direction",
+        local_path="data/broken.pdf",
+    )
+
+    with pytest.raises(IngestionError):
+        load_source(source, repo_root=tmp_path)
+
+
+def test_pdf_suffix_routing_is_declared_not_guessed():
+    from app.rag.ingestion import PDF_SUFFIXES
+
+    assert ".pdf" in PDF_SUFFIXES
+    assert ".txt" not in PDF_SUFFIXES

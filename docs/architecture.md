@@ -79,11 +79,14 @@ Per-module state:
   output still carries `is_mock: True` (see `app/rbi/metadata.py`).
 - **RAG** (Nidhi) — the full Phase 3 pipeline: corpus → ingestion →
   chunking → embeddings → vector store → retrieval → `build_evidence()`,
-  production-connected to report generation. The **approved corpus contains
-  one source**, a 2014 excerpt (`is_excerpt: True`, `is_current: False`), so
-  real retrieval grounds **1 of the 5 report sections**; the rest return
-  `NOT_FOUND`, meaning no verified evidence was retrieved from the indexed
-  corpus — never that no RBI rule exists. `app/rag/smoke_test.py` is the
+  production-connected to report generation. The **production corpus is the
+  six verified RBI Directions** marked `downloaded` in
+  `app/rbi/corpus_manifest.json`, read by `corpus_from_manifest()`; real
+  retrieval grounds **all 5 report sections** from them, each citation
+  carrying the PDF page and the clause the document itself prints. A section
+  with no match still returns `NOT_FOUND`, meaning no verified evidence was
+  retrieved from the indexed corpus — never that no RBI rule exists. The 2014
+  excerpt remains a regression fixture and is not in the production corpus. `app/rag/smoke_test.py` is the
   retained Phase 0 smoke test and is **not** the production path.
 - **Report** (Khushi) — `app/report/generate.py` assembles findings plus
   retrieved evidence and calls the LLM (Groq). The three layers

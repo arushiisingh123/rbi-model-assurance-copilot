@@ -233,11 +233,17 @@ class RBICorpus:
 
 
 # ---------------------------------------------------------------------------
-# Approved RBI source documents
+# The 2014 regression fixture
 #
-# Phase 3A currently has exactly ONE approved source: the limited historical
-# excerpt already in the repo. Every value below is taken from that file's
-# own header -- see the file for the full scope/limitation statement.
+# APPROVED_CORPUS holds exactly one source: the limited historical excerpt
+# already in the repo. It is NOT the production corpus and has not been since
+# the RBI Directions were obtained -- ``corpus_from_manifest()`` below reads
+# the manifest, and ``app.rag.retrieval.default_corpus()`` uses that for live
+# retrieval. This record is retained as the regression fixture that proves the
+# non-PDF ingestion path still works.
+#
+# Every value below is taken from that file's own header -- see the file for
+# the full scope/limitation statement.
 # ---------------------------------------------------------------------------
 
 RBI_IRAC_ADVANCES_2014 = RBISourceMetadata(
@@ -293,6 +299,113 @@ def get_source(doc_id: str) -> RBISourceMetadata | None:
     return APPROVED_CORPUS.get(doc_id)
 
 
+# ---------------------------------------------------------------------------
+# Manifest-backed corpus
+#
+# ``app/rbi/corpus_manifest.json`` is the canonical record of which documents
+# this project has, and it is DATA -- adding a source is a manifest edit. The
+# functions below read it, so no second hardcoded registry has to be kept in
+# step with it.
+#
+# ``APPROVED_CORPUS`` above stays exactly as it was. It holds the 2014 text
+# excerpt, which is not a manifest document: it is the regression fixture that
+# proves the non-PDF ingestion path still works. Keeping it separate means a
+# manifest edit can never silently break that proof.
+# ---------------------------------------------------------------------------
+
+# Manifest keys a document must carry to become an RBISourceMetadata. They are
+# absent from entries for documents nobody has obtained, which is correct --
+# such a document has no local file to describe.
+MANIFEST_METADATA_KEYS: tuple[str, ...] = (
+    "issuing_authority",
+    "document_type",
+)
+
+
+class ManifestSourceError(Exception):
+    """A downloaded manifest entry cannot be turned into source metadata."""
+
+
+def source_from_manifest_document(document) -> RBISourceMetadata:
+    """Build an ``RBISourceMetadata`` from one manifest document.
+
+    Only meaningful for an entry that has actually been downloaded: the
+    record describes a local file, and there is no local file otherwise.
+
+    Every value is copied from the manifest. Nothing is derived, defaulted or
+    inferred -- in particular ``is_current`` is read from the entry rather
+    than computed from ``regulatory_status``, because "not superseded as far
+    as anyone has checked" and "verified to be in force" are different claims
+    and only the manifest author can make the second one.
+
+    Raises
+    ------
+    ManifestSourceError
+        If the entry is not downloaded, has no ``local_path``, or is missing
+        a key ``RBISourceMetadata`` requires.
+    """
+    if not document.is_citable():
+        raise ManifestSourceError(
+            f"{document.document_id!r} has source_status "
+            f"{document.source_status!r}; only a downloaded document has a "
+            "local file to describe"
+        )
+    if not document.local_path:
+        raise ManifestSourceError(
+            f"{document.document_id!r} is marked downloaded but has no "
+            "local_path, so nothing can be loaded for it"
+        )
+
+    raw = document.raw or {}
+    missing = [key for key in MANIFEST_METADATA_KEYS if not raw.get(key)]
+    if missing:
+        raise ManifestSourceError(
+            f"{document.document_id!r} is downloaded but its manifest entry "
+            f"is missing {', '.join(missing)}, which RBISourceMetadata "
+            "requires and which must be read from the document, not guessed"
+        )
+
+    applies_to = ", ".join(document.applies_to) or None
+
+    return RBISourceMetadata(
+        doc_id=document.document_id,
+        title=document.title,
+        issuing_authority=raw["issuing_authority"],
+        document_type=raw["document_type"],
+        local_path=document.local_path,
+        publication_date=document.issued_date,
+        effective_date=document.effective_date,
+        reference_number=document.circular_number,
+        source_url=document.source_url,
+        retrieved_date=raw.get("retrieved_date"),
+        applicable_to=applies_to,
+        is_excerpt=bool(raw.get("is_excerpt", False)),
+        is_current=bool(raw.get("is_current", False)),
+        coverage_note=raw.get("coverage_note"),
+        scope_note=raw.get("scope_note"),
+    )
+
+
+def corpus_from_manifest(manifest=None) -> RBICorpus:
+    """Every DOWNLOADED manifest document, as a corpus ready for ingestion.
+
+    Documents that have not been obtained are skipped, not stubbed: a corpus
+    entry for a document nobody has is a citation waiting to happen.
+
+    The 2014 text excerpt is deliberately NOT included -- it is not a manifest
+    document. It remains available as ``APPROVED_CORPUS`` for the regression
+    that proves text ingestion still works.
+    """
+    if manifest is None:
+        from app.rbi.manifest import load_manifest
+
+        manifest = load_manifest()
+
+    return RBICorpus(
+        [source_from_manifest_document(document) for document in manifest.citable()]
+    )
+
+
 __all__ = [
     "RBISourceMetadata",
     "RBICorpus",
@@ -300,6 +413,10 @@ __all__ = [
     "REQUIRED_FIELDS",
     "RBI_IRAC_ADVANCES_2014",
     "APPROVED_CORPUS",
+    "MANIFEST_METADATA_KEYS",
+    "ManifestSourceError",
     "list_sources",
     "get_source",
+    "source_from_manifest_document",
+    "corpus_from_manifest",
 ]

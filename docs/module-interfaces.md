@@ -699,7 +699,7 @@ The `/report` endpoint returns an evidence-grounded model assurance report synth
 **Implementation (Phase 3, Khushi):**
 The endpoint is backed by `app.report.generate.generate_report()`, which:
 - Gathers real Layer 1 findings verbatim from `model`, `explainability`, `fairness`, `drift`, `compliance`.
-- Evaluates Layer 2 regulatory evidence via the canonical RAG pipeline — `app.rag.retrieval.build_default_retriever()` and `app.rag.evidence.build_evidence()` — with an explicit Python relevance gate. Citations carry provenance `"interim_single_document"` referencing the one approved RBI source, a 2014 excerpt (`is_excerpt: True`, `is_current: False`). `app/rag/smoke_test.py` is **not** the production retrieval path; it is retained only for the test-only `IsolatedRAGRetriever` (see `docs/decisions.md`, 2026-09-11, "Phase 3 integration (C1/C2/C3)").
+- Evaluates Layer 2 regulatory evidence via the canonical RAG pipeline — `app.rag.retrieval.build_default_retriever()` and `app.rag.evidence.build_evidence()` — with an explicit Python relevance gate. Citations carry provenance `"interim_multi_document"` and are structured: document title, RBI reference number, page, the clause the PDF itself prints (`source_clause`), section title, source URL, and `is_current` / `is_excerpt`. Where the verified register cites the same provision, its own reference is carried separately as `register_clause` — the two numbering schemes are never merged (see `app/rbi/clause_crossref.py`). The production corpus is the six downloaded RBI Directions in `app/rbi/corpus_manifest.json`; the 2014 excerpt is retained as a regression fixture and is NOT retrievable in production. `app/rag/smoke_test.py` is **not** the production retrieval path; it is retained only for the test-only `IsolatedRAGRetriever` (see `docs/decisions.md`, 2026-09-11, "Phase 3 integration (C1/C2/C3)").
 - Calls Groq (`openai/gpt-oss-120b`) via Groq Python SDK in a single LLM call for the entire report.
 - Enforces strict safety in Python: `regulatory_basis` is computed in code (`"illustrative_rule_only"` for interim retrieval, `"none"` for `NOT_FOUND`). Any `NOT_FOUND` section where the LLM generated regulatory claim language is stripped and replaced with: `"The generated response for this section was withheld because no supporting evidence was retrieved."`
 - If live generation fails or `GROQ_API_KEY` is not set, the endpoint falls back gracefully to `MOCK_REPORT_RESULT` with a fallback disclaimer, returning HTTP 200 (never 500).
@@ -707,16 +707,20 @@ The endpoint is backed by `app.report.generate.generate_report()`, which:
 **Key Architectural Principle:** The three evaluation layers must remain strictly decoupled and visible field-for-field — never collapsed into an unverified block of AI prose:
 
 1. **`technical_finding` (Layer 1):** Deterministic analytical output produced by Python evaluation modules (`app.models`, `app.explainability`, `app.fairness`, `app.drift`, `app.compliance`). Provenance: `"observed"` | `"mock"` | `"synthetic_fixture"`.
-2. **`retrieved_evidence` (Layer 2):** Grounded regulatory text retrieved via vector search over the RBI corpus. If no governing rule was found, `evidence_status` is explicitly `"NOT_FOUND"`. Citation provenance: `"verified"` | `"illustrative"` | `"interim_single_document"`.
+2. **`retrieved_evidence` (Layer 2):** Grounded regulatory text retrieved via vector search over the RBI corpus. If no governing rule was found, `evidence_status` is explicitly `"NOT_FOUND"`. Citation provenance: `"verified"` | `"illustrative"` | `"interim_multi_document"`.
 3. **`llm_interpretation` (Layer 3):** Natural language synthesis strictly constrained to cited evidence and analytical findings. Must never invent regulatory requirements (`regulatory_basis`: `"cited_evidence" | "illustrative_rule_only" | "none"`).
 
 Abridged below — one section is shown to illustrate the three-layer shape.
 The section shown uses `RETRIEVED` for illustration; in the actual
 `MOCK_REPORT_RESULT` fixture the single `RETRIEVED` section is "RBI Compliance
 Rules Mapping", and the model, explainability, fairness, and drift sections
-are `NOT_FOUND` with zero citations and `regulatory_basis: "none"`. That
-mirrors real retrieval coverage against the current one-source corpus. See
+are `NOT_FOUND` with zero citations and `regulatory_basis: "none"`. See
 `app/api/mock_data.py`.
+
+That 1-of-5 shape is the FIXTURE's, and no longer mirrors real retrieval:
+against the six-document corpus the live path grounds all five sections. The
+fixture is returned only when `GROQ_API_KEY` is absent, and carries a
+`FALLBACK MOCK REPORT` disclaimer saying so.
 
 ```json
 {
@@ -767,6 +771,41 @@ mirrors real retrieval coverage against the current one-source corpus. See
   "is_mock": true
 }
 ```
+
+### `GET /report/pdf` (PDF assurance report)
+
+Returns the assurance run as a downloadable PDF (`application/pdf`,
+`Content-Disposition: attachment`). Built by `app/report/pdf_report.py` from
+the **same** `build_assurance_result()` data as `GET /assurance-result`, with
+`compliance.verified_requirements` attached through the shared
+`_attach_verified_requirements()` helper — so the declared-profile wiring
+exists in exactly one place and the two endpoints cannot disagree.
+
+It is a different document from `GET /report`, not a rendering of it:
+`GET /report` is the LLM-narrated three-layer report, while the PDF is the
+assurance summary (model, explainability, fairness, drift, technical checks,
+RBI requirements). Both draw their RBI grounding from the same place.
+
+**RBI grounding in the PDF.** The "Technical Assurance Checks" table is
+followed by "RBI Sources Consulted", listing the passages retrieved for those
+checks with four columns: INSTRUMENT, PAGE, **SOURCE CLAUSE** and **REGISTER
+CLAUSE**. The two clause numbers are separate columns for the same reason
+they are separate fields on `Citation`: `source_clause` is what the cited
+document prints, `register_clause` is how
+`app/rbi/verified_requirements.py` refers to the same provision, and they
+differ for fourteen of the sixteen verified requirements. Printing the
+register's number against the document would name a clause that document
+does not contain.
+
+Those citations are produced by `app.rag.citations.attach_citations_to_findings()`,
+the same helper `GET /compliance` uses, so a finding carries identical
+evidence on both endpoints and in the PDF.
+
+Status labels come from `frontend/src/utils/statusMeaning.json` via
+`app/report/status_meaning.py`, shared with the dashboard.
+
+Errors match the other model-facing routes: `404` for an unknown `model_id`,
+`502` when a REST-backed model's service is unreachable.
 
 ### Phase 3 additive report fields (implemented, C3 — 2026-09-11)
 

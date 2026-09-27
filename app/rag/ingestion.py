@@ -7,13 +7,26 @@ WHAT THIS MODULE DOES
     file, read the stored text exactly as it is on disk, and return that
     text paired with the source's provenance metadata.
 
+TWO FILE FORMATS, ONE RETURN TYPE
+    ``.txt`` sources are read verbatim, exactly as they always have been.
+    ``.pdf`` sources go through ``app/rag/pdf_extract.py``, which returns
+    the same kind of thing plus the page and clause structure a citation
+    needs. Either way the caller gets a ``LoadedDocument``; the PDF case
+    additionally populates ``LoadedDocument.structure``.
+
+    The text path is deliberately untouched by the PDF work. The stored 2014
+    excerpt must keep loading byte-for-byte identically -- see
+    ``tests/rag/test_ingestion.py`` for the regression that holds this.
+
 WHAT THIS MODULE DOES NOT DO
     - No chunking, embeddings, vector store, retrieval, LLM, or report
-      generation -- those are later, separate tasks.
+      generation -- those are later, separate tasks. In particular this
+      module does not decide which page or clause a chunk belongs to; it
+      only makes that answerable, via ``structure``.
     - No cleaning, normalising, summarising, trimming, or interpreting the
-      text. ``LoadedDocument.text`` is a verbatim copy of the file. Deciding
-      which spans of a file to index (for example excluding the provenance
-      header) belongs to the chunking task, not here.
+      text. For a ``.txt`` source ``LoadedDocument.text`` is a verbatim copy
+      of the file. Deciding which spans of a file to index (for example
+      excluding the provenance header) belongs to the chunking task.
     - No metadata is invented. Every provenance value comes straight from
       the ``RBISourceMetadata`` record; a value the source never stated
       stays ``None``.
@@ -25,8 +38,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from app.rag.corpus import APPROVED_CORPUS, RBICorpus, RBISourceMetadata
+from app.rag.pdf_extract import ExtractedDocument, PDFExtractionError, extract_pdf
+
+# Suffixes routed through the PDF extractor. Everything else is read as UTF-8
+# text, which is what every pre-PDF source was.
+PDF_SUFFIXES = (".pdf",)
 
 # The provenance fields ingestion carries through, in a stable order. Kept
 # here as an explicit statement of what ingestion promises to preserve;
@@ -84,19 +103,31 @@ class LoadedDocument:
         the same object, so provenance is preserved rather than copied or
         rebuilt.
     text
-        The file's content, read verbatim as UTF-8. Not chunked, cleaned,
-        or interpreted.
+        The document's content. For a text source, the file read verbatim as
+        UTF-8. For a PDF, the extracted page text joined in page order, with
+        line breaks preserved. Not chunked, cleaned, or interpreted.
     path
         The resolved absolute path the text was read from.
+    structure
+        For a PDF, the ``ExtractedDocument`` carrying page spans and clause
+        marks, so a later stage can ask which page and clause any offset in
+        ``text`` belongs to. ``None`` for a text source, which genuinely has
+        no page or clause structure -- not an omission, an absence.
     """
 
     metadata: RBISourceMetadata
     text: str
     path: Path
+    structure: Optional[ExtractedDocument] = None
 
     @property
     def doc_id(self) -> str:
         return self.metadata.doc_id
+
+    @property
+    def is_paginated(self) -> bool:
+        """Whether this document can anchor a page-level citation."""
+        return self.structure is not None
 
 
 def load_source(
@@ -139,20 +170,34 @@ def load_source(
             f"at {path} (from local_path {source.local_path!r})"
         )
 
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise IngestionError(
-            f"could not read source document for {source.doc_id!r} at {path}: "
-            f"{exc}"
-        ) from exc
+    structure: Optional[ExtractedDocument] = None
+
+    if path.suffix.lower() in PDF_SUFFIXES:
+        try:
+            structure = extract_pdf(path)
+        except PDFExtractionError as exc:
+            raise IngestionError(
+                f"could not read source document for {source.doc_id!r} at "
+                f"{path}: {exc}"
+            ) from exc
+        text = structure.text
+    else:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise IngestionError(
+                f"could not read source document for {source.doc_id!r} at {path}: "
+                f"{exc}"
+            ) from exc
 
     if not text.strip():
         raise IngestionError(
             f"source document for {source.doc_id!r} at {path} is empty"
         )
 
-    return LoadedDocument(metadata=source, text=text, path=path)
+    return LoadedDocument(
+        metadata=source, text=text, path=path, structure=structure
+    )
 
 
 def load_by_id(
@@ -194,6 +239,7 @@ __all__ = [
     "IngestionError",
     "SourceDocumentNotFoundError",
     "PROVENANCE_FIELDS",
+    "PDF_SUFFIXES",
     "provenance",
     "load_source",
     "load_by_id",

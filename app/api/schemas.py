@@ -103,6 +103,47 @@ class FairnessGroup(BaseModel):
     count: int
     favorable_count: int
     selection_rate: float
+    # Deliberately NO per-group size flag here: these four fields are the
+    # contract agreed with the fairness module and locked by its tests.
+    # Which groups are too small is reported once, on
+    # FairnessResult.rate_stability.small_groups.
+
+
+class RateStability(BaseModel):
+    """Group sizes reported against a configurable small-group threshold.
+
+    DESCRIPTIVE, NOT INFERENTIAL, and a THIRD thing distinct from the two
+    that already exist:
+
+      1. the fairness RESULT       -- demographic_parity_diff, disparate_impact_ratio
+      2. the fairness STATUS       -- PASS/WARNING/FAIL from the unchanged
+                                      disparate-impact thresholds
+      3. this small-sample WARNING -- advisory only
+
+    Nothing here removes a group from a calculation, and nothing here can
+    change (2). The threshold behind it is a project convention that no
+    project document validates, so this layer never asserts that a result is
+    statistically unreliable -- only that a group is small and the ratio may
+    therefore be sensitive to individual records.
+    """
+    # The configured threshold actually applied.
+    min_group_size: int
+    # True when nobody configured it, so the screen can say the default is
+    # not a validated or team-agreed value.
+    threshold_is_project_default: bool = True
+    # Plain statement of what the threshold is and is not.
+    threshold_basis: Optional[str] = None
+    small_groups: list[str] = Field(default_factory=list)
+    # Observed size of every group, so a reader can judge the numbers directly
+    # rather than trusting the flag.
+    group_sizes: dict[str, int] = Field(default_factory=dict)
+    # True when a group that DETERMINES the reported ratio is itself small.
+    driving_groups_small: bool = False
+    note: Optional[str] = None
+    # The groups whose rates produced the reported aggregates. Null on the
+    # PENDING paths, where no comparison was made.
+    most_favoured_group: Optional[str] = None
+    least_favoured_group: Optional[str] = None
 
 
 class FairnessResult(BaseModel):
@@ -137,6 +178,10 @@ class FairnessDriftResult(BaseModel):
     """Combined output payload for fairness and drift analysis."""
     fairness: FairnessResult
     drift: DriftResult
+    # Sibling of `fairness`, deliberately not folded into it: that model's
+    # key set is a contract locked by the fairness module's tests. Reporting
+    # only -- it excludes no group and changes no status.
+    fairness_rate_stability: Optional[RateStability] = None
     note: Optional[str] = None
 
 
@@ -157,7 +202,28 @@ class ComplianceFinding(BaseModel):
     rule_description: str
     technical_finding_ref: str
     status: Status
+    # The rule's own provenance string. Every rule in app/rbi/rules carries
+    # the ILLUSTRATIVE marker, and this field was previously absent from the
+    # schema, so Pydantic dropped it and the API reported None -- leaving the
+    # UI with nothing to caveat a FAIL with. The class docstring above always
+    # claimed this field was present; now it actually is.
+    rbi_source: Optional[str] = None
     evidence_chunks: list[str] = Field(default_factory=list)
+    # Structured form of the same retrieved evidence: document, page, the
+    # clause the PDF prints, and the register's cross-reference where one
+    # exists. ``evidence_chunks`` is kept alongside it as the internal
+    # chunk-id list rather than being replaced, because it is produced inside
+    # the compliance engine and asserted by that engine's own tests.
+    #
+    # A citation here NEVER affects ``status``. The rule engine decides status
+    # from technical findings alone; retrieval only says where the regulation
+    # that discusses the topic can be read. An empty list means no supporting
+    # text was retrieved -- not that the check failed, and not that it passed.
+    #
+    # Quoted: Citation is defined further down this module, with the report
+    # schemas it originally belonged to. Resolved by model_rebuild() at the
+    # end of the file.
+    citations: list["Citation"] = Field(default_factory=list)
     model_id: Optional[str] = None
     assurance_run_id: Optional[str] = None
 
@@ -421,25 +487,55 @@ class TechnicalFinding(BaseModel):
 class Citation(BaseModel):
     """Source reference for retrieved regulatory evidence.
 
-    The five optional fields below are additive (Phase 3 C3) and carry the
-    canonical source attribution that ``app.rag.evidence.RBIEvidence`` already
-    holds, so a citation is not reduced to quote + filename. They default to
-    ``None`` so every existing caller stays valid.
+    The optional fields are additive and carry the canonical source
+    attribution that ``app.rag.evidence.RBIEvidence`` already holds, so a
+    citation is not reduced to quote + filename. They default to ``None`` so
+    every existing caller stays valid.
 
-    ``is_excerpt`` / ``is_current`` matter most: the one approved source is a
-    limited 2014 excerpt (``is_excerpt=True``, ``is_current=False``). Retrieving
-    it must never present it as current or binding regulation
-    (docs/decisions.md, "Historical / excerpt status").
+    ``is_excerpt`` / ``is_current`` matter most for how a citation may be
+    presented: a historical excerpt must never be shown as current or binding
+    regulation (docs/decisions.md, "Historical / excerpt status").
+
+    TWO CLAUSE NUMBERS, DELIBERATELY NOT MERGED
+        ``source_clause`` is what the cited PDF actually prints.
+        ``register_clause`` is what ``app/rbi/verified_requirements.py`` cites
+        for the same provision, which it read from the RBI website.
+
+        They differ for FOURTEEN of the sixteen verified requirements -- the
+        2023 IT Outsourcing Directions letter clause 16's sub-items a) ... m)
+        while the website numbers them 16.1 ... 16.13, and the register
+        prefixes the Fraud Directions' clauses with their chapter. Only the
+        two IT Governance clauses are numbered identically in both. Both are correct for their
+        own source. Rewriting one into the other would put a clause reference
+        on screen that the document being cited does not contain, so they are
+        carried separately and must be LABELLED separately wherever they are
+        shown. ``register_clause`` is ``None`` for any clause the register
+        does not cite, which is most of any Direction.
+
+        The pairing comes from ``app/rbi/clause_crossref.py``, where each row
+        was established by locating the register's own verbatim quote in the
+        document -- never by transforming one number into the other.
     """
     source: str
     locator: str
     quote: str
-    provenance: Literal["verified", "illustrative", "interim_single_document"]
+    provenance: Literal["verified", "illustrative", "interim_multi_document"]
     source_url: Optional[str] = None
     publication_date: Optional[str] = None
     document_type: Optional[str] = None
     is_excerpt: Optional[bool] = None
     is_current: Optional[bool] = None
+
+    # Where in the document. None means "not known", never a guess: a page
+    # number invented for an unpaginated source would look checkable and
+    # resolve to nothing.
+    page: Optional[int] = None
+    source_clause: Optional[str] = None
+    section_title: Optional[str] = None
+    register_clause: Optional[str] = None
+    reference_number: Optional[str] = None
+    # Internal tracing handle, not a citation a reviewer would quote.
+    chunk_id: Optional[str] = None
 
 
 class RetrievedEvidence(BaseModel):
@@ -472,7 +568,12 @@ class ReportSection(BaseModel):
     heading: str
     technical_finding: TechnicalFinding
     retrieved_evidence: RetrievedEvidence
-    llm_interpretation: LLMInterpretation
+    # Optional: when no LLM provider is configured the report is still produced
+    # from the REAL technical findings and REAL retrieved evidence, and this
+    # layer is simply absent. None means "no narrative was generated" -- it
+    # never means the two layers above are missing or mocked. The dashboard
+    # already renders that case explicitly rather than inventing prose.
+    llm_interpretation: Optional[LLMInterpretation] = None
     supporting_evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -509,3 +610,8 @@ class ReportResult(BaseModel):
 # build the response schema.
 # ---------------------------------------------------------------------------
 AssuranceResult.model_rebuild()
+
+
+# ComplianceFinding.citations is annotated as a forward reference because
+# Citation is declared later in this module. Resolve it now that both exist.
+ComplianceFinding.model_rebuild()

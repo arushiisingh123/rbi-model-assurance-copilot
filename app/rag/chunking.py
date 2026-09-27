@@ -18,6 +18,25 @@ CHUNKING STRATEGY (deliberately simple, matches the Phase 0 smoke test)
     ``app/rag/smoke_test.chunk_text`` already does). This does not invent,
     paraphrase, or interpret any regulatory text.
 
+PAGINATED SOURCES ARE CHUNKED PAGE BY PAGE (Phase B)
+    When a ``LoadedDocument`` carries extractor structure (a PDF), chunking
+    restarts at every page boundary, so no chunk spans two pages. A chunk
+    that straddled pages 15 and 16 could honestly claim neither, and would
+    have to claim one -- which is precisely the kind of citation that looks
+    checkable and resolves to the wrong place.
+
+    Each chunk then takes the page it sits on, and the clause that was in
+    force where it starts, from ``app/rag/pdf_extract.py``. Those values are
+    READ, never derived here: this module does not parse clause numbers and
+    does not know what a clause looks like.
+
+    Front matter -- covering letters and contents pages, everything before
+    the document's first substantive clause -- carries ``section_id = None``
+    rather than inheriting a neighbouring clause's number.
+
+    A text source has no pages and no clauses, so its chunks keep the
+    ``None`` they have always had. That path is unchanged.
+
 WHAT THIS MODULE DOES NOT DO
     No embeddings, vector database, retrieval, LLM, or report generation --
     those are later, separate tasks. This module does not import
@@ -162,6 +181,9 @@ def chunk_document(
     if chunk_size_words < 1:
         raise ValueError(f"chunk_size_words must be >= 1, got {chunk_size_words}")
 
+    if document.structure is not None:
+        return _chunk_paginated(document, chunk_size_words=chunk_size_words)
+
     words = document.text.split()
     if not words:
         raise ValueError(
@@ -179,6 +201,137 @@ def chunk_document(
                 source_metadata=metadata,
             )
         )
+    return chunks
+
+
+def _chunk_paginated(
+    document: LoadedDocument,
+    *,
+    chunk_size_words: int,
+) -> list[DocumentChunk]:
+    """Chunk a PDF page by page, attaching page and clause provenance.
+
+    Chunks never span a page boundary, so ``page`` is always exactly true
+    rather than "mostly". Within a page, words are windowed exactly as the
+    text path windows them, so the two produce the same kind of chunk.
+
+    ``section_id`` is whatever clause ``pdf_extract`` reports as in force at
+    the chunk's starting offset, and ``None`` before the first clause. This
+    module never parses, completes or normalises a clause identifier.
+
+    KNOWN LIMITATION: section_id describes where a chunk STARTS
+        A window that begins in the tail of clause 16 and runs on into
+        clause 17 is labelled 16. The page is always exact; the clause is the
+        one the chunk opens in. 40% of chunks span a boundary this way.
+
+        The label is imprecise but never WRONG in the dangerous direction: a
+        chunk can only ever be labelled with a clause at or before it, never
+        one that begins later. tests/rag/test_chunk_page_provenance.py pins
+        that invariant, which is what stops a citation pointing a reviewer
+        past the provision they were shown.
+
+        FOUR ALTERNATIVES WERE IMPLEMENTED AND MEASURED. ALL WERE REJECTED.
+        Clause-aware segmentation, with short segments merged forward into
+        their neighbour at several thresholds:
+
+            strategy        chunks  <8 words  crossing  coverage  page@5
+            ------------------------------------------------------------
+            THIS MODULE      1264        36     40.0%       5/5   15/16
+            pure split       1724       215      0.0%       3/5   15/16
+            merge <15w       1511        89     22.8%       2/5   14/16
+            merge <25w       1459       104     31.5%       4/5   14/16
+            merge <35w       1442       118     44.7%         -       -
+
+        Not one improves on the current behaviour. Higher merge thresholds
+        are worse still: they re-create the spanning they were meant to
+        remove.
+
+        WHY -- AND A CORRECTION TO THE EARLIER EXPLANATION
+        An earlier version of this note blamed retrieval scoring: it claimed
+        short chunks outranked longer passages, and that length-normalising
+        the ranking would make clause splitting viable. That was a
+        hypothesis, and measuring it showed it to be WRONG.
+
+        Nine ranking strategies were benchmarked against this corpus --
+        plain cosine, pivoted length normalisation (Singhal et al.) at three
+        slopes, a bounded short-chunk penalty at three settings, and two
+        query-coverage blends -- each under this chunking and under clause
+        splitting. Two findings killed the hypothesis:
+
+          * Under THIS chunking, not one selected chunk is under eight words.
+            There is no short-chunk problem for a scorer to fix, which is why
+            the short-chunk penalty changed nothing at all.
+          * Under clause splitting, the sections that lose coverage retrieve
+            chunks of 40 and 30 words -- not short ones -- while the single
+            five-word chunk that does win actually PASSES the relevance gate.
+
+        The real mechanism is simpler. Splitting redistributes text across
+        boundaries, so a different passage ranks first. The new winner is
+        usually a topically adjacent clause that does not happen to contain
+        the multi-word phrase app/report/generate.py's relevance gate looks
+        for -- "regular monitoring and assessment" where the gate wants
+        "periodic assessment". Retrieval is not failing: doc@5 stays 16/16
+        and page@5 stays 15/16 throughout. The section gate is what fails.
+
+        So this is not a scoring problem and not a chunk-length problem. It
+        is the interaction between chunk size and a lexical relevance gate,
+        and no ranking change can fix it. The simpler windowing stands,
+        because a slightly imprecise clause label is a far better failure
+        than losing two report sections.
+    """
+    structure = document.structure
+    metadata = document.metadata
+    chunks: list[DocumentChunk] = []
+    chunk_index = 0
+
+    for page_number, page_start, page_end in structure.page_spans:
+        # A contents page is navigation, not regulatory text. It lists every
+        # heading in the document, which makes it match almost any topical
+        # query -- and a citation pointing at a table of contents tells a
+        # reviewer nothing. Indexing it actively crowds out the real clause.
+        if structure.is_contents_page(page_number):
+            continue
+
+        page_text = structure.text[page_start:page_end]
+
+        # Walk the page's words while tracking each one's offset in the full
+        # document text, so a chunk's clause is looked up at the position the
+        # chunk actually begins -- not at the start of the page, which would
+        # attribute a whole page to its first clause.
+        offsets: list[int] = []
+        words: list[str] = []
+        cursor = 0
+        for token in page_text.split():
+            found = page_text.find(token, cursor)
+            if found < 0:  # pragma: no cover - split() guarantees presence
+                found = cursor
+            offsets.append(page_start + found)
+            words.append(token)
+            cursor = found + len(token)
+
+        if not words:
+            # A genuinely blank page (separator sheets do occur). It
+            # contributes no chunk rather than an empty one.
+            continue
+
+        for start in range(0, len(words), chunk_size_words):
+            window = words[start : start + chunk_size_words]
+            mark = structure.section_for_offset(offsets[start])
+            chunks.append(
+                DocumentChunk(
+                    text=" ".join(window),
+                    chunk_index=chunk_index,
+                    source_metadata=metadata,
+                    page=page_number,
+                    section_id=mark.section_id if mark else None,
+                    section_title=mark.section_title if mark else None,
+                )
+            )
+            chunk_index += 1
+
+    if not chunks:
+        raise ValueError(f"document {document.doc_id!r} has no words to chunk")
+
     return chunks
 
 

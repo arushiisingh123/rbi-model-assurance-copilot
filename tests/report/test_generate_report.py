@@ -92,19 +92,32 @@ def fake_retrieval_all_not_found(query: str) -> Dict[str, Any]:
 
 
 def fake_retrieval_mixed(query: str) -> Dict[str, Any]:
-    """Retrieval test double returning relevant text for compliance and non-relevant text for others."""
-    if "non performing" in query.lower() or "prudential" in query.lower():
+    """Double returning relevant text for compliance, irrelevant for the rest.
+
+    Routes on the COMPLIANCE section's query vocabulary. That vocabulary
+    changed when the corpus did: the section used to ask about non-performing
+    assets (the 2014 excerpt's subject) and now asks about compliance with
+    statutory and regulatory requirements, which is what the current
+    Directions actually impose. The double's purpose -- exactly one section
+    clears the relevance bar -- is unchanged.
+    """
+    lowered = query.lower()
+    if "statutory and regulatory" in lowered or "non performing" in lowered:
         return {
             "query": query,
-            "retrieved_text": "A non-performing asset (NPA) is an advance where interest remains overdue.",
-            "source": "RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt",
+            "retrieved_text": (
+                "The RE shall ensure compliance with all applicable statutory "
+                "and regulatory requirements in respect of the outsourced "
+                "activity."
+            ),
+            "source": "Master Direction on Outsourcing of Information Technology Services",
             "chunk_index": 2,
             "num_chunks_indexed": 17,
         }
     return {
         "query": query,
         "retrieved_text": "General bank administrative guidelines without technical keywords.",
-        "source": "RBI_MASTER_CIRCULAR_IRAC_ADVANCES_2014-07-01.txt",
+        "source": "Master Direction on Outsourcing of Information Technology Services",
         "chunk_index": 0,
         "num_chunks_indexed": 17,
     }
@@ -188,7 +201,7 @@ def test_generate_report_retrieved_sets_regulatory_basis_illustrative(sample_inp
     for section in parsed.sections:
         assert section.retrieved_evidence.evidence_status == "RETRIEVED"
         assert len(section.retrieved_evidence.citations) == 1
-        assert section.retrieved_evidence.citations[0].provenance == "interim_single_document"
+        assert section.retrieved_evidence.citations[0].provenance == "interim_multi_document"
         assert section.llm_interpretation.regulatory_basis == "illustrative_rule_only"
         assert section.llm_interpretation.regulatory_basis != "cited_evidence"
 
@@ -238,17 +251,57 @@ def test_generate_report_missing_api_key_raises_unavailable(sample_inputs, monke
     assert "GROQ_API_KEY" in str(exc_info.value)
 
 
-def test_report_endpoint_fallback_on_missing_key(monkeypatch):
-    """Verify /report endpoint returns HTTP 200 with mock fallback when GROQ_API_KEY is unset."""
+def test_report_endpoint_without_a_key_is_real_but_has_no_narrative(monkeypatch):
+    """No LLM provider must not mean a stored fixture.
+
+    This previously returned MOCK_REPORT_RESULT, whose disclaimers still
+    described a single 2014 excerpt and whose coverage read 1 of 5 -- while the
+    PDF generated from the same page cited six current RBI Directions. One demo
+    flow contradicted itself.
+
+    The report is now genuinely produced and simply omits the narrative layer.
+    The technical findings and retrieved RBI evidence are real; no prose is
+    invented to fill the gap.
+    """
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     client = TestClient(app)
-    response = client.get("/report")
+    response = client.get("/report?model_id=german-credit-logistic-regression")
 
     assert response.status_code == 200
-    body = response.json()
-    parsed = ReportResult(**body)
-    assert parsed.is_mock is True
-    assert any("FALLBACK MOCK REPORT" in d for d in parsed.disclaimers)
+    parsed = ReportResult(**response.json())
+
+    # Nothing is mocked, and the report names the model and run it describes.
+    assert parsed.is_mock is False
+    assert parsed.model_id == "german-credit-logistic-regression"
+    assert parsed.assurance_run_id
+
+    # The narrative layer is absent rather than fabricated.
+    assert parsed.sections
+    assert all(section.llm_interpretation is None for section in parsed.sections)
+    assert any("NO LLM NARRATIVE" in d for d in parsed.disclaimers)
+
+    # Coverage is measured, not asserted from a fixture.
+    assert parsed.evidence_coverage.total == len(parsed.sections)
+    assert (
+        parsed.evidence_coverage.retrieved + parsed.evidence_coverage.not_found
+        == parsed.evidence_coverage.total
+    )
+
+    # The stale pre-integration claims must never reappear.
+    blob = " ".join(parsed.disclaimers).lower()
+    for stale in (
+        "1 of 5",
+        "single approved rbi excerpt",
+        "irac advances 2014",
+        "single-document excerpt",
+        "upcoming verified regulatory corpus",
+    ):
+        assert stale not in blob, f"stale claim resurfaced: {stale!r}"
+
+    # The honest caveats must survive.
+    assert any("not mean no rbi rule exists" in d.lower() for d in parsed.disclaimers)
+    assert any("never establish rbi compliance" in d.lower() for d in parsed.disclaimers)
+    assert any("not evidence of the organisational controls" in d.lower() for d in parsed.disclaimers)
 
 
 def test_report_endpoint_fallback_on_groq_exception(monkeypatch, sample_inputs):
@@ -417,23 +470,30 @@ def test_isolated_retriever_accepts_the_query_keyword():
     assert outcome["retrieved_text"].strip()
 
 
+# An NPA question, which the 2014 IRAC excerpt genuinely answers. Written out
+# here instead of borrowing SECTION_QUERIES["compliance"]: this test exercises
+# the retrieval_fn CALL PATH against the historical fixture, and must not move
+# every time the production section vocabulary is retuned for a new corpus.
+IRAC_FIXTURE_QUERY = "What is a non performing asset prudential norms classification advances"
+
+
 def test_real_retriever_reaches_retrieved_through_retrieve_section_evidence(caplog):
     """C1 regression: real retriever + production call path -> RETRIEVED.
 
-    Uses the compliance/NPA query, which the interim IRAC corpus genuinely
-    contains, so RETRIEVED is the correct expectation. Pre-fix this returned
-    NOT_FOUND with a swallowed TypeError.
+    Uses an NPA query, which the interim IRAC corpus genuinely contains, so
+    RETRIEVED is the correct expectation. Pre-fix this returned NOT_FOUND with
+    a swallowed TypeError.
     """
     import logging
 
-    from app.report.generate import SECTION_QUERIES, _retrieve_section_evidence
+    from app.report.generate import _retrieve_section_evidence
 
     retriever = IsolatedRAGRetriever()
     try:
         with caplog.at_level(logging.WARNING, logger="app.report.generate"):
             evidence = _retrieve_section_evidence(
                 section_key="compliance",
-                query=SECTION_QUERIES["compliance"],
+                query=IRAC_FIXTURE_QUERY,
                 retrieval_fn=retriever.query,
             )
     finally:
@@ -455,7 +515,7 @@ def test_real_retriever_reaches_retrieved_through_retrieve_section_evidence(capl
     citation = evidence.citations[0]
     assert "RBI_MASTER_CIRCULAR_IRAC_ADVANCES" in citation.source
     assert citation.locator.startswith("chunk #")
-    assert citation.provenance == "interim_single_document"
+    assert citation.provenance == "interim_multi_document"
     assert "non performing" in citation.quote.lower()
 
 

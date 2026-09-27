@@ -99,7 +99,14 @@ def test_build_assurance_result_structure():
     # Fairness & Drift domain
     assert res["fairness_drift"]["fairness"]["is_mock"] is False
     assert res["fairness_drift"]["drift"]["is_mock"] is False
-    assert set(res["fairness_drift"].keys()) == {"fairness", "drift"}
+    # "fairness" and "drift" are unchanged; the stability annotation is
+    # additive and sits BESIDE fairness rather than inside it, precisely so
+    # the six-key fairness contract asserted just below stays intact.
+    assert set(res["fairness_drift"].keys()) == {
+        "fairness",
+        "drift",
+        "fairness_rate_stability",
+    }
     assert set(res["fairness_drift"]["fairness"].keys()) == {
         "protected_attribute",
         "demographic_parity_diff",

@@ -398,30 +398,51 @@ def _explainability_section(data):
     story.append(Paragraph("Global feature importance (top 12, mean |contribution|)", styles["SubHeading"]))
     story.append(_chart_horizontal_bar(labels, values, "Mean |SHAP contribution|"))
 
+    probs = model["probabilities"]
+    preds = model["predictions"]
+    ids = model["instance_ids"]
+
+    candidates = []
+    contrib_by_row = {}
     if exp["per_instance"]:
+        # per_instance is NOT always parallel to the model arrays. Each record
+        # carries the row it explains, and that is the only safe way to line the
+        # two up. An adapter may explain every held-out row (the in-process
+        # scikit-learn models explain all 200) or only a sample of them (the
+        # REST-served XGBoost model explains 3 of 50, because KernelExplainer is
+        # too expensive to run per row over HTTP). Indexing per_instance with a
+        # position taken from probabilities assumed the first case and raised
+        # IndexError in the second, which failed the whole PDF with a 500.
+        contrib_by_row = {
+            record["row_index"]: record["contributions"]
+            for record in exp["per_instance"]
+            if isinstance(record.get("row_index"), int)
+            and 0 <= record["row_index"] < len(probs)
+        }
+        # Choose only among rows that actually have an explanation to show.
+        candidates = sorted(contrib_by_row)
+
+    if candidates:
+        order = sorted(candidates, key=lambda i: probs[i])
+        selected = list(dict.fromkeys(
+            order[:2] + order[-2:]
+            + [min(candidates, key=lambda i: abs(probs[i] - 0.5))]
+        ))[:5]
+
         story.append(Paragraph("Sampled instances (predicted-probability extremes)", styles["SubHeading"]))
         story.append(Paragraph(
-            f"5 of {len(exp['per_instance'])} held-out instances, selected by predicted-probability "
-            "extremes: the 2 most confidently predicted GOOD, the 2 most confidently predicted BAD, "
-            "and the 1 closest to the decision boundary. Labeled by instance ID; not a random or "
-            "representative sample.",
+            f"{len(selected)} of {len(contrib_by_row)} explained held-out instances, selected by "
+            "predicted-probability extremes: the most confidently predicted GOOD, the most "
+            "confidently predicted BAD, and the one closest to the decision boundary. Labeled by "
+            "instance ID; not a random or representative sample.",
             styles["BodyMuted"],
         ))
         story.append(Spacer(1, 6))
 
-        probs = model["probabilities"]
-        preds = model["predictions"]
-        ids = model["instance_ids"]
-        per_instance = exp["per_instance"]
-        order = sorted(range(len(probs)), key=lambda i: probs[i])
-        selected = list(dict.fromkeys(
-            order[:2] + order[-2:] + [min(range(len(probs)), key=lambda i: abs(probs[i] - 0.5))]
-        ))[:5]
-
         header = ["INSTANCE", "PRED.", "P(BAD)", "TOP CONTRIBUTING FEATURES"]
         rows = []
         for idx in selected:
-            contrib = per_instance[idx]["contributions"]
+            contrib = contrib_by_row[idx]
             top3 = sorted(contrib.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3]
             top3_text = "; ".join(f"{k} ({v:+.2f})" for k, v in top3)
             rows.append([
@@ -569,7 +590,68 @@ def _technical_checks_section(data):
                 Paragraph(meaning["label"], status_style),
             ])
         story.append(_zebra_table(header, rows, [32 * mm, CONTENT_W - 32 * mm - 26 * mm, 26 * mm]))
+    story += _retrieved_sources_table(findings)
     return story
+
+
+def _retrieved_sources_table(findings):
+    """The RBI passages retrieved for the checks above, if any.
+
+    WHY THIS IS HERE
+        The checks above are illustrative project thresholds, not regulation.
+        Retrieval separately finds the RBI passages that discuss the same
+        subjects, and GET /compliance has always returned them. Without this
+        block the downloadable PDF showed the checks while silently dropping
+        the grounding the JSON carried -- a reviewer reading the PDF alone
+        could not tell which Direction, page or clause was consulted.
+
+        These passages did NOT decide any status above. They say where the
+        regulation on the topic can be read.
+
+    TWO CLAUSE NUMBERS, LABELLED APART
+        SOURCE CLAUSE is what the cited PDF itself prints. REGISTER CLAUSE is
+        how the verified register refers to the same provision, read from the
+        RBI website; the two differ for fourteen of the sixteen verified
+        requirements. They are separate columns here for the same reason they
+        are separate fields in the API: printing the register's number against
+        the document would name a clause that document does not contain.
+    """
+    seen, rows = set(), []
+    for finding in findings or []:
+        for citation in finding.get("citations") or []:
+            key = citation.get("chunk_id") or (
+                citation.get("source"), citation.get("page"), citation.get("source_clause")
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append([
+                Paragraph(citation.get("source") or "—", styles["TableCell"]),
+                Paragraph(str(citation.get("page") or "—"), styles["TableCellMono"]),
+                Paragraph(citation.get("source_clause") or "—", styles["TableCellMono"]),
+                Paragraph(citation.get("register_clause") or "—", styles["TableCellMono"]),
+            ])
+
+    if not rows:
+        return []
+
+    return [
+        Spacer(1, 6 * mm),
+        Paragraph("RBI Sources Consulted", styles["SectionHeading"]),
+        Paragraph(
+            "Passages retrieved from the indexed RBI Directions covering the same "
+            "subjects as the checks above. They show where the regulation can be "
+            "read; they did not decide any status. SOURCE CLAUSE is the clause the "
+            "document itself prints. REGISTER CLAUSE is our register's reference to "
+            "the same provision and is not printed in that document.",
+            styles["SectionSubtitle"],
+        ),
+        _zebra_table(
+            ["INSTRUMENT", "PAGE", "SOURCE CLAUSE", "REGISTER CLAUSE"],
+            rows,
+            [CONTENT_W - 78 * mm, 16 * mm, 30 * mm, 32 * mm],
+        ),
+    ]
 
 
 def _requirement_card(req):

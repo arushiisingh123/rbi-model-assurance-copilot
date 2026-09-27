@@ -54,6 +54,16 @@ app = FastAPI(
     description="API for credit-scoring model assurance and RBI compliance evidence.",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://rbi-model-assurance-copilot-xi.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Monitoring lane (owner: Arushi) -- self-contained router, see app/api/monitoring.py.
 app.include_router(monitoring_router)
 

@@ -8,7 +8,7 @@ import os
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Response
-
+from fastapi.middleware.cors import CORSMiddleware
 logger = logging.getLogger(__name__)
 
 from app.api.mock_data import MOCK_ASSURANCE_RESULT, MOCK_REPORT_RESULT
